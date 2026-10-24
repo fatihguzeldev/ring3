@@ -1,4 +1,4 @@
-use super::{BlockType, INDEX, Output, REMAIN, StopReason};
+use super::{BlockType, CompletedHandoff, INDEX, Output, REMAIN, StopReason};
 use crate::cpu::{
     core::region::{BlockId, Region, Shape, Target, Terminator},
     x86::ir::{Condition, CountBranchKind},
@@ -283,7 +283,8 @@ impl Emitter<'_, '_> {
                 }
                 // the actual indirect instruction has already committed its
                 // stack/register effects and retirement. only its target missed.
-                self.out.exit(StopReason::NeedCode, None, 0);
+                self.out
+                    .completed_handoff(self.current, None, CompletedHandoff::External);
             }
             Terminator::Exit { .. } => {
                 self.out.c().unreachable();
@@ -292,6 +293,21 @@ impl Emitter<'_, '_> {
     }
 
     fn branch(&mut self, taken: Target, otherwise: Target) {
+        if let (Target::External(taken), Target::External(otherwise)) = (taken, otherwise) {
+            // Both outcomes share one completed frame. Select only their actual
+            // PC before the common typed handoff, instead of duplicating it.
+            self.out
+                .c()
+                .if_(BlockType::Result(super::ValType::I32))
+                .i32_const(taken as i32)
+                .else_()
+                .i32_const(otherwise as i32)
+                .end()
+                .local_set(super::EIP);
+            self.out
+                .completed_handoff(self.current, None, CompletedHandoff::External);
+            return;
+        }
         self.out.c().if_(BlockType::Empty);
         self.labels.push(Label::Other);
         self.edge(taken);
@@ -306,7 +322,8 @@ impl Emitter<'_, '_> {
             let Target::External(pc) = target else {
                 unreachable!()
             };
-            self.out.exit(StopReason::NeedCode, Some(pc), 0);
+            self.out
+                .completed_handoff(self.current, Some(pc), CompletedHandoff::External);
             return;
         };
         let _edge = self
@@ -338,9 +355,9 @@ impl Emitter<'_, '_> {
                 .br(depth as u32);
             return;
         }
-        // Restart publishes the source recovery before entering the target.
+        // Restart commits the completed source before entering the target.
         // Target SSA locals can reuse source colors, so assigning its arguments
-        // here would destroy values that this publication still needs.
+        // here would destroy values that this handoff still needs.
         let pc = self.graph.blocks[id.0].entry;
         self.out
             .c()
@@ -352,26 +369,10 @@ impl Emitter<'_, '_> {
     }
 
     fn restart(&mut self) {
+        // Both an unmatched computed target and a same-body restart follow a
+        // complete source block. Preserve its actual scalar lease and target.
         self.out
-            .c()
-            .local_get(INDEX)
-            .i32_const(-1)
-            .i32_eq()
-            .if_(BlockType::Empty);
-        self.out.exit(StopReason::NeedCode, None, 0);
-        self.out.c().end();
-        if let Some(recovery) = self.out.active_fp_recovery.clone() {
-            super::numeric::executable::recover(self.out, &recovery);
-        }
-        // An unproved computed predecessor commits through the same in-body
-        // service as a terminal prefix, then reimports the pool identity frame.
-        // The selected INDEX/ENTRY_OFFSET and live scalar lease survive.
-        self.out
-            .c()
-            .i32_const(1)
-            .local_set(super::SERVICE_RESUME)
-            .i32_const(StopReason::NeedCode as i32)
-            .return_();
+            .completed_handoff(self.current, None, CompletedHandoff::Computed);
     }
 
     fn dispatch(&mut self, blocks: &[BlockId]) {

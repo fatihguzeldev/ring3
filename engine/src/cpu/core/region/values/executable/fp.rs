@@ -560,6 +560,9 @@ impl FpEffect {
 #[derive(Clone, Debug)]
 pub(in crate::cpu::core) struct FpParameters {
     pub block: BlockId,
+    /// Conservative logical payload dirtiness carried by real internal edges.
+    /// Fresh external entry and completed pool handoff start with no dirty bits.
+    pub incoming_dirty: u8,
     pub payloads: u8,
     pub tags: u8,
     pub header: bool,
@@ -661,7 +664,7 @@ pub(in crate::cpu::core) fn analyze_parameters(
     let uses_fp=body.effects().any(|effect|matches!(effect.kind,EffectKind::Fp(_)));
     let imports=uses_fp||body.effects().any(|effect|matches!(effect.contract.fp,FpEffectClass::Observe|FpEffectClass::Barrier));
     let arithmetic=body.effects().any(|effect|matches!(&effect.kind,EffectKind::Fp(fp) if matches!(fp.kind,FpEffectKind::Binary {..})));
-    FpParameters {block,payloads,tags,header:active[block.0]||imports,imports,arithmetic}
+    FpParameters {block,incoming_dirty:dirty[block.0],payloads,tags,header:active[block.0]||imports,imports,arithmetic}
     }).collect();
     carry_parameters(program, values, &mut parameters);
     parameters

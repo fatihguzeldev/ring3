@@ -983,3 +983,79 @@ fn integer_load64_defines_all_exact_payload_lanes_and_pop_preserves_the_empty_gh
         ValueNode::Fp(FpValueNode::I32(3))
     ));
 }
+
+#[test]
+fn incoming_payload_dirtiness_tracks_top_rotation_control_and_canonical_reset() {
+    let (_, program) = plan(&[
+        block(
+            0x1000,
+            &[
+                memory_fp(X87Operation::Load(X87Format::Float32), 0),
+                jump(0x1100),
+            ],
+        ),
+        block(0x1100, &[Operation::Nop, jump(0x1200)]),
+        block(
+            0x1200,
+            &[
+                fp(X87Operation::StoreRegister {
+                    index: 0,
+                    pop: true,
+                }),
+                jump(0x1300),
+            ],
+        ),
+        block(
+            0x1300,
+            &[memory_fp(X87Operation::LoadControl, 4), jump(0x1400)],
+        ),
+        block(
+            0x1400,
+            &[
+                memory_fp(X87Operation::LoadEnvironment { operand16: false }, 8),
+                jump(0x1500),
+            ],
+        ),
+        block(0x1500, &[Operation::Nop]),
+    ]);
+    let masks: Vec<_> = (0..6)
+        .map(|index| program.fp_parameters(BlockId(index)).incoming_dirty)
+        .collect();
+    assert_eq!(
+        masks,
+        [0, 1, 1, 0x80, 0x80, 0],
+        "fresh entry is clean; a pop carries the changed empty ghost; FLDCW preserves it; FLDENV replaces it"
+    );
+    assert_eq!(program.block(BlockId(2)).exit.fp.top_delta, 1);
+    assert_eq!(program.block(BlockId(2)).exit.fp.written, 0x80);
+    assert_ne!(
+        program.block(BlockId(3)).entry.fp.epoch,
+        program.block(BlockId(3)).exit.fp.epoch,
+        "a real CW epoch change does not discard the incoming payload write"
+    );
+}
+
+#[test]
+fn incoming_payload_dirtiness_includes_the_backedge_empty_ghost_at_a_public_root() {
+    let (_, program) = plan(&[block(
+        0x1000,
+        &[
+            memory_fp(X87Operation::Load(X87Format::Float32), 0),
+            fp(X87Operation::StoreRegister {
+                index: 0,
+                pop: true,
+            }),
+            jump(0x1000),
+        ],
+    )]);
+    let body = program.block(BlockId(0));
+    assert_eq!(body.exit.fp.top_delta, 0);
+    assert_eq!(body.exit.fp.written, 0x80);
+    let parameters = program.fp_parameters(BlockId(0));
+    assert_eq!(
+        parameters.incoming_dirty, 0x80,
+        "a public root can also be entered by a real dirty internal backedge"
+    );
+    assert_eq!(parameters.payloads & 0x80, 0x80);
+    assert_eq!(parameters.tags & 0x80, 0x80);
+}

@@ -1,6 +1,7 @@
-//! Consume typed FP values/effects. Architectural cell publication is confined
-//! to recovery; successful native producers define F64 SSA values directly.
+//! Consume typed FP values/effects. Successful native producers define F64 SSA
+//! values; completed handoffs and exact recovery own physical publication.
 mod control;
+mod handoff;
 pub(in crate::cpu::core::emitter) mod integer;
 pub(in crate::cpu::core::emitter) mod primitive;
 use super::super::{CTX, Output, mem};
@@ -14,6 +15,7 @@ use crate::cpu::core::region::values::executable::{
 };
 use crate::cpu::core::{StopReason, fp_pool as p};
 use crate::cpu::x86::{X87Binary, X87Format, X87Operation, ir::Operation};
+pub(in crate::cpu::core::emitter) use handoff::commit_completed;
 use std::collections::BTreeSet;
 use wasm_encoder::{BlockType, ValType};
 

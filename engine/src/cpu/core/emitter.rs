@@ -66,6 +66,12 @@ pub(super) const SCALAR_CACHE_BASE: u32 = 179;
 
 const BLOCK_BITS: u32 = 14;
 
+/// Only a completely executed block may leave through this path.
+enum CompletedHandoff {
+    External,
+    Computed,
+}
+
 pub(super) fn mem(offset: u64, align: u32) -> MemArg {
     MemArg {
         offset,
@@ -1062,6 +1068,60 @@ impl Output<'_> {
             .i32_const(mask as i32)
             .call(function)
             .local_set(FLAGS);
+    }
+
+    fn completed_handoff(
+        &mut self,
+        block: super::region::BlockId,
+        pc: Option<u32>,
+        handoff: CompletedHandoff,
+    ) {
+        assert_eq!(self.current_block, Some(block));
+        assert!(self.active_recovery.is_none() && self.active_effect.is_none());
+        let frame = self.plan.block(block).exit;
+        let fp = self.executable.block(block).exit.fp.clone();
+        // Scalar values and lazy FLAGS were committed by block(). In particular,
+        // LOOP may since have changed real ECX in its typed terminator.
+        let available = self.available.clone();
+        let physical_gpr = self.physical_gpr;
+        let physical_flags = self.physical_flags;
+        let captured_effect = self.captured_effect;
+        numeric::executable::commit_completed(self, &fp, frame);
+        // Terminal arms must not grant their staged values to a sibling arm.
+        self.available = available;
+        self.physical_gpr = physical_gpr;
+        self.physical_flags = physical_flags;
+        self.captured_effect = captured_effect;
+        let request = self.recovery.locals.request();
+        self.c()
+            .i32_const(0)
+            .local_set(request)
+            .i32_const(0)
+            .local_set(SERVICE_RESUME);
+        if let Some(pc) = pc {
+            self.c().i32_const(pc as i32).local_set(EIP);
+        }
+        if matches!(handoff, CompletedHandoff::Computed) {
+            self.c()
+                .local_get(INDEX)
+                .i32_const(-1)
+                .i32_ne()
+                .if_(BlockType::Empty)
+                .i32_const(1)
+                .local_set(SERVICE_RESUME)
+                .i32_const(StopReason::NeedCode as i32)
+                .return_()
+                .end();
+        }
+        // COUNT already charged this complete block, including a budgeted
+        // string kernel's own work. A handoff never retires it a second time.
+        self.c()
+            .i32_const(StopReason::Budget as i32)
+            .i32_const(StopReason::NeedCode as i32)
+            .local_get(REMAIN)
+            .i32_eqz()
+            .select()
+            .return_();
     }
 
     pub(super) fn exit(&mut self, reason: StopReason, pc: Option<u32>, retired: u32) {
