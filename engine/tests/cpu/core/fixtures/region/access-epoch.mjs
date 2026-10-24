@@ -118,17 +118,28 @@ export function runAccessEpochCases(fixture,{mechanism=true}={}) {
     remember(t,witness,{groups:1,exec:2,private:0,canonicalWrites:1});
   });
 
-  fixture('access-epoch-canonical-numeric-boundary-invalidates-earlier-write-authority',{
+  fixture('access-epoch-typed-control-write-preserves-earlier-write-authority',{
     segments:[[0x1000,'8903 894304 d96b10 894308 89430c ffe5']],registers,stateWitness:true,
     data:page=>new DataView(page.buffer).setUint16(16,0x37f,true),
   },t=>{
     const before=t.version();for(const address of[0x3000,0x3004,0x3008,0x300c])t.writeExpected(address,'44332211');
     const fp=t.startingFp.slice();new DataView(fp.buffer,fp.byteOffset,fp.byteLength).setUint16(16,0x37f,true);
     const witness=checked(t,{pc:0x1100,retired:6,budget:6,ecx:B,fp},
+      {writes:4,version:before});
+    assert.equal(stamp(t,0x3000),before+4n);
+    // the typed CW read changes its numerical epoch, not memory authority.
+    remember(t,witness,{groups:1,exec:1,private:1});
+  });
+
+  fixture('access-epoch-canonical-numeric-boundary-invalidates-earlier-write-authority',{
+    segments:[[0x1000,'8903 894304 dbe2 894308 89430c ffe5']],registers,stateWitness:true,
+  },t=>{
+    const before=t.version();for(const address of[0x3000,0x3004,0x3008,0x300c])t.writeExpected(address,'44332211');
+    const witness=checked(t,{pc:0x1100,retired:6,budget:6,ecx:B,fp:t.startingFp},
       {writes:4,helpers:1,version:before});
     assert.equal(stamp(t,0x3000),before+4n);
-    // The planned callback ends a span. Its offset-zero successor obtains one
-    // fresh shared write proof after the canonical authority barrier.
+    // FNCLEX is still a true canonical effect. its offset-zero successor obtains
+    // one fresh shared write proof after the canonical authority barrier.
     remember(t,witness,{groups:2,exec:2,private:2});
   });
 

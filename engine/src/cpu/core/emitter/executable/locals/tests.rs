@@ -433,7 +433,7 @@ fn fresh_post_barrier_inputs_are_live_in_the_successful_after_recovery() {
         0x1000,
         &[
             fp(X87Operation::Load(X87Format::Float32), true),
-            fp(X87Operation::LoadControl, true),
+            fp(X87Operation::LoadEnvironment { operand16: false }, true),
             fp(X87Operation::ChangeSign, false),
         ],
     )]);
@@ -461,6 +461,61 @@ fn fresh_post_barrier_inputs_are_live_in_the_successful_after_recovery() {
         for &old in &before {
             if after != old {
                 assert_ne!(layout.values[after.0], layout.values[old.0]);
+            }
+        }
+    }
+}
+
+#[test]
+fn typed_control_write_keeps_old_payload_roots_live_without_fresh_input_reimports() {
+    use crate::cpu::core::region::values::executable::{EffectKind, fp::FpEffectKind};
+    let program = program(&[block(
+        0x1000,
+        &[
+            fp(X87Operation::Load(X87Format::Float32), true),
+            fp(X87Operation::LoadControl, true),
+            fp(X87Operation::ChangeSign, false),
+        ],
+    )]);
+    let control = program.block(BlockId(0)).effects().nth(1).unwrap();
+    assert!(
+        matches!(control.kind, EffectKind::Fp(ref effect) if matches!(effect.kind,FpEffectKind::LoadControl { .. }))
+    );
+    let definition = control.point.prefix * 2 + 1;
+    let layout = Layout::build(&program, 1, true, BASE);
+    let before = program.dependency_order(&control.before.fp.roots());
+    let after = program.dependency_order(&control.after.fp.roots());
+    let mut inherited_inputs = 0;
+    for &id in &after {
+        if let ValueNode::Fp(FpValueNode::Input { point, .. }) = program.value(id).node {
+            assert!(
+                before.contains(&id),
+                "a CW write retains its actual inherited input"
+            );
+            assert!(point.prefix <= control.point.prefix);
+            assert!(layout.live_at(id, BlockId(0), definition));
+            inherited_inputs += 1;
+        }
+    }
+    assert!(
+        inherited_inputs > 8,
+        "the exact inherited FP header/ghosts remain live"
+    );
+    assert_eq!(control.before.fp.tags, control.after.fp.tags);
+    assert_eq!(control.before.fp.top, control.after.fp.top);
+    assert_eq!(control.before.fp.written, control.after.fp.written);
+    assert_eq!(control.before.fp.tag_written, control.after.fp.tag_written);
+    let EffectKind::Fp(effect) = &control.kind else {
+        unreachable!()
+    };
+    for output in effect.definitions() {
+        assert!(layout.live_at(output, BlockId(0), definition));
+        for &old in &before {
+            if output != old && layout.live_at(old, BlockId(0), definition) {
+                assert_ne!(
+                    layout.values[output.0], layout.values[old.0],
+                    "simultaneous old recovery roots and CW/status definitions cannot alias"
+                );
             }
         }
     }

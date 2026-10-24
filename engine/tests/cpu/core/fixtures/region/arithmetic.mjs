@@ -106,7 +106,7 @@ export function runArithmeticCases(fixture) {
     t.writeExpected(0x3008,'0000803f');
     const expected=t.fp({status:0x20,opcode:0x15b,fip:0x100b,fdp:0x3008,registers:{7:HALF}});
     new DataView(expected.buffer,expected.byteOffset,expected.length).setUint16(16,0x27f,true);
-    observe(t,{pc:0x1800,retired:6,budget:6,fp:expected}, {helpers:1,packs:1},checks);
+    observe(t,{pc:0x1800,retired:6,budget:6,fp:expected}, {packs:1},checks);
   });
 
   fixture('arithmetic-mode-correlation-directed-rounding-retains-canonical-suffix',{

@@ -177,10 +177,14 @@ function run(artifact,report,bridge,iterations) {
       'validated warm continuations resolve in generated code; only actual native misses create probes');
     assert.equal(measured.body_entries,3*iterations);
     assert.equal(measured.normalizer_calls,0);assert.equal(measured.wide_snapshot_calls,0);
-    assert.equal(world.helperCalls.length-helpers,bridge==='ordinary'?0:iterations);
+    assert.equal(world.helperCalls.length-helpers,bridge==='cpuid'?iterations:0,
+      'CPUID keeps its real scalar callback; ordinary and typed-CW bridges execute locally');
+    assert.equal(measured.canonical_calls,bridge==='cpuid'?iterations:0);
     for(const call of world.helperCalls.slice(helpers)) {
       assert.equal(BigInt(call.identity),units.get(C).id,'callback authority is the selected scalar family');
       assert.equal(call.ordinal,0);
+      assert.equal(call.pc,C+5,'the remaining callback names the actual CPUID instruction');
+      assert.equal(call.returned,0);
     }
     for(let i=0;i<probes.length;i++) {
       const current=probes[i],stage=i%3;
@@ -190,9 +194,16 @@ function run(artifact,report,bridge,iterations) {
         assert.equal(current.pending,1,'the completed addition retains its unresolved C1 recipe');
       }
       if(bridge==='control'&&stage===1) {
-        assert.equal(current.active,0,'a true control operation relinquishes the pool');
-        assert.equal(current.pending,0);assert.equal(current.counters.materializer_calls,1);
-        assert.notEqual(current.canonicalHex,initialBank);
+        const previous=probes[i-1],prior=Buffer.from(previous.poolHex,'hex'),next=Buffer.from(current.poolHex,'hex');
+        assert.equal(current.active,1,'typed FLDCW retains the authoritative physical pool');
+        assert.equal(current.pending,0,'FLDCW resolves the prior sticky-status recipe before testing old pending state');
+        assert.equal(next.readUInt32LE(4),0x37f,'the pool carries the actual loaded CW');
+        assert.equal(next.readUInt32LE(8),0x220,'CW replacement preserves the resolved C1 and sticky PE');
+        assert.deepEqual(next.subarray(12,40),prior.subarray(12,40),'CW replacement preserves TAG/TOP and all FP metadata');
+        for(let slot=0;slot<8;slot++)assert.deepEqual(next.subarray(128+slot*32,152+slot*32),
+          prior.subarray(128+slot*32,152+slot*32),'every physical payload and VALID lane survives its changed proof epoch');
+        assert.equal(current.counters.materializer_calls,0,'typed CW replacement does not publish the canonical bank');
+        assert.equal(current.canonicalHex,initialBank,'canonical bytes remain stale through the typed CW bridge');
       }else {
         assert.equal(current.counters.materializer_calls,0,'family ingress and pure scalar callbacks do not materialize');
         assert.equal(current.canonicalHex,initialBank,'canonical bytes remain stale until a real observer');
@@ -202,7 +213,7 @@ function run(artifact,report,bridge,iterations) {
         }
       }
     }
-    assert.equal(measured.materializer_calls,bridge==='control'?2:1,'only the true helper and final publisher materialize');
+    assert.equal(measured.materializer_calls,1,'only the final publisher materializes the preserved physical pool');
     assert.equal(world.recording().active,0);assert.equal(world.recording().used,baseline.recording.used);
     stable(world,units);
   });

@@ -265,9 +265,9 @@ try {
       bank(t,t.fp({opcode:0x15b,fip:0x100d,fdp:0x3008,cs:0x1b,ds:0x23,
         registers:{6:ext3,7:'00000000000000a00140'}}));
     });
-  runCase('consecutive-control-reloads-after-canonical-control-write','d903 d96b0c d84304 dd5b08 0f0b',4,
-    // The planned control write ends a span; the next span imports its new CW.
-    {control:0x27f,numericCalls:3,newNumericCalls:1,preciseCalls:0,data:v=>{v.setFloat32(0,1,true);v.setFloat32(4,2**-24,true);v.setUint16(12,0x7f,true);}},t=>{
+  runCase('consecutive-control-reloads-after-typed-control-write','d903 d96b0c d84304 dd5b08 0f0b',4,
+    // the typed control write rechecks the next arithmetic use in its new epoch.
+    {control:0x27f,numericCalls:3,newNumericCalls:0,preciseCalls:0,data:v=>{v.setFloat32(0,1,true);v.setFloat32(4,2**-24,true);v.setUint16(12,0x7f,true);}},t=>{
       standard(t,4,0x100b);t.writeExpected(0x3008,unhex('000000000000f03f'));
       const wanted=t.fp({status:0x20,opcode:0x55b,fip:0x1008,fdp:0x3008,cs:0x1b,ds:0x23,registers:{7:'0000000000000080ff3f'}});
       new DataView(wanted.buffer).setUint16(16,0x7f,true);bank(t,wanted);

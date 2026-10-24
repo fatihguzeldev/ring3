@@ -100,7 +100,7 @@ fn folded_scalar_flags_recovery_emits_valid_wasm_on_exit_and_memory_fault_paths(
 fn callback_spine_emits_only_modes_requested_by_the_authored_program() {
     use std::{fmt::Write, process::Command};
 
-    let cases: [(&str, &[u8], usize, usize); 3] = [
+    let cases: [(&str, &[u8], usize, usize); 4] = [
         ("scalar-only", &[0x8d, 0x40, 1, 0xff, 0xe6], 0, 0),
         (
             "typed-fp-only",
@@ -109,8 +109,14 @@ fn callback_spine_emits_only_modes_requested_by_the_authored_program() {
             1,
         ),
         (
-            "canonical-control-and-typed-fp",
+            "typed-control-and-typed-fp",
             &[0xd9, 0x2b, 0xd9, 0x03, 0xd8, 0xc1, 0xff, 0xe6],
+            0,
+            1,
+        ),
+        (
+            "canonical-environment-and-typed-fp",
+            &[0xd9, 0x23, 0xd9, 0x03, 0xd8, 0xc1, 0xff, 0xe6],
             1,
             1,
         ),

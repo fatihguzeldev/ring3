@@ -29,7 +29,7 @@ const programs={
   recursive:{root:'e8fb000000 90 0f0b',callee:'49 7407 e8f8ffffff d8c1 c3',
     trainingBudget:15,end:0x1005,returnPc:0x1005},
   ordinal:{root:'d92b dc4308 e8f6000000 83c001 49 75f0 90 0f0b',callee:'dc4308 c3',
-    perIteration:8,end:0x1010,returnPc:0x100a,canonicalPerIteration:3,canonicalMemory:true},
+    perIteration:8,end:0x1010,returnPc:0x100a,canonicalPerIteration:2,canonicalMemory:true},
 };
 
 function recorder(world) {
@@ -395,22 +395,21 @@ export function runObservedCanonicalCases(artifact,report) {
     const run=world.cache.execute(selected),registers=Array.from({length:8},(_,i)=>view(before.state).getUint32(16+i*4,true));
     registers[0]=2;registers[1]=0;
     const completed=literal(world,before,run,{pc:0x1010,retired:16,budget:16,registers,flags:0x46,writes:2,
-      stackReturn:0x100a,fpValue:FULL80,fpPc:CALLEE,fpOpcode:0x443,fpData:0x3008,fpDs:0x23,helpers:6});
+      stackReturn:0x100a,fpValue:FULL80,fpPc:CALLEE,fpOpcode:0x443,fpData:0x3008,fpDs:0x23,helpers:4});
     const callbacks=world.result.numericCalls.slice(first);
-    // These operations require the canonical boundary independently of how the
-    // observed graph partitions blocks: FLDCW has no direct lowering, memory
-    // arithmetic admits only float32, so both memory64 additions stay planned.
-    // FLDCW itself preserves historical FIP/FDP; the double-zero addition
-    // records the exact data address without rounding this full80 payload.
-    assert.deepEqual(callbacks.map(call=>call.fip),[0x11223344,0x1002,CALLEE,CALLEE,0x1002,CALLEE],
-      'control loads preserve historical FIP while real computations publish their authored PCs');
-    assert.deepEqual(callbacks.map(call=>call.ordinal),[0,1,2,0,1,2],
+    // FLDCW is a typed local effect and preserves the physical payload. Both
+    // memory64 additions still require their real canonical boundaries, and
+    // the unchanged source dictionary retains CW at ordinal zero.
+    assert.deepEqual(callbacks.map(call=>call.fip),[0x1002,CALLEE,0x1002,CALLEE],
+      'the two actual canonical computations publish their authored PCs');
+    assert.deepEqual(callbacks.map(call=>call.ordinal),[1,2,1,2],
       'the same callee operation resolves through the overlay dictionary ordinal two');
-    assert.deepEqual(callbacks.map(call=>call.pc),[ROOT,ROOT+2,CALLEE,ROOT,ROOT+2,CALLEE],
-      'every overlay callback carries the exact control/arithmetic PC independently of its ordinal');
+    assert.deepEqual(callbacks.map(call=>call.pc),[ROOT+2,CALLEE,ROOT+2,CALLEE],
+      'every remaining overlay callback carries its exact arithmetic PC independently of its ordinal');
     for(const call of callbacks){assert.equal(call.identity,String(selected.id));assert.equal(call.returned,0);}
     world.result.semanticComplete=true;assert.equal(completed.counters.body_entries,1);assert.equal(completed.probes,0);
-    assert.equal(completed.counters.canonical_calls,6,'one real callback per exact canonical operation remains');
+    assert.equal(completed.preciseCalls,0,'typed CW replacement does not substitute a precise suffix');
+    assert.equal(completed.counters.canonical_calls,4,'both memory64 additions keep one real callback per iteration');
   });
 }
 
