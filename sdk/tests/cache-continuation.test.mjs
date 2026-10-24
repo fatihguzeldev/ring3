@@ -87,7 +87,7 @@ function fixture(options={}) {
     core_begin() {
       calls.push(['begin']);
       data().setUint32(CONTEXT+112,1,true);data().setUint32(CONTEXT+44,budget,true);
-      data().setUint32(HEADER,1,true);data().setUint32(HEADER+4,1,true);data().setUint32(HEADER+8,CONTEXT,true);
+      data().setUint32(HEADER,options.format??1,true);data().setUint32(HEADER+4,1,true);data().setUint32(HEADER+8,CONTEXT,true);
       data().setBigUint64(HEADER+16,1n,true);data().setUint32(HEADER+76,1,true);
       data().setBigUint64(HEADER+80,1n,true);data().setBigUint64(HEADER+88,7n,true);
       data().setBigUint64(HEADER+104,control.invalidNonce?2n:1n,true);return 0;
@@ -126,6 +126,12 @@ function fixture(options={}) {
       if(control.endStatus)return control.endStatus;
       close();return 0;
     },
+    core_end_accounted_owned(...args) {
+      calls.push(['end-accounted-owned',...args]);
+      if(control.endTrap)throw control.endTrap;
+      if(control.endStatus)return control.endStatus;
+      close();return 0;
+    },
   };
   if(options.withoutOwned)for(const name of OWNED)delete api[name];
   if(options.missing)delete api[options.missing];
@@ -146,11 +152,32 @@ test('continuation exports and link ABI are negotiated as a complete format',()=
     assert.throws(()=>new CodeCache(f.engine),/incomplete core continuation exports/);
     assert.equal(f.calls.some(([name])=>name==='begin'),false);
   }
-  for(const options of [{format:2},{abi:4},{withoutOwned:true}]) {
+  for(const options of [{format:3},{abi:4},{withoutOwned:true}]) {
     const f=fixture(options);
     assert.throws(()=>new CodeCache(f.engine),/continuation (format|ABI)/);
     assert.equal(f.calls.some(([name])=>name==='begin'),false);
   }
+});
+
+test('format2 replaces the existing end call with the validated run summary',()=>{
+  const f=fixture({format:2,callbacks:true}),{cache,unit}=retained(f);
+  const run=cache.execute(unit);
+  assert.deepEqual([run.pc,run.coreReason,run.retired,run.work],[0x1004,2,2,2]);
+  assert.deepEqual(f.calls.filter(([name])=>name==='end-accounted-owned'),
+    [['end-accounted-owned',CONTEXT,1,7n,2,0,2]]);
+  assert.equal(f.calls.filter(([name])=>name==='end-owned'||name==='end').length,0);
+  assert.equal(cache.open,false);
+});
+
+test('format2 requires its accounting boundary and rejects a mismatched lease format',()=>{
+  const missing=fixture({format:2,missing:'core_end_accounted_owned'});
+  assert.throws(()=>new CodeCache(missing.engine),/incomplete core continuation accounting exports/);
+  const f=fixture({format:2}),original=f.api.core_begin;
+  f.api.core_begin=()=>{const result=original();f.data().setUint32(HEADER,1,true);return result;};
+  const {cache,unit}=retained(f);
+  assert.throws(()=>cache.execute(unit),/invalid CPU continuation lease/);
+  assert.equal(f.calls.filter(([name])=>name==='end-accounted-owned').length,0);
+  assert.equal(f.calls.filter(([name])=>name==='end').length,1);
 });
 
 test('real owner imports forward the current BigInt ticket to numeric, precise, and end',()=>{
@@ -181,12 +208,12 @@ for(const failure of ['pointer','nonce','late-nonce'])test(`invalid continuation
   assert.equal(cache.units.get(unit.id),unit);assert.equal(cache.table.get(unit.slot),unit.link);
 });
 
-for(const failure of ['reject','trap'])test(`owned end ${failure} cannot strand a valid lease`,()=>{
-  const f=fixture(),{cache,unit}=retained(f),trap=new Error('owned end trap');
+for(const format of [1,2])for(const failure of ['reject','trap'])test(`format${format} owned end ${failure} cannot strand a valid lease`,()=>{
+  const f=fixture({format}),{cache,unit}=retained(f),trap=new Error('owned end trap');
   if(failure==='reject')f.control.endStatus=7;else f.control.endTrap=trap;
   assert.throws(()=>cache.execute(unit),failure==='reject'?/core_end returned 7/:error=>error===trap);
-  assert.deepEqual(f.calls.filter(([name])=>['begin','end-owned','end'].includes(name)),
-    [['begin'],['end-owned',CONTEXT,1,7n,2],['end']]);
+  assert.deepEqual(f.calls.filter(([name])=>['begin','end-owned','end-accounted-owned','end'].includes(name)),
+    [['begin'],format===1?['end-owned',CONTEXT,1,7n,2]:['end-accounted-owned',CONTEXT,1,7n,2,0,1],['end']]);
   assert.equal(cache.open,false);assert.equal(f.data().getUint32(CONTEXT+112,true),0);
   assert.equal(f.data().getUint32(HEADER+4,true),0);assert.equal(cache.runs,0);
   assert.equal(f.data().getUint32(CONTEXT+40,true),1);

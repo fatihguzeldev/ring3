@@ -44,6 +44,7 @@ export class CodeCache {
   #residentLayout = false;
   #prunedEpoch = null;
   #slotExtent = 0;
+  #continuationFormat = 0;
 
   constructor(engine, {budget = 50000, instructions = 2048, blocks = 128, capacity = null, chain = true} = {}) {
     if (typeof chain !== 'boolean') throw new Error('invalid core chain option');
@@ -97,7 +98,13 @@ export class CodeCache {
     if (this.continuationCore && !this.linkedCore) throw new Error('continuation core requires linked execution');
     if (this.continuationCore) {
       for (const name of CONTINUATION_EXPORTS) this.native[name] = this.api[name];
-      if (this.native.core_continuation_format() !== 1) throw new Error('unsupported core continuation format');
+      this.#continuationFormat = this.native.core_continuation_format();
+      if (![1,2].includes(this.#continuationFormat)) throw new Error('unsupported core continuation format');
+      if (this.#continuationFormat === 2) {
+        if (typeof this.api.core_end_accounted_owned !== 'function')
+          throw new Error('incomplete core continuation accounting exports');
+        this.native.core_end_accounted_owned = this.api.core_end_accounted_owned;
+      }
     }
     if (typeof this.api.core_chain_resolve_executable_owned === 'function') {
       if (!this.continuationCore || !executable.every(Boolean))
@@ -606,7 +613,9 @@ export class CodeCache {
           let ticket;
           try {ticket = this.#ticket(this.context);}
           catch (error) {authorityFailure = error;}
-          ended = ticket ? this.native.core_end_owned(this.context,ticket.slot,ticket.generation,stop??8) : this.native.core_end();
+          ended = ticket ? (this.#continuationFormat === 2
+            ? this.native.core_end_accounted_owned(this.context,ticket.slot,ticket.generation,stop??8,before,this.budget)
+            : this.native.core_end_owned(this.context,ticket.slot,ticket.generation,stop??8)) : this.native.core_end();
         } else ended = this.native.core_end();
         if (this.continuationCore && ended !== 0) this.native.core_end();
       } catch (error) {
@@ -655,10 +664,11 @@ export class CodeCache {
   }
   #ticket(context) {
     const pointer = this.continuationPointer, buffer = this.memory.buffer;
-    if (!this.open || context !== this.context || !pointer || pointer % 8 || pointer+120 > buffer.byteLength)
+    const headerSize = this.#continuationFormat === 2 ? 136 : 120;
+    if (!this.open || context !== this.context || !pointer || pointer % 8 || pointer+headerSize > buffer.byteLength)
       throw new Error('invalid CPU continuation allocation');
     const view = new DataView(buffer);
-    if (view.getUint32(pointer,true) !== 1 || view.getUint32(pointer+4,true) !== 1 ||
+    if (view.getUint32(pointer,true) !== this.#continuationFormat || view.getUint32(pointer+4,true) !== 1 ||
         view.getUint32(pointer+8,true) !== context ||
         view.getBigUint64(pointer+16,true) !== view.getBigUint64(pointer+104,true))
       throw new Error('invalid CPU continuation lease');
