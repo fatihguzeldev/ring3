@@ -34,7 +34,7 @@ function packingProof(source) {
   return{guards,stores};
 }
 
-function observe(t,wanted,{helpers=0,precise=0,writes=1,packs,conditional=true,queries=0},checks) {
+function observe(t,wanted,{helpers=0,precise=0,writes=1,packs,conditional=true,precisionGuards=1,queries=0},checks) {
   const source=t.bytes(t.api.core_code_ptr()>>>0,t.api.core_code_len()>>>0),before=t.version();
   const id=new DataView(t.engine.memory.buffer).getBigUint64(t.context()+120,true),run=t.check(wanted);
   assert.equal(run.activations.length,1);assert.equal(t.result.modules.length,1);
@@ -49,11 +49,12 @@ function observe(t,wanted,{helpers=0,precise=0,writes=1,packs,conditional=true,q
     assert.equal(witness.fp_generic_f32_packs,packs,'actual raw80-to-f32 packing follows the admitted current precision');
     assert.equal(witness.fp_single_precision_queries,queries,'a dominating mode-correlated value fact removes repeated operand precision queries');
     if(conditional){
-      assert.equal(structure.guards.length,1,'one actual imported-CW precision guard selects this arithmetic-produced store');
-      assert(structure.guards[0].native&&structure.guards[0].generic,
+      assert.equal(structure.guards.length,precisionGuards,'the authored store representation selects its exact precision-branch count');
+      if(precisionGuards!==0)assert(structure.guards[0].native&&structure.guards[0].generic,
         'the real PC24 arm uses exact native bits and the real PC53 arm retains generic rounding');
-      assert.equal(structure.stores.length,1,'both precision arms converge on one actual memory payload store');
-      assert(structure.stores[0].operator>structure.guards[0].end,'memory preparation and commit follow precision selection');
+      assert.equal(structure.stores.length,1,'the selected payload has one actual memory store');
+      if(precisionGuards!==0)assert(structure.stores[0].operator>structure.guards[0].end,
+        'memory preparation and commit follow precision selection');
     }
   });
 }
@@ -126,7 +127,9 @@ export function runArithmeticCases(fixture) {
     t.writeExpected(0x3008,'0000807f');
     observe(t,{pc:0x1800,retired:5,budget:5,
       fp:t.fp({status:0x228,opcode:0x15b,fip:0x1020,fdp:0x3008,registers:{7:WIDE}})},
-      {precise:2,packs:0},checks);
+      // this block receives Tagged transport, so its store has generic packing
+      // rather than the old entry-predicted InSingle precision branch.
+      {precise:2,packs:0,precisionGuards:0},checks);
   });
 
   fixture('arithmetic-mode-correlation-raw-sign-producer-does-not-grant-native-admission',{

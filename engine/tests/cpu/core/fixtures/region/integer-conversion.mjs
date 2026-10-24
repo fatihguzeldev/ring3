@@ -191,10 +191,10 @@ export function runIntegerConversionCases(artifact,report) {
     mechanism(checks,world,before,precise,{full:true,run});
   });
 
-  procedure(artifact,report,'integer-conversion-arbitrary-empty-ghost-entry-takes-exact-adapter',(world,learned)=>{
+  procedure(artifact,report,'integer-conversion-overwritten-empty-ghost-entry-stays-typed',(world,learned)=>{
     // Initial ghost6 has non-F64 raw80 bits. It remains an architectural empty
-    // ghost until the second FLD overwrites it. A loop-native entry must reject
-    // this contradictory hint before executing an operation, then run exactly.
+    // ghost until the second FLD overwrites it. Entry transport preserves those
+    // bits without imposing an unused numeric representation on the prologue.
     world.reset({pc:ROOT,registers:registers(1),flags:FLAGS,fp:learned.initial});
     const before=world.snapshot(),precise=world.cache.preciseRuns,run=world.execute(14);
     coldLiteral(world,before,run,{pc:0x1010,retired:14,budget:14,
@@ -203,11 +203,10 @@ export function runIntegerConversionCases(artifact,report) {
     stable(world,learned);mechanism(checks,world,before,precise);
     const entries=world.result.preciseEntries.slice();
     checks.push(()=>{
-      assert.equal(world.cache.preciseRuns-precise,1,'the arbitrary native-hint mismatch uses one real precise adapter');
-      assert.equal(entries.length,1);assert.equal(entries[0].before.pc,ROOT);
-      assert.equal(entries[0].after.pc,CALLEE);assert.equal(entries[0].after.retired-entries[0].before.retired,3);
+      assert.equal(world.cache.preciseRuns-precise,0,'an overwritten empty ghost needs no precise entry adapter');
+      assert.equal(entries.length,0,'no native precise callback executes before the overwriting loads');
     });
-    world.result.entryContract={kind:'arbitrary raw80 empty ghost',expectedPrecisePc:ROOT};
+    world.result.entryContract={kind:'arbitrary raw80 empty ghost overwritten before use',expectedPreciseCalls:0};
   });
 
   procedure(artifact,report,'integer-conversion-quota-after-pop-before-cw-restoration',(world,learned)=>{
