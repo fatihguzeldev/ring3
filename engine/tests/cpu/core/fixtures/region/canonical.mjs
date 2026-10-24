@@ -25,7 +25,7 @@ function observe(t,wanted,{helpers=0,precise=0,entries=1,materializers=helpers+p
   const spine=inspectCanonicalSpine(source),witness=t.stateWitness();
   t.result.canonicalSpine=spine;t.result.canonicalWitness=witness;t.result.semanticComplete=true;
   checks.push(()=>{
-    assert.equal(witness.body_entries,entries,'only an eligible post-precise span re-enters the retained hot body');
+    assert.equal(witness.body_entries,entries,'internal precise continuation retains one bootstrap; external exact ingress uses only the specified wrapper reentry');
     assert.equal(witness.canonical_calls,helpers,'actual Wasm canonical calls match the independent callback oracle');
     assert.equal(spine.sites.length,1,'the numerical owner has one actual canonical import callsite, independent of its instruction count');
     assert(spine.sites.every(site=>site.function===spine.body),'the canonical spine belongs to the shared instruction body');
@@ -67,7 +67,7 @@ export function runCanonicalCases(fixture) {
       budget===2?{status:0x20,tag:0xfffc,opcode:0x43,fip:0x1002,fdp:0x3004,registers:{0:FIVE}}:
       {status:0x820,opcode:0x37b,fip:0x1005,fdp:0x3010,registers:{0:FIVE}});
     observe(t,{pc:[0x1000,0x1002,0x1005,0,0x1800][budget],retired:budget,budget,fp:expected},
-      {precise:Number(budget!==0),entries:budget===4?2:1,writes:Number(budget===4)},checks);
+      {precise:Number(budget!==0),writes:Number(budget===4)},checks);
   });
 
   fixture('canonical-service-arbitrary-port-imports-full80-top-and-unexecuted-history',{

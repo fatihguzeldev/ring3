@@ -25,6 +25,8 @@ pub(super) use frame::{
 };
 pub(super) use frame::{emit_edge, emit_frame, enter_block};
 pub(super) use service::emit as emit_service;
+pub(super) use service::prepare as prepare_service;
+pub(super) use service::request_exact_suffix;
 
 pub(super) fn enter_port(out: &mut Output<'_>) {
     // An interior port imports the actual identity state, never the skipped

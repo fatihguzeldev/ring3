@@ -28,7 +28,8 @@ function operators(bytes) {
     else if(op===16||op===18)node.call=r.unsigned();
     else if(op===17||op===19){r.unsigned();r.unsigned();}
     else if(op>=0x20&&op<=0x22)node.local=r.unsigned();
-    else if(op===20||op===21||op>=0x23&&op<=0x26||op===0xd2)r.unsigned();
+    else if(op===0x23||op===0x24)node.global=r.unsigned();
+    else if(op===20||op===21||op===0x25||op===0x26||op===0xd2)r.unsigned();
     else if(op===0x1c)r.vector(()=>r.byte());
     else if(op>=0x28&&op<=0x3e){node.align=r.unsigned();node.memoryOffset=r.unsigned();}
     else if(op===0x3f||op===0x40)r.unsigned();
@@ -236,6 +237,229 @@ function inspectPortRouting(fn,module) {
   return precise<0?inspectLegacyPortRouting(fn):inspectHotSpanRouting(fn,module,precise);
 }
 
+function inspectExactSuffixService(fn,module,precise) {
+  const {ops}=fn,errors=[],check=(okay,message)=>{if(!okay)errors.push(message);};
+  const local=(node,op,index)=>node?.op===op&&node.local===index;
+  const constant=(node,value)=>node?.op===0x41&&node.value===value;
+  const immediate=node=>node?.local??node?.global??node?.call??node?.value??node?.memoryOffset;
+  const sequence=(nodes,wanted)=>nodes.length===wanted.length&&wanted.every(([op,value],i)=>
+    nodes[i]?.op===op&&(value===undefined||immediate(nodes[i])===value));
+  const exact=frame=>frame?.kind===4&&local(ops[frame.open-3],0x20,157)&&
+    constant(ops[frame.open-2],3)&&ops[frame.open-1]?.op===0x46;
+  const mask=(frame,bit)=>frame?.kind===4&&local(ops[frame.open-3],0x20,175)&&
+    constant(ops[frame.open-2],bit)&&ops[frame.open-1]?.op===0x71;
+  const imported=name=>module.imports.findIndex(item=>item.module==='ring3'&&item.name===name);
+  const children=(parent,from=parent.open,to=parent.end)=>ops.flatMap(node=>node.op===4&&
+    node.frame.open>from&&node.frame.open<to&&node.frames.at(-1)===parent?[node.frame]:[]);
+  const sites=ops.flatMap((node,i)=>node.op===16&&node.call===precise?[i]:[]);
+  const expected=module.imports.some(item=>item.module==='ring3'&&item.name==='numeric')?1:0;
+  check(sites.length===expected,'the numerical body has exactly one shared exact-suffix callsite; integer bodies have none');
+  if(sites.length!==1)return{errors,sites,publications:[],entries:[]};
+  const numeric=imported('numeric'),numericSites=ops.flatMap((node,i)=>node.op===16&&node.call===numeric?[i]:[]);
+  const combined=numericSites.length===1,call=sites[0],choice=combined?ops[call].frames.findLast(exact):undefined;
+  const shared=combined?choice&&ops[choice.open].frames.at(-1):ops[call].frames.findLast(frame=>
+    frame.kind===4&&local(ops[frame.open-3],0x20,157)&&constant(ops[frame.open-2],2)&&ops[frame.open-1]?.op===0x4f);
+  const service=shared&&ops[shared.open].frames.at(-1);
+  check((!combined||choice?.type===-1)&&shared?.kind===4&&shared.type===-64&&shared.otherwise===undefined&&
+    local(ops[shared.open-3],0x20,157)&&constant(ops[shared.open-2],2)&&ops[shared.open-1]?.op===0x4f&&
+    service?.kind===4&&local(ops[service.open-1],0x20,157),
+    'only kind3 selects precise inside the shared SERVICE>=2 callback arm');
+  if(!shared||(combined&&!choice))return{errors,sites,publications:[],entries:[]};
+  const numericCall=numericSites[0];
+  check(numericSites.length===(combined?1:0)&&(!combined||choice.otherwise===call+1&&call===choice.open+2&&
+    local(ops[call-1],0x20,0)&&numericCall===choice.otherwise+4&&choice.end===numericCall+1&&
+    sequence(ops.slice(choice.otherwise+1,numericCall),[[0x20,0],[0x20,173],[0x20,172]])&&
+    local(ops[choice.end+1],0x21,19)&&JSON.stringify(signature(module,numeric))===
+      JSON.stringify({parameters:[0x7f,0x7f,0x7f],results:[0x7f]})),
+    'one result choice calls precise(Context) or the unchanged owned numeric(Context,actualPC,ordinal)');
+  const resultEnd=combined?choice.end:call;
+  check(local(ops[call-1],0x20,0)&&local(ops[resultEnd+1],0x21,19),
+    'the actual precise callback consumes Context and saves its one real stop reason');
+  const setup=combined?ops[shared.open+4]?.frame:undefined,valid=module.globalImports.findIndex(item=>item.name==='link.valid');
+  const setupStart=combined?setup?.open+1:shared.open+1,setupEnd=combined?setup?.end:setupStart+12;
+  check((!combined||exact(setup)&&setup.otherwise===undefined)&&sequence(ops.slice(setupStart,setupEnd),[
+    [0x41,0x38d5ffff],[0x21,175],[0x20,10],[0x21,173],[0x41,0],[0x24,valid],
+    [0x20,0],[0x20,13],[0x36,40],[0x20,0],[0x20,12],[0x36,44],
+  ]),'kind3 alone selects the complete exact transfer mask, actual PC/counts and canonical link authority');
+  const materialize=imported('support.materialize_numeric'),materializeSites=ops.flatMap((node,i)=>
+    node.op===16&&node.call===materialize&&i>shared.open&&i<shared.end?[i]:[]);
+  const materializeCall=materializeSites[0],materializeGuard=combined?ops[materializeCall]?.frames.at(-1):undefined;
+  check(materializeSites.length===1&&(combined?materializeGuard?.kind===4&&materializeGuard.otherwise===undefined&&
+    sequence(ops.slice(materializeGuard.open-4,materializeGuard.open),
+      [[0x20,175],[0x41,1<<30],[0x71],[0x45]])&&
+    sequence(ops.slice(materializeGuard.open+1,materializeGuard.end),[[0x20,0],[0x28,92],[16,materialize]])&&
+    ops[materializeGuard.open].frames.at(-1)===shared:
+    materializeCall===setupEnd+2&&sequence(ops.slice(setupEnd,materializeCall+1),[[0x20,0],[0x28,92],[16,materialize]])&&
+    ops[materializeCall].frames.at(-1)===shared),
+    'the actual pool materializer is conditional on PRESERVE for shared callbacks, or unconditional for exact-only service');
+  const resetStart=combined?materializeGuard?.end+1:materializeCall+1;
+  const reset=ops.slice(resetStart,resetStart+20);
+  check(sequence(reset,[...[84,85,86,153,154,178,100].flatMap(index=>[[0x41,0],[0x21,index]]),
+    [0x42,0n],[0x21,177],[0x41,1],[0x21,126],[0x41,0],[0x21,109]]),
+    'the shared callback drops only its local FP view and selects an exact fresh continuation');
+  const inputs=children(shared,resetStart+19,combined?choice.open:call);
+  const flagsInput=inputs.find(frame=>local(ops[frame.open-1],0x22,14));
+  const flags=imported('support.flags');
+  check(Number.isInteger(flagsInput?.open)&&flagsInput.otherwise===undefined&&sequence(ops.slice(flagsInput.open-6,flagsInput.open),
+    [[0x20,175],[0x41,16],[0x76],[0x41,0xfff],[0x71],[0x22,14]])&&
+    sequence(ops.slice(flagsInput.open+1,flagsInput.end),[
+      ...[11,20,25,21,22,23,24,14].map(index=>[0x20,index]),[16,flags],[0x21,11],
+      [0x20,0],[0x20,11],[0x36,36],
+    ]),'the shared flags publication materializes exactly the runtime transfer mask and unchanged lazy tuple');
+  const maskFrame=(parent,frames,bit,wanted,label)=>{
+    const found=frames.filter(frame=>mask(frame,bit));
+    check(found.length===1&&found[0].otherwise===undefined&&ops[found[0].open].frames.at(-1)===parent&&
+      sequence(ops.slice(found[0].open+1,found[0].end),wanted),label);return found[0];
+  };
+  maskFrame(shared,inputs,1<<28,[[0x41,0],[0x21,20]],'flags-output callbacks clear only the old lazy kind');
+  for(let register=0;register<8;register++)maskFrame(shared,inputs,1<<register,
+    [[0x20,0],[0x20,register+2],[0x36,register*4]],'each GPR input is published exactly under its own transfer bit');
+  maskFrame(shared,inputs,1<<29,[[0x20,0],[0x20,173],[0x36,32]],
+    'generic callbacks receive the actual service PC while specialized callbacks retain selective Context semantics');
+  const callbackStart=combined?choice.open-3:call-1;
+  check(sequence(ops.slice(callbackStart-4,callbackStart),[[0x20,0],[0x28,80],[0x20,99],[0x37,0]])&&
+    sequence(ops.slice(resultEnd+2,resultEnd+14),[[0x20,0],[0x28,80],[0x29,0],[0x21,99],
+      ...[104,132,133,150].flatMap(index=>[[0x41,0],[0x21,index]])]),
+    'the actual callback is immediately bracketed by transaction-authority flush/reload and complete translation-cache invalidation');
+  const normalized=ops[resultEnd+17]?.frame;
+  check(sequence(ops.slice(resultEnd+14,resultEnd+17),[[0x20,19],[0x41,10],[0x4b]])&&
+    normalized?.kind===4&&normalized.otherwise===undefined&&
+    sequence(ops.slice(normalized.open+1,normalized.end),[[0x41,8],[0x21,19]]),
+    'invalid native stop reasons normalize to Infrastructure before outputs or reentry');
+  const completed=combined?ops.findIndex((node,i)=>i>resultEnd&&i<shared.end&&local(node,0x21,14)):-1;
+  check(!combined||completed>=0&&sequence(ops.slice(completed-10,completed+1),[
+    [0x20,19],[0x45],[0x20,19],[0x41,6],[0x46],[0x72],[0x20,19],[0x41,10],[0x46],[0x72],[0x21,14],
+  ]),'canonical completion remains exactly success0, committed SMC6 or system entry10');
+  const reload=combined?ops[completed+6]?.frame:undefined;
+  check(!combined||sequence(ops.slice(completed+1,completed+6),[[0x20,157],[0x41,3],[0x46],[0x20,14],[0x72]])&&
+    reload?.kind===4&&reload.otherwise===undefined,'all exact outcomes, or completed canonical outcomes only, reload declared outputs');
+  const outputParent=combined?reload:shared,outputStart=combined?reload?.open:normalized?.end;
+  const outputFrames=outputParent?children(outputParent,outputStart??outputParent.open):[];
+  if(outputParent){
+    for(let register=0;register<8;register++)maskFrame(outputParent,outputFrames,1<<(8+register),
+      [[0x20,0],[0x28,register*4],[0x21,register+2]],'each declared GPR output reloads the actual callback value');
+    maskFrame(outputParent,outputFrames,1<<28,[[0x20,0],[0x28,36],[0x21,11],[0x41,0],[0x21,20]],
+      'declared flags outputs reload the actual canonical FLAGS and clear its lazy kind');
+    check(!combined||!ops.slice(reload.open,reload.end).some(node=>[0x21,0x22].includes(node.op)&&node.local===14),
+      'output reload cannot overwrite the saved canonical-completion predicate');
+  }
+  const lastOutput=outputFrames.filter(frame=>mask(frame,1<<28)).at(-1);
+  const post=combined&&reload?ops[reload.end+4]?.frame:undefined;
+  check(!combined||exact(post)&&Number.isInteger(post.otherwise),'kind3 and canonical completion retain distinct post-callback accounting');
+  const postStart=combined?post?.open+1:lastOutput?.end+1,postEnd=combined?post?.otherwise:shared.end;
+  if(!Number.isInteger(postStart))return{errors,sites,publications:[],entries:[],guardOpen:shared.open,guardEnd:shared.end};
+  check(sequence(ops.slice(postStart,postStart+9),[[0x20,0],[0x28,32],[0x21,10],
+    [0x20,0],[0x28,40],[0x21,13],[0x20,0],[0x28,44],[0x21,12]]),
+    'exact completion reloads actual PC, retired count and live remaining quota on every outcome');
+  const marker=ops[postStart+10]?.local;
+  check(Number.isInteger(marker)&&marker>=179&&sequence(ops.slice(postStart+9,postStart+19),
+    [[0x41,0],[0x21,marker],[0x41,0],[0x21,129],[0x41,0],[0x21,109],[0x41,1],[0x21,126],[0x41,0],[0x21,157]]),
+    'exact completion clears the typed ingress marker, GP proofs and selected frame before any reentry');
+  const retry=ops.findIndex((node,i)=>i>=postStart&&i<postEnd&&local(node,0x20,19)&&
+    constant(ops[i+1],1)&&ops[i+2]?.op===0x46);
+  check(retry>=0,'only a real NeedCode result can request private hot reentry');
+  const entries=[];
+  function tree(at) {
+    if(constant(ops[at],0))return at+1;
+    const equal=ops[at+3]?.frame,less=equal&&ops[equal.otherwise+4]?.frame;
+    const pc=ops[at+1]?.value,work=ops[at+5]?.value;
+    if(!(local(ops[at],0x20,10)&&Number.isInteger(pc)&&ops[at+1]?.op===0x41&&ops[at+2]?.op===0x46&&
+      ops[at+3]?.op===4&&equal?.type===-1&&Number.isInteger(equal.otherwise)&&
+      local(ops[at+4],0x20,12)&&ops[at+5]?.op===0x41&&work>0&&ops[at+6]?.op===0x4f&&
+      equal.otherwise===at+7&&local(ops[equal.otherwise+1],0x20,10)&&
+      constant(ops[equal.otherwise+2],pc)&&ops[equal.otherwise+3]?.op===0x49&&
+      ops[equal.otherwise+4]?.op===4&&less?.type===-1&&Number.isInteger(less.otherwise)))return null;
+    const left=tree(less.open+1);if(left!==less.otherwise)return null;
+    entries.push({pc:pc>>>0,instructions:work});
+    const right=tree(less.otherwise+1);if(right!==less.end||equal.end!==less.end+1)return null;
+    return equal.end+1;
+  }
+  let afterTree=retry>=0?tree(retry+3):null,reusedHotEntry=false;
+  const hotEntry=named(module,'guest.hot_entry');
+  if(retry>=0&&sequence(ops.slice(retry+3,retry+6),[[0x20,10],[0x20,12],[16,hotEntry]])) {
+    const hot=defined(module,hotEntry),h=hot?.ops;let at=0;
+    const count=()=>{
+      if(constant(h?.[at],0)){at++;return true;}
+      const start=at,equal=h?.[at+3]?.frame,less=equal&&h[equal.otherwise+4]?.frame;
+      const pc=h?.[at+1]?.value,work=h?.[at+4]?.value;
+      if(!(local(h?.[at],0x20,0)&&h?.[at+1]?.op===0x41&&h?.[at+2]?.op===0x46&&
+        equal?.type===-1&&equal.otherwise===start+5&&h?.[start+4]?.op===0x41&&work>0&&
+        local(h?.[equal.otherwise+1],0x20,0)&&constant(h?.[equal.otherwise+2],pc)&&
+        h?.[equal.otherwise+3]?.op===0x49&&less?.type===-1))return false;
+      at=less.open+1;if(!count()||at!==less.otherwise)return false;
+      entries.push({pc:pc>>>0,instructions:work});at=less.otherwise+1;
+      if(!count()||at!==less.end||equal.end!==less.end+1)return false;
+      at=equal.end+1;return true;
+    };
+    const counted=count();
+    check(counted&&sequence(h?.slice(at)??[],[[0x22,2],[0x41,0],[0x47],[0x20,1],[0x20,2],[0x4f],[0x71],[11]])&&
+      JSON.stringify(signature(module,hotEntry))===JSON.stringify({parameters:[0x7f,0x7f],results:[0x7f]})&&
+      hot?.locals.length===1&&hot.locals[0].count===1&&hot.locals[0].type===0x7f,
+      'shared public/private eligibility reuse calls only the exact PC/minimum-fuel pure decision tree');
+    afterTree=retry+6;
+    reusedHotEntry=true;
+  }
+  const reentry=afterTree===null?undefined:ops[afterTree+1]?.frame;
+  check(afterTree!==null&&ops[afterTree]?.op===0x71&&ops[afterTree+1]?.op===4&&reentry?.type===-64&&
+    Number.isInteger(reentry.otherwise)&&entries.every((entry,i)=>i===0||entries[i-1].pc<entry.pc),
+    'private reentry requires an exact certified PC and its live minimum fuel through one ordered decision tree');
+  const lookup=named(module,'guest.lookup');let lookupCalls=0;
+  const dynamic=(from,to,input)=>{
+    const prefix=[[0x20,input],[0x21,10]],port=[
+      [0x20,10],[16,lookup],[0x22,26],[0x41,14],[0x76],[0x21,130],
+      [0x20,26],[0x41,16383],[0x71],[0x41,-1],[0x20,26],[0x41,-1],[0x47],[0x1b],[0x21,26],
+    ],nodes=ops.slice(from,to);
+    if(sequence(nodes,prefix))return true;
+    if(sequence(nodes,[...prefix,...port])){lookupCalls++;return true;}
+    return false;
+  };
+  if(reentry){
+    check(dynamic(reentry.open+1,reentry.otherwise-2,10)&&
+      constant(ops[reentry.otherwise-2],1)&&local(ops[reentry.otherwise-1],0x21,157)&&
+      local(ops[reentry.otherwise+1],0x20,19)&&local(ops[reentry.otherwise+2],0x21,108)&&
+      ops[reentry.otherwise+3]?.op===12&&reentry.end===reentry.otherwise+4&&postEnd===reentry.end+1,
+      'eligible private reentry requests the existing service loop; every other precise result terminates with its actual reason');
+  }
+  if(combined&&post){
+    const completedArm=ops[post.otherwise+2]?.frame,stopped=completedArm&&ops[completedArm.open+12]?.frame;
+    check(local(ops[post.otherwise+1],0x20,14)&&completedArm?.kind===4&&Number.isInteger(completedArm.otherwise)&&
+      sequence(ops.slice(completedArm.open+1,completedArm.open+11),[
+        [0x20,12],[0x41,1],[0x6b],[0x21,12],[0x20,13],[0x41,1],[0x6a],[0x21,13],[0x20,174],[0x21,10],
+      ])&&local(ops[completedArm.open+11],0x20,19)&&stopped?.kind===4&&stopped.otherwise===undefined&&
+      sequence(ops.slice(stopped.open+1,stopped.end),[[0x41,0],[0x21,157],[0x20,19],[0x21,108],[12]])&&
+      dynamic(stopped.end+1,completedArm.otherwise-4,174)&&
+      sequence(ops.slice(completedArm.otherwise-4,completedArm.otherwise),[[0x41,0],[0x21,129],[0x41,1],[0x21,157]])&&
+      sequence(ops.slice(completedArm.otherwise+1,completedArm.end),[
+        [0x20,173],[0x21,10],[0x41,0],[0x21,157],[0x20,19],[0x21,108],[12],
+      ])&&post.end===completedArm.end+1&&shared.end===post.end+1,
+      'canonical0/6/10 alone retire one instruction; success resumes at NEXT, committed stops terminate, and failures retain the request PC');
+  }
+  const calls=ops.flatMap((node,i)=>node.op===16&&i>shared.open&&i<shared.end?[node.call]:[]);
+  const allowed=[materialize,flags,precise,...(combined?[numeric]:[]),...Array(lookupCalls).fill(lookup),
+    ...(reusedHotEntry?[hotEntry]:[])].sort((a,b)=>a-b);
+  check(JSON.stringify(calls.sort((a,b)=>a-b))===JSON.stringify(allowed),
+    'the shared service contains only the verified materializer, flags resolver, exclusive callbacks and existing eligibility/lookup calls');
+  check(!ops.slice(shared.open,shared.end).some(node=>node.op===0x24&&node.global!==valid),
+    'the shared service cannot change continuation pointers, owner IDs, mode or nonce authority');
+  check(ops.slice(shared.open,shared.end).every((node,index)=>{
+    if(node.op===0x37)return node.memoryOffset===0&&sequence(
+      ops.slice(shared.open+index-3,shared.open+index),[[0x20,0],[0x28,80],[0x20,99]]);
+    if(node.op===0x36)return [0,4,8,12,16,20,24,28,32,36,40,44].includes(node.memoryOffset);
+    return !(node.op>=0x38&&node.op<=0x3e);
+  }),'service publication cannot write owner identity, source certificates, nonce or unrelated memory');
+  return{errors,sites,guardOpen:shared.open,guardEnd:shared.end,publications:[],entries,shared:true,
+    canonicalCall:numericCall,callbackChoice:choice?.open,mode:combined?'canonical-and-exact':'exact-only',
+    viewResetOffset:ops[resetStart+3]?.offset};
+}
+
+export function inspectSharedCallbackSpine(bytes) {
+  const module=readModule(bytes),index=named(module,'guest.run');
+  const precise=module.imports.findIndex(item=>item.module==='ring3'&&item.name==='precise');
+  const fn=defined(module,index);
+  if(!fn||precise<0)return{errors:['missing actual guest body or precise import'],sites:[],publications:[],entries:[]};
+  return inspectExactSuffixService(fn,module,precise);
+}
+
 function inspectHotSpanRouting(fn,module,precise) {
   const {ops,edges}=fn,summary={kind:'exact-adapter',tables:[],fullBlockAssignments:[],prefixQuotaGuards:[],
     spanGuards:[],wrappers:[],errors:[]};
@@ -254,12 +478,11 @@ function inspectHotSpanRouting(fn,module,precise) {
       if(constant(ops[index-1],0))continue;
       summary.fullBlockAssignments.push(node.offset);
       const end=ops[index-2],guard=end?.op===11?end.frame:undefined;
-      const p=guard?ops.slice(guard.open-9,guard.open):[];
+      const p=guard?ops.slice(guard.open-7,guard.open):[];
       const admitted=constant(ops[index-1],1)&&guard?.kind===4&&guard.type===-64&&guard.otherwise===undefined&&
-        p.length===9&&local(p[0],0x20,130)&&constant(p[1],0)&&p[2].op===0x47&&
-        local(p[3],0x20,12)&&p[4].op===0x41&&p[4].value>0&&p[5].op===0x49&&p[6].op===0x72&&
-        p[7].op===0x41&&[0,1].includes(p[7].value)&&p[8].op===0x72;
-      check(admitted,'every FULL_BLOCK=1 follows an exact offset/whole-span quota/variable-work rejection guard');
+        p.length===7&&local(p[0],0x20,130)&&constant(p[1],0)&&p[2].op===0x47&&
+        local(p[3],0x20,12)&&p[4].op===0x41&&p[4].value>0&&p[5].op===0x49&&p[6].op===0x72;
+      check(admitted,'every FULL_BLOCK=1 follows an exact offset and certified minimum-fuel rejection guard');
       if(!admitted)continue;
       const tail=ops.slice(guard.end-7,guard.end),branch=tail[6];
       const target=branch?.op===12?branch.frames.at(-1-branch.targets[0]):undefined;
@@ -274,8 +497,12 @@ function inspectHotSpanRouting(fn,module,precise) {
         reached.add(at);pending.push(...(edges[at]??[]));}
       check(!reached.has(guard.end+1)&&!reached.has(index),
         'every rejected-arm path exits before establishing hot-span permission');
-      summary.spanGuards.push({offset:ops[guard.open].offset,fullOffset:node.offset,
-        instructions:p[4].value,variable:p[7].value,exitOffset:branch?.offset});
+      const entry=ops[guard.open+3]?.frame;
+      check(local(ops[guard.open+1],0x20,130)&&ops[guard.open+2]?.op===0x45&&
+        entry?.kind===4&&entry.otherwise===undefined&&ops[entry.end-2]?.op===0x41&&
+        local(ops[entry.end-1],0x21,10),'rejected block-start ingress retains its exact PC before publication');
+      summary.spanGuards.push({offset:ops[guard.open].offset,fullOffset:node.offset,pc:ops[entry?.end-2]?.value>>>0,
+        instructions:p[4].value,exitOffset:branch?.offset});
     }
     if(node.op===0x4d&&local(ops[index-4],0x20,12)&&ops[index-3]?.op===0x41&&
       local(ops[index-2],0x20,131)&&ops[index-1]?.op===0x6b)summary.prefixQuotaGuards.push(node.offset);
@@ -321,8 +548,13 @@ function inspectHotSpanRouting(fn,module,precise) {
     }else check(exact===guard?.open+2,
       'the standalone wrapper enters exact execution immediately after the canonical hot-body publication');
   }
-  check(module.functions.reduce((count,fn)=>count+fn.ops.filter(node=>node.op===16&&node.call===precise).length,0)===2,
-    'only the two actual public entry wrappers invoke the precise adapter');
+  summary.exactSuffix=inspectExactSuffixService(fn,module,precise);
+  summary.errors.push(...summary.exactSuffix.errors);
+  check(module.functions.reduce((count,fn)=>count+fn.ops.filter(node=>node.op===16&&node.call===precise).length,0)===
+    2+summary.exactSuffix.sites.length,'only the two verified public wrappers and verified shared service invoke precise');
+  if(summary.exactSuffix.sites.length)check(JSON.stringify(summary.exactSuffix.entries)===JSON.stringify(
+    summary.spanGuards.map(({pc,instructions})=>({pc,instructions})).sort((a,b)=>a.pc-b.pc)),
+    'the private service exposes exactly the same certified minimum-fuel spans without expanding public entry permission');
   return summary;
 }
 
@@ -479,7 +711,15 @@ function inspectExitEpilogue(module,name) {
     if(bodies.has(node.call))summary.instructionBodyCalls.push({offset:node.offset,target:node.call});
     if(node.op===15)summary.explicitReturns.push(index);
   });
-  if(summary.publicationCalls.length!==1){summary.errors.push('requires one actual publication call');return summary;}
+  const precise=module.imports.findIndex(item=>item.module==='ring3'&&item.name==='precise');
+  const exactSuffix=precise<0?{errors:[],sites:[],publications:[]}:inspectExactSuffixService(fn,module,precise);
+  summary.errors.push(...exactSuffix.errors);summary.exactSuffix=exactSuffix;
+  const outerPublications=summary.publicationCalls.filter(index=>ops[index].frames.length===1);
+  check(summary.publicationCalls.length===1+exactSuffix.publications.length&&outerPublications.length===1&&
+    summary.publicationCalls.every(index=>outerPublications.includes(index)||exactSuffix.publications.includes(index)),
+    'only the verified shared precise service adds publication before the sole terminal epilogue');
+  summary.publicationCalls=outerPublications;
+  if(summary.publicationCalls.length!==1){summary.errors.push('requires one terminal publication call');return summary;}
   const publish=summary.publicationCalls[0],numeric=module.imports.some(item=>item.name==='numeric')&&
     module.globalImports.some(item=>item.name==='link.local76');
   const fields=[0,...Array.from({length:12},(_,i)=>i+2),...Array.from({length:6},(_,i)=>i+20),
@@ -503,7 +743,7 @@ function inspectExitEpilogue(module,name) {
       serviceTest=ops[serviceTests[0]].frame;serviceLoop=ops[serviceTests[0]].frames.at(-1);
       innerExit=ops[serviceLoop?.open+1]?.frame;
       const resume=ops.slice(serviceTest.open+1,serviceTest.end);
-      const resumeTail=resume.slice(-3),canonicalPrefix=resume.slice(0,-3);
+      const resumeTail=resume.slice(-3);let canonicalPrefix=resume.slice(0,-3);
       check(serviceLoop?.kind===3&&serviceLoop.type===-64&&
         ops[serviceLoop.open].frames.at(-1)===body&&innerExit?.kind===2&&innerExit.type===-64&&
         innerExit.open===serviceLoop.open+1&&innerExit.end<serviceTest.open,
@@ -512,6 +752,15 @@ function inspectExitEpilogue(module,name) {
         resumeTail[1].op===0x21&&resumeTail[1].local===157&&resumeTail[2].op===12&&
         resumeTail[2].frames.at(-1-resumeTail[2].targets[0])===serviceLoop,
         'a requested restart clears its request and branches to the same service loop without re-running bootstrap');
+      if(exactSuffix.shared){
+        check(exactSuffix.guardOpen===serviceTest.open+4&&exactSuffix.guardEnd===serviceTest.end-4&&
+          canonicalPrefix.length===exactSuffix.guardEnd-serviceTest.open,
+          'the verified SERVICE>=2 callback spine is the complete service prefix before the unchanged restart tail');
+        canonicalPrefix=[];
+        summary.canonicalService={guardOpen:exactSuffix.guardOpen,guardEnd:exactSuffix.guardEnd,
+          call:exactSuffix.canonicalCall,imported:module.imports.findIndex(item=>item.module==='ring3'&&item.name==='numeric'),
+          mode:exactSuffix.mode};
+      }
       if(canonicalPrefix.length){
         const guard=canonicalPrefix[3]?.frame,imported=module.imports.findIndex(item=>item.module==='ring3'&&item.name==='numeric');
         const calls=ops.flatMap((node,i)=>node.op===16&&node.call===imported?[i]:[]),call=calls[0];
@@ -540,12 +789,23 @@ function inspectExitEpilogue(module,name) {
       summary.service={loopOpen:serviceLoop.open,innerOpen:innerExit.open,innerEnd:innerExit.end,resumeTest:serviceTest.open};
     }
   }
+  const privateRequests=ops.flatMap((node,i)=>{
+    if(node.op!==0x20||node.local!==108||ops[i+1]?.op!==0x41||ops[i+1].value!==-3||ops[i+2]?.op!==0x46)return[];
+    const mapper=ops[i+3]?.frame;
+    const valid=ops[i+3]?.op===4&&mapper?.kind===4&&mapper.otherwise===undefined&&mapper.end===i+6&&
+      ops[i+4]?.op===0x41&&ops[i+4].value===3&&ops[i+5]?.op===0x21&&ops[i+5].local===157&&
+      i>innerExit?.end&&mapper.end<serviceTest?.open;
+    check(valid,'the private -3 request is mapped once to exact service3 after recovery and before callback dispatch');
+    return valid?[i]:[];
+  });
+  check(privateRequests.length===(exactSuffix.sites.length?1:0),
+    'only an emitted exact callback adds one private-sentinel service mapper');
   const exits=[];
   for(let i=body.open+1;i<body.end;i++){
     const node=ops[i];
     if(node.local===108&&[0x20,0x21,0x22].includes(node.op)){
-      if(node.op===0x20)check(serviceTest&&i===serviceTest.end+1,
-        'only terminal service completion reads the reason inside the outer body');
+      if(node.op===0x20)check(serviceTest&&(i===serviceTest.end+1||privateRequests.includes(i)),
+        'only terminal completion and the verified private exact-request mapper read the saved reason');
       else{
         check(node.op===0x21,'the guest body only assigns the reason local');
         const next=ops[i+1],target=next?.frames.at(-1-next.targets[0]);

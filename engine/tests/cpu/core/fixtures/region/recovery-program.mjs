@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
-import {readGeneratedModule} from './structure.mjs';
+import {readGeneratedModule,inspectSharedCallbackSpine} from './structure.mjs';
 
 const ROOT=0x1000,TARGET=0x1800,FLAGS=0x403;
 const registers=[0x13579bdf,2,0x2468ace0,0x3000,0x4800,0x89abcdef,TARGET,0x76543210];
@@ -31,7 +31,8 @@ function format(bytes) {
   const at=(index,op,local)=>run.ops[index]?.op===op&&(local===undefined||run.ops[index].local===local);
   const zero=(index,local)=>at(index,0x41)&&run.ops[index].value===0&&at(index+1,0x21,local);
   const tokenZero=index=>at(index,0x42)&&run.ops[index].value===0n&&at(index+1,0x21,177);
-  const projectionStarts=[],resetOrigins={blockEntry:[],inlineCommit:[],environment:[],preservingService:[],canonicalService:[],shared:[],unclassified:[]};
+  const callbackSpine=inspectSharedCallbackSpine(bytes);
+  const projectionStarts=[],resetOrigins={blockEntry:[],inlineCommit:[],environment:[],sharedService:[],shared:[],unclassified:[]};
   for(let i=0;i<run.ops.length;i++)if(at(i,0x21,85)&&at(i-1,0x41)&&run.ops[i-1].value===0){
     const offset=run.ops[i].offset;projectionStarts.push(offset);
     const viewReset=zero(i-3,84)&&zero(i+1,86)&&zero(i+3,153)&&zero(i+5,154)&&zero(i+7,178);
@@ -40,14 +41,9 @@ function format(bytes) {
     else if(viewReset&&zero(i+9,109)&&tokenZero(i+11)&&at(i-6,0x20,152)&&at(i-5,0x20,103)&&
       at(i-4,0x39)&&run.ops[i-4].memoryOffset===64)
       resetOrigins.inlineCommit.push(offset);
-    else if(viewReset&&zero(i+9,100)&&tokenZero(i+11)){
-      // Both are the exact same forget-view packet. The canonical arm alone
-      // has the actual materializer call immediately before that packet.
-      const before=run.ops[i-4];
-      const materializer=before?.op===16&&module.imports[before.call]?.module==='ring3'&&
-        module.imports[before.call]?.name==='support.materialize_numeric';
-      (materializer?resetOrigins.canonicalService:resetOrigins.preservingService).push(offset);
-    }else if(zero(i+1,86)&&zero(i+3,153)&&zero(i+5,154)&&tokenZero(i+7)&&zero(i+9,178)&&
+    else if(viewReset&&zero(i+9,100)&&tokenZero(i+11)&&callbackSpine.shared&&
+      callbackSpine.viewResetOffset===offset)resetOrigins.sharedService.push(offset);
+    else if(zero(i+1,86)&&zero(i+3,153)&&zero(i+5,154)&&tokenZero(i+7)&&zero(i+9,178)&&
       at(i+11,0x41)&&run.ops[i+11].value===1&&at(i+12,0x21,84))resetOrigins.environment.push(offset);
     else if(at(i-3,16)&&dataIndices.has(run.ops[i-3].call)&&at(i-2,0x21,177)&&
       at(i+1,0x20)&&at(i+2,0x21,158))resetOrigins.shared.push(offset);
@@ -61,7 +57,7 @@ function format(bytes) {
     return{index,name,type,bytes:fn?.raw.length,forbidden:forbidden.map(node=>({op:node.op,offset:node.offset}))};
   });
   return{bytes:bytes.length,bodyBytes:run.raw.length,operators:run.ops.length,
-    mainGetters:main.length,projectionStarts,resetOrigins,getterCalls,functions};
+    mainGetters:main.length,projectionStarts,resetOrigins,getterCalls,functions,callbackSpine};
 }
 
 function contextLiteral(t,wanted) {
@@ -112,8 +108,10 @@ export function runRecoveryProgramCases(fixture) {
           'the one selective pool commit clears its view after writing the pending-result header');
         assert.equal(proof.resetOrigins.environment.length,0,
           'typed block ingress does not add a separate legacy environment-import reset');
-        assert.equal(proof.resetOrigins.preservingService.length,1,'one unchanged preserving service view reset');
-        assert.equal(proof.resetOrigins.canonicalService.length,1,'one unchanged materializing canonical service view reset');
+        assert.deepEqual(proof.callbackSpine.errors,[],
+          'the actual shared callback packet proves full transfer, FP materialization policy, exclusive callbacks, authority reload and quota-qualified reentry');
+        assert.equal(proof.resetOrigins.sharedService.length,1,
+          'one positively verified SERVICE>=2 packet drops the local view for all emitted callback kinds');
         assert.equal(proof.resetOrigins.unclassified.length,0,'every VALID clear has an exact emitted purpose');
         if(count===128)assert(encoded.length<115789,
           `the accepted128-add format must be smaller than the retained Step24 body: ${encoded.length}`);

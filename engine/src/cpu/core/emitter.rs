@@ -590,6 +590,8 @@ fn run(
         is_trace: graph.is_observed,
         family,
         guarded_control: false,
+        canonical_service: false,
+        exact_service: false,
         native,
         spans,
     };
@@ -698,6 +700,7 @@ fn run(
     out.return_target = Some(1);
     recovery::emit(&mut out);
     numeric::emit_inline_commit(&mut out);
+    numeric::prepare_service(&mut out);
     out.c().local_get(SERVICE_RESUME).if_(BlockType::Empty);
     // Ordinary exits retain the existing single mode test. The helper spine is
     // reached only for a service request; computed restarts simply pass it.
@@ -759,6 +762,8 @@ pub(super) struct Output<'a> {
     is_trace: bool,
     family: bool,
     guarded_control: bool,
+    canonical_service: bool,
+    exact_service: bool,
     native: &'a [NativeInstruction],
     spans: &'a [super::program::spans::ExecutableSpan],
 }
@@ -953,6 +958,10 @@ impl Output<'_> {
     }
 
     pub(super) fn exit(&mut self, reason: StopReason, pc: Option<u32>, retired: u32) {
+        if reason == StopReason::ExactPrefix && !self.native.is_empty() {
+            numeric::request_exact_suffix(self, pc, retired);
+            return;
+        }
         self.publish_exit(pc, retired);
         if reason == StopReason::NeedCode {
             self.c()

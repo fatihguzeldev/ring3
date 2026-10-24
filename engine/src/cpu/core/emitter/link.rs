@@ -130,36 +130,42 @@ pub(super) fn restore(out: &mut Output<'_>) {
     }
 }
 
-pub(super) fn publish_canonical(out: &mut Output<'_>) {
-    out.c().local_get(CTX);
-    for (local, _) in boundary_fields(!out.native.is_empty()) {
-        out.c().local_get(local);
-    }
-    let publish = out.internal(5);
-    let publish_link = super::support::owner_defined(7, !out.native.is_empty());
-    out.c()
-        .call(publish)
-        .global_get(MODE)
-        .if_(BlockType::Empty)
-        .local_get(CTX)
-        .call(publish_link)
-        .end();
-}
-
-pub(super) fn reload_canonical(out: &mut Output<'_>) {
-    for (offset, local) in
-        (0..8)
-            .map(|index| (index * 4, index + 2))
-            .chain([(32, 10), (36, 11), (40, 13), (44, 12)])
-    {
+pub(super) fn private_hot_entry(out: &mut Output<'_>) {
+    fn tree(out: &mut Output<'_>, entries: &[(u32, u32)]) {
+        if entries.is_empty() {
+            out.c().i32_const(0);
+            return;
+        }
+        let mid = entries.len() / 2;
+        let (pc, work) = entries[mid];
         out.c()
-            .local_get(CTX)
-            .i32_load(mem(u64::from(offset), 2))
-            .local_set(local);
+            .local_get(super::EIP)
+            .i32_const(pc as i32)
+            .i32_eq()
+            .if_(BlockType::Result(ValType::I32))
+            .local_get(super::REMAIN)
+            .i32_const(work as i32)
+            .i32_ge_u()
+            .else_()
+            .local_get(super::EIP)
+            .i32_const(pc as i32)
+            .i32_lt_u()
+            .if_(BlockType::Result(ValType::I32));
+        tree(out, &entries[..mid]);
+        out.c().else_();
+        tree(out, &entries[mid + 1..]);
+        out.c().end().end();
     }
-    out.c().i32_const(0).local_set(super::KIND);
-    super::super::memory::authority::load(out.c().raw());
-    super::super::memory::cache::invalidate(out.c().raw());
+    // the precise callback has retained this exact, source-current owner. its
+    // private continuation can use any complete fixed span; public window
+    // ingress still uses the separate root-restricted guest.hot_entry helper.
+    let mut entries: Vec<_> = out
+        .spans
+        .iter()
+        .map(|span| (span.block.entry, span.work().minimum_work()))
+        .collect();
+    entries.sort_unstable();
+    tree(out, &entries);
 }
 
 pub(super) fn boundary_fields(_numeric: bool) -> impl Iterator<Item = (u32, ValType)> {

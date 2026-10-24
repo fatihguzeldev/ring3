@@ -922,8 +922,7 @@ pub(in crate::cpu::core::emitter) fn emit_effect(out: &mut Output<'_>, effect: &
     let success_available = out.available.clone();
     out.c().br(1).end();
     out.available = before_available;
-    let retired = out.prefix;
-    super::service::request_exact_suffix(out, retired);
+    out.exit(StopReason::ExactPrefix, Some(out.pc), out.prefix);
     out.c().end();
     out.available = success_available;
 }
@@ -1074,7 +1073,7 @@ pub(in crate::cpu::core::emitter) fn emit_ingress(out: &mut Output<'_>, entry: &
         .local_set(frame::SELECTED)
         .i32_const(0)
         .local_set(pool::ADMITTED);
-    super::service::request_exact_suffix(out, 0);
+    out.exit(StopReason::ExactPrefix, Some(out.pc), 0);
     out.c().end();
     out.available = before;
     out.available.extend(required);

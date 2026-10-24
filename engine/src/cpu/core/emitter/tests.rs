@@ -95,3 +95,73 @@ fn folded_scalar_flags_recovery_emits_valid_wasm_on_exit_and_memory_fault_paths(
         String::from_utf8_lossy(&result.stderr)
     );
 }
+
+#[test]
+fn callback_spine_emits_only_modes_requested_by_the_authored_program() {
+    use std::{fmt::Write, process::Command};
+
+    let cases: [(&str, &[u8], usize, usize); 3] = [
+        ("scalar-only", &[0x8d, 0x40, 1, 0xff, 0xe6], 0, 0),
+        (
+            "typed-fp-only",
+            &[0xd9, 0x03, 0xd8, 0xc1, 0xdd, 0x5b, 8, 0xff, 0xe6],
+            0,
+            1,
+        ),
+        (
+            "canonical-control-and-typed-fp",
+            &[0xd9, 0x2b, 0xd9, 0x03, 0xd8, 0xc1, 0xff, 0xe6],
+            1,
+            1,
+        ),
+    ];
+    let mut script = String::from("const modules=[");
+    for (name, instructions, numeric, precise) in cases {
+        let mut memory = AddressSpace::new(1).unwrap();
+        memory
+            .map_zeroed(
+                PageRange::new(GuestAddress(0x1000), 1).unwrap(),
+                Permissions::ALL,
+            )
+            .unwrap();
+        memory.write(GuestAddress(0x1000), instructions).unwrap();
+        let code = compile(&memory, GuestAddress(0x1000), CompileOptions::default()).unwrap();
+        write!(
+            &mut script,
+            "{{name:{name:?},numeric:{numeric},precise:{precise},hex:\""
+        )
+        .unwrap();
+        for byte in code.wasm() {
+            write!(&mut script, "{byte:02x}").unwrap();
+        }
+        script.push_str("\"},");
+    }
+    let inspector = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/cpu/core/fixtures/region/structure.mjs");
+    write!(
+        &mut script,
+        "];(async()=>{{const {{readGeneratedModule}}=await import({:?});",
+        inspector.to_str().unwrap()
+    )
+    .unwrap();
+    script.push_str(
+        "for(const row of modules){const bytes=Buffer.from(row.hex,'hex');new WebAssembly.Module(bytes);\
+         const m=readGeneratedModule(bytes),run=[...m.names].find(([,name])=>name==='guest.run');\
+         if(!run)throw new Error(row.name+': missing body');\
+         const body=m.functions[run[0]-m.imports.length];\
+         for(const [name,wanted]of[['numeric',row.numeric],['precise',row.precise]]){\
+           const index=m.imports.findIndex(item=>item.module==='ring3'&&item.name===name);\
+           const actual=index<0?0:body.ops.filter(op=>op.op===16&&op.call===index).length;\
+           if(actual!==wanted)throw new Error(row.name+': '+name+' sites '+actual+' != '+wanted);\
+         }}})().catch(error=>{console.error(error);process.exit(1)});",
+    );
+    let result = Command::new("node")
+        .args(["-e", &script])
+        .output()
+        .expect("validate authored callback-mode modules");
+    assert!(
+        result.status.success(),
+        "{}",
+        String::from_utf8_lossy(&result.stderr)
+    );
+}

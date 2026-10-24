@@ -92,6 +92,16 @@ export function runExactSuffixCases(fixture) {
     {revoked:smc,writes:ordinary?[[0x3008,'78563412',1],[0x300c,wordHex(add(7)),2]]:
       smc?[[0x1100,'78563412',1]]:[]},checks);
   });
+  fixture('exact-suffix-simd-rejection-resumes-same-body-with-exact-vector-result',{
+    segments:[[ROOT,'8d4001 0f5803 8d4002 eb15'],[0x1020,tail]],registers,
+    initialFlags:FLAGS,initialFp,control:0x27f,stateWitness:true,
+    data:page=>{const d=new DataView(page.buffer);for(let lane=0;lane<4;lane++)d.setUint32(lane*4,0x7fc00000,true);},
+  },t=>{
+    const simd=t.startingSimd.slice(),d=new DataView(simd.buffer);
+    for(let lane=0;lane<4;lane++)d.setUint32(32+lane*4,0x7fc00000,true);
+    checked(t,{pc:TARGET,retired:7,budget:7,regs:{0:add(7)},fp:t.startingFp,simd},
+      {writes:[[0x300c,wordHex(add(7)),1]]},checks);
+  });
   // all independent context/fp/vector/ram/stamp oracles precede the old-red
   // activation assertion, so the pinned old engine fails only on the format.
   for(const check of checks)check();
