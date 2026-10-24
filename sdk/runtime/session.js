@@ -28,24 +28,41 @@ export class Session {
     this.needsSchedule = false;
   }
   status(state, message, extra = {}) {
+    const unavailable = [];
+    const read = (field, operation) => {
+      if (state !== "error") return operation();
+      try {
+        return operation();
+      } catch (error) {
+        unavailable.push({ field, name: error?.name ?? "Error", message: error?.message ?? String(error) });
+        return undefined;
+      }
+    };
     if (state !== 'error' && !this.stopped) this.code?.publish();
-    if (!this.stopped) this.code?.sampleUsage();
-    this.callDiagnostics?.sampleInput({ closed: this.stopped });
-    this.emit({
+    if (!this.stopped) {
+      const usage = read("cache.sampleUsage", () => this.code?.sampleUsage());
+      if (state === "error" && this.code && usage == null &&
+          !unavailable.some(item => item.field === "cache.sampleUsage"))
+        unavailable.push({ field: "cache.sampleUsage", message: "unavailable" });
+    }
+    read("windowsCalls.sampleInput", () => this.callDiagnostics?.sampleInput({ closed: this.stopped }));
+    const snapshot = {
       type: "status",
       state,
       message,
-      pc: this.engine?.get(48),
-      stats: this.code?.stats(),
-      windowsCalls: this.callDiagnostics?.snapshot(),
+      pc: read("pc", () => this.engine?.get(48)),
+      stats: read("cache.stats", () => this.code?.stats()),
+      windowsCalls: read("windowsCalls.snapshot", () => this.callDiagnostics?.snapshot()),
       physicalInputFocus: this.media?.lastPhysicalFocus,
-      inputDelivery: this.media?.inputStatus?.(),
-      graphicsInventory: this.media?.graphicsStatus?.(),
-      fileReads: this.files?.snapshot?.(),
+      inputDelivery: read("inputDelivery", () => this.media?.inputStatus?.()),
+      graphicsInventory: read("graphicsInventory", () => this.media?.graphicsStatus?.()),
+      fileReads: read("fileReads", () => this.files?.snapshot?.()),
       manualPauseMs: (this.pausedDuration ?? 0) + (this.paused ? performance.now() - this.pauseStarted : 0),
       ...(this.measurements ? {waitSemantics: 'host scheduler task/timer elapsed including event-loop delay; paused-loop waits excluded; not guest wait API duration'} : {}),
       ...extra,
-    });
+    };
+    if (unavailable.length) snapshot.unavailable = unavailable;
+    this.emit(snapshot);
   }
   start(options) {
     this.initializing ??= this.initialize(options);
@@ -527,27 +544,43 @@ export class Session {
   }
   fail(error) {
     if (this.stopped || this.failureReported) return;
+    // A native trap can leave later diagnostic exports unavailable. Preserve
+    // the original exception before attempting any cleanup or status reads.
+    const original = { name: error.name, message: error.message, stack: error.stack };
     this.failureReported = true;
     this.scheduler.close();
     this.running = false;
+    const unavailable = [];
+    const inspect = (field, operation) => {
+      try {
+        return operation();
+      } catch (error) {
+        unavailable.push({ field, name: error?.name ?? "Error", message: error?.message ?? String(error) });
+        return undefined;
+      }
+    };
+    const pc = error.pc ?? inspect("pc", () => this.engine?.get(48));
     const instruction = error.reason === 4 && this.engine
-      ? unsupportedInstruction(this.engine,this.files?.assets,error.pc ?? this.code?.pc ?? this.engine.get(48))
+      ? inspect("instruction", () => unsupportedInstruction(this.engine,this.files?.assets,error.pc ?? this.code?.pc ?? pc))
       : undefined;
     this.emit({
       type: "diagnostic",
-      message: error.message,
+      message: original.message,
       detail: {
+        name: original.name,
+        stack: original.stack,
         operation: error.operation,
         status: error.status,
-        pc: error.pc ?? this.engine?.get(48),
+        pc,
         reason: error.reason,
         detail: error.detail,
         exception: error.exception,
         call: this.lastCall,
         recent: this.recent.map(run => ({...run, id: run.id === null ? null : run.id.toString()})),
         ...(instruction ? {instruction} : {}),
+        ...(unavailable.length ? {unavailable} : {}),
       },
     });
-    this.status("error", error.message);
+    this.status("error", original.message);
   }
 }
