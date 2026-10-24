@@ -130,6 +130,38 @@ pub(super) fn restore(out: &mut Output<'_>) {
     }
 }
 
+pub(super) fn publish_canonical(out: &mut Output<'_>) {
+    out.c().local_get(CTX);
+    for (local, _) in boundary_fields(!out.native.is_empty()) {
+        out.c().local_get(local);
+    }
+    let publish = out.internal(5);
+    let publish_link = super::support::owner_defined(7, !out.native.is_empty());
+    out.c()
+        .call(publish)
+        .global_get(MODE)
+        .if_(BlockType::Empty)
+        .local_get(CTX)
+        .call(publish_link)
+        .end();
+}
+
+pub(super) fn reload_canonical(out: &mut Output<'_>) {
+    for (offset, local) in
+        (0..8)
+            .map(|index| (index * 4, index + 2))
+            .chain([(32, 10), (36, 11), (40, 13), (44, 12)])
+    {
+        out.c()
+            .local_get(CTX)
+            .i32_load(mem(u64::from(offset), 2))
+            .local_set(local);
+    }
+    out.c().i32_const(0).local_set(super::KIND);
+    super::super::memory::authority::load(out.c().raw());
+    super::super::memory::cache::invalidate(out.c().raw());
+}
+
 pub(super) fn boundary_fields(_numeric: bool) -> impl Iterator<Item = (u32, ValType)> {
     FIELDS.iter().copied()
 }

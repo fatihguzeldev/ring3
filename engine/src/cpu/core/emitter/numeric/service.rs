@@ -10,6 +10,7 @@ use crate::cpu::core::emitter::{
 use wasm_encoder::BlockType;
 
 const CANONICAL: i32 = 2;
+const EXACT_SUFFIX: i32 = 3;
 const FLAGS_OUTPUT: i32 = 1 << 28;
 const GENERIC: i32 = 1 << 29;
 const PRESERVES_FP: i32 = 1 << 30;
@@ -85,6 +86,67 @@ pub(super) fn request(out: &mut Output<'_>, next: u32, planned: bool) {
         .local_set(SERVICE_RESUME)
         .i32_const(StopReason::NeedCode as i32)
         .return_();
+}
+
+pub(super) fn request_exact_suffix(out: &mut Output<'_>, retired: u32) {
+    // the failed fast path has not completed its current instruction. retain
+    // the same before-state recovery as a public precise exit, then service it
+    // inside this body instead of repeating its architectural bootstrap.
+    out.address_fact = None;
+    let marker = out.fp_entry_marker;
+    out.c().i32_const(0).local_set(marker);
+    out.publish_exit(Some(out.pc), retired);
+    out.c()
+        .i32_const(EXACT_SUFFIX)
+        .local_set(SERVICE_RESUME)
+        .i32_const(StopReason::NeedCode as i32)
+        .return_();
+}
+
+fn emit_exact_suffix(out: &mut Output<'_>) {
+    out.c()
+        .local_get(SERVICE_RESUME)
+        .i32_const(EXACT_SUFFIX)
+        .i32_eq()
+        .if_(BlockType::Empty);
+    // use the same canonical publishers as the public exact-prefix wrapper.
+    // they expose the completed fp pool, all gprs, flags, quota and sequence.
+    crate::cpu::core::emitter::link::publish_canonical(out);
+    span::forget_view(out);
+    let precise = 2 + u32::from(!out.native.is_empty());
+    out.c().local_get(CTX).call(precise).local_set(WRITE_STATUS);
+    crate::cpu::core::emitter::link::reload_canonical(out);
+    let marker = out.fp_entry_marker;
+    out.c()
+        .i32_const(0)
+        .local_set(marker)
+        .i32_const(0)
+        .local_set(GP_FACTS_VALID)
+        .i32_const(0)
+        .local_set(frame::SELECTED)
+        .i32_const(1)
+        .local_set(frame::EXACT_SUFFIX)
+        .i32_const(0)
+        .local_set(SERVICE_RESUME);
+    let hot_entry = crate::cpu::core::emitter::support::owner_defined(8, true);
+    out.c()
+        .local_get(WRITE_STATUS)
+        .i32_const(StopReason::NeedCode as i32)
+        .i32_eq()
+        .local_get(EIP)
+        .local_get(REMAIN)
+        .call(hot_entry)
+        .i32_and()
+        .if_(BlockType::Empty);
+    out.dynamic_pc(EIP);
+    out.c()
+        .i32_const(1)
+        .local_set(SERVICE_RESUME)
+        .else_()
+        .local_get(WRITE_STATUS)
+        .return_()
+        .end()
+        .end();
 }
 
 fn test(out: &mut Output<'_>, mask: i32) {
@@ -170,6 +232,7 @@ pub(in crate::cpu::core::emitter) fn emit(out: &mut Output<'_>) {
     if out.native.is_empty() {
         return;
     }
+    emit_exact_suffix(out);
     out.c()
         .local_get(SERVICE_RESUME)
         .i32_const(CANONICAL)
