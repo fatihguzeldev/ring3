@@ -5,6 +5,11 @@ import {join} from 'node:path';
 const detectionOwner = 'engine/src/abi/wasm/exports/detection.rs';
 const cpuOwner = 'engine/src/abi/wasm/exports/cpu.rs';
 const coreOwner = 'engine/src/abi/wasm/exports/core.rs';
+const continuationParameters = new Map([
+  ['core_numeric_owned',['context: u32','slot: u32','generation: u64','pc: u32','ordinal: u32']],
+  ['core_precise_owned',['context: u32','slot: u32','generation: u64']],
+  ['core_end_owned',['context: u32','slot: u32','generation: u64','reason: u32']],
+]);
 const instanceOwner = 'engine/src/abi/wasm/exports/instance.rs';
 const tokens = value => value.match(/[a-zA-Z_][a-zA-Z_0-9]*|"(?:\\.|[^"\\])*"|[^\s]/g);
 const componentLease = `#[cfg(feature = "external-cpu")]
@@ -243,6 +248,10 @@ export function assertEngineExports(module, root, {observability = false} = {}) 
     const functions = declarations(body, path, (name, argumentsList) => {
       if (path === cpuOwner && name === 'cpu_read32_view') {
         assert.deepEqual(argumentsList, ['epoch: i64'], `${path}/${name}: view parameters`);
+        return;
+      }
+      if (path === coreOwner && continuationParameters.has(name)) {
+        assert.deepEqual(argumentsList, continuationParameters.get(name), `${path}/${name}: exact continuation generation parameters`);
         return;
       }
       for (const argument of argumentsList) {

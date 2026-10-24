@@ -208,6 +208,31 @@ const coreSource = readFileSync(new URL('../../../src/abi/wasm/exports/core.rs',
 const coreReadSource = coreSource.slice(coreSource.indexOf('#[allow('));
 const coreColdStatusSource = '#[cfg(feature = "observability")]\nexport_process_calls! { core_cold_status_ptr(); }\n';
 
+test('continuation generations retain their exact u64 positions without widening other ABI parameters', () => {
+  workspace(parent, child, root => {
+    const dir=join(root,'engine/src/abi/wasm/exports');
+    writeFileSync(join(dir,'mod.rs'),'macro_rules! export_process_calls {\n}\nmod core;\n');
+    const declarations='export_process_calls! {\n'+
+      'core_numeric_owned(context: u32, slot: u32, generation: u64, pc: u32, ordinal: u32);\n'+
+      'core_precise_owned(context: u32, slot: u32, generation: u64);\n'+
+      'core_end_owned(context: u32, slot: u32, generation: u64, reason: u32);\n}\n';
+    const source=declarations+coreReadSource,core=join(dir,'core.rs');
+    const actual=moduleWith(['core_numeric_owned','core_precise_owned','core_end_owned','core_read','core_cold_run']
+      .map(name=>'ring3_abi_v1_'+name));
+    writeFileSync(core,source);
+    assert.deepEqual(assertEngineExports(actual,root).functions.slice(0,3).map(row=>row.arity),[5,3,4]);
+    for(const invalid of[
+      source.replace('generation: u64','generation: u32'),
+      source.replace('slot: u32, generation: u64','generation: u64, slot: u32'),
+      source.replace('generation: u64, pc: u32','generation: u64, pc: u64'),
+      source.replace('generation: u64, ',''),
+    ]) {
+      writeFileSync(core,invalid);
+      assert.throws(()=>assertEngineExports(actual,root),/exact continuation generation parameters/);
+    }
+  });
+});
+
 test('the Core cold snapshot tail is exact and follows the observability export profile', () => {
   workspace(parent, child, root => {
     const dir = join(root, 'engine/src/abi/wasm/exports');
