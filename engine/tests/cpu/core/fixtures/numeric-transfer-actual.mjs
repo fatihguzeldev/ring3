@@ -4,7 +4,7 @@ import {fileURLToPath} from 'node:url';
 import {createHash} from 'node:crypto';
 import {readEngine} from '../../../support/wasm/engine.mjs';
 import {Engine,KEY,record,view} from '../../../../../sdk/runtime/engine.js';
-import {instantiateCore,instantiateSupport} from './link.mjs';
+import {instantiateCore,instantiateSupport,recoveryBindings} from './link.mjs';
 import {assertCoreNames} from './names.mjs';
 
 const FP=4236,SIMD=4364,YMM=4612,PAGE=4096,NATIVE_PC=0x102b,SEQUENCE=37n;
@@ -65,7 +65,7 @@ export function runActualTransfer(program,name,{initial,dirty,inputs,inputFlags,
       if(name==='processor')put(context,0x12345678);
       return 0;
     };
-    const generated=new WebAssembly.Instance(module,{ring3:{...support,'support.abi':support.supportAbi,memory,
+    const generated=new WebAssembly.Instance(module,{ring3:{...support,...recoveryBindings(module,memory),'support.abi':support.supportAbi,memory,
       read:()=>assert.fail('scalar slow read is outside this transfer control'),
       write:()=>assert.fail('scalar slow write is outside this transfer control'),numeric,
       precise:pointer=>{preciseCalls++;return api.core_precise(pointer);}}});

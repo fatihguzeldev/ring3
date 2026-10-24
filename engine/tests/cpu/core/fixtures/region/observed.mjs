@@ -153,7 +153,7 @@ function fixture(artifact,report,name,options,body) {
       for(const{unit,module}of units.values())if(!module.instrumentedSha256){
         const diagnostic=instrumentObservedModule(module.source);
         const bindings={memory,read:api.core_read,write:api.core_write,...cacheCallbacks(cache),
-          ...cache.dispatch,'support.abi':cache.dispatch.supportAbi};
+          ...cache.dispatch,'support.abi':cache.dispatch.supportAbi,'recovery.base':unit.recoveryBase};
         const generated=new WebAssembly.Instance(new WebAssembly.Module(diagnostic.bytes),{ring3:bindings}).exports;
         Object.assign(unit,{run:generated.run,link:generated.link,publish:generated.publish});
         cache.table.set(unit.slot,unit.link);cache.publishers.set(unit.slot,unit.publish);

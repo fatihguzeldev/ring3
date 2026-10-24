@@ -53,6 +53,7 @@ function instrument(world,unit) {
   const exports=new WebAssembly.Instance(new WebAssembly.Module(diagnostic.bytes),{ring3:{
     memory:world.memory,read:world.api.core_read,write:world.api.core_write,
     ...cacheCallbacks(world.cache),...world.cache.dispatch,'support.abi':world.cache.dispatch.supportAbi,
+    'recovery.base':unit.recoveryBase,
   }}).exports;
   Object.assign(unit,{run:exports.run,link:exports.link,publish:exports.publish});
   world.cache.table.set(unit.slot,unit.link);world.cache.publishers.set(unit.slot,unit.publish);

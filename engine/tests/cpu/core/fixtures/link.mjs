@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import {existsSync,readFileSync} from 'node:fs';
 import {join} from 'node:path';
+import {bindNativeRecovery,moduleRecovery,retainedRecoveryBase} from '../../../../../sdk/runtime/recovery.js';
 
 const legacyFields=[2,3,4,5,6,7,8,9,10,11,12,13,20,21,22,23,24,25,
   76,77,78,79,80,81,82,83,84,85,86,87,88,89,90,91,92,93,94,95,96,99,100,101,102,103];
@@ -14,6 +15,7 @@ const legacySupportNames=[...supportNames.slice(0,8),'support.normalize_kernel']
 const supportForAbi=abi=>abi===1?legacySupportNames:abi===2?poolSupportNames:abi<5?previousSupportNames:supportNames;
 const supportSources=new WeakMap(),supportInstances=new WeakMap();
 const preciseCallbacks=new WeakMap();
+const recoveryProviders=new WeakMap(),standaloneRecovery=new WeakMap();
 let standaloneSupport;
 
 export function coreImports(module) {
@@ -28,7 +30,63 @@ export function coreImports(module) {
   const precise=imports.filter(item=>item.name==='precise');
   if(precise.length)assert.deepEqual(precise,[{module:'ring3',name:'precise',kind:'function'}],
     'exact-prefix ingress has one explicit CPU callback');
-  return imports.filter(item=>!item.name.startsWith('link.')&&!item.name.startsWith('support.')&&item.name!=='trace.arena'&&item.name!=='precise');
+  const recovery=imports.filter(item=>item.name==='recovery.base');
+  if(recovery.length) {assert.deepEqual(recovery,[{module:'ring3',name:'recovery.base',kind:'global'}]);moduleRecovery(module);}
+  return imports.filter(item=>!item.name.startsWith('link.')&&!item.name.startsWith('support.')&&item.name!=='trace.arena'&&item.name!=='precise'&&item.name!=='recovery.base');
+}
+
+export function registerRecoveryProvider(memory,api) {
+  assert(memory instanceof WebAssembly.Memory);
+  const names=['core_context_ptr','core_code_ptr','core_code_len'];
+  const provider=Object.fromEntries(names.map(name=>{assert.equal(typeof api[name],'function');return[name,api[name]];}));
+  assert(!standaloneRecovery.has(memory),'real engine memory cannot use a standalone metadata arena');
+  const previous=recoveryProviders.get(memory);
+  if(previous)assert(names.every(name=>previous[name]===provider[name]),'one actual engine provider per memory');
+  else recoveryProviders.set(memory,Object.freeze(provider));
+}
+
+export function registerStandaloneRecovery(memory,bytes) {
+  assert(memory instanceof WebAssembly.Memory);
+  assert(!recoveryProviders.has(memory)&&!standaloneRecovery.has(memory),'one explicit standalone arena per memory');
+  assert(Number.isInteger(bytes)&&bytes>0&&bytes<=16*1024*1024,'bounded standalone metadata reservation');
+  const start=memory.buffer.byteLength,pages=Math.ceil(bytes/65536);
+  assert(start+pages*65536<=0x100000000,'standalone metadata fits Wasm32');
+  memory.grow(pages);
+  standaloneRecovery.set(memory,{next:start,end:start+bytes,modules:new WeakMap()});
+}
+
+export function recoveryBindings(module,memory) {
+  const metadata=moduleRecovery(module);if(!metadata)return {};
+  assert(memory instanceof WebAssembly.Memory,'recovery metadata uses its actual Wasm memory');
+  const provider=recoveryProviders.get(memory);
+  if(provider) {
+    const rawContext=provider.core_context_ptr();
+    assert(Number.isInteger(rawContext)&&rawContext>=-0x80000000&&rawContext<=0xffffffff,'32-bit native context pointer');
+    const context=rawContext<0?rawContext+0x100000000:rawContext;
+    assert(context>0&&context%8===0&&context+128<=memory.buffer.byteLength,'valid selected native recovery owner');
+    const identity=new DataView(memory.buffer).getBigUint64(context+120,true);
+    const rawPointer=provider.core_code_ptr(),length=provider.core_code_len();
+    assert(Number.isInteger(rawPointer)&&rawPointer>=-0x80000000&&rawPointer<=0xffffffff,'32-bit native module pointer');
+    const pointer=rawPointer<0?rawPointer+0x100000000:rawPointer;
+    assert(pointer>0&&Number.isInteger(length)&&length>=8&&length<=16*1024*1024&&
+      pointer+length<=memory.buffer.byteLength,'valid selected native module span');
+    const source=new Uint8Array(memory.buffer).slice(pointer,pointer+length);
+    assert.equal(new DataView(memory.buffer).getBigUint64(context+120,true),identity,'selected owner remains stable');
+    return {'recovery.base':bindNativeRecovery(module,source,{memory,pointer,length,identity})};
+  }
+  // Standalone generated-Wasm controls have no Rust allocation or engine heap.
+  // Their exact same portable blob gets a private tail outside guest mappings.
+  const arena=standaloneRecovery.get(memory);
+  assert(arena,'standalone metadata requires explicit unmapped-tail reservation before fixture views');
+  let base=arena.modules.get(module);
+  if(!base) {
+    const pointer=arena.next;
+    assert(pointer+metadata.bytes.length<=arena.end,'standalone metadata stays inside its reserved private tail');
+    new Uint8Array(memory.buffer,pointer,metadata.bytes.length).set(metadata.bytes);
+    base=new WebAssembly.Global({value:'i32',mutable:false},pointer>=0x80000000?pointer-0x100000000:pointer);
+    arena.next+=metadata.bytes.length;arena.modules.set(module,base);
+  }
+  return {'recovery.base':base};
 }
 
 export function coreSupportSource(memory) {
@@ -153,8 +211,10 @@ export function instantiateCore(module,imports) {
   const supplied=imports?.ring3??{};
   const shared=WebAssembly.Module.imports(module).some(item=>item.name.startsWith('support.'))&&
     !WebAssembly.Module.imports(module).filter(item=>item.name.startsWith('support.')&&item.kind==='function').every(item=>typeof supplied[item.name]==='function')?bindings(supplied.memory):{};
+  const recovery=supplied['recovery.base']===undefined?recoveryBindings(module,supplied.memory):
+    {'recovery.base':retainedRecoveryBase(module,supplied.memory,supplied['recovery.base'])};
   const instance=new WebAssembly.Instance(module,{...imports,
-    ring3:{...shared,...linkGlobals(module,supplied),...supplied,
+    ring3:{...shared,...linkGlobals(module,supplied),...recovery,...supplied,
       numeric:(...args)=>args.length===3?supplied.numeric(args[0],args[2]):supplied.numeric(...args),
       precise:supplied.precise??preciseCallbacks.get(supplied.memory)??(()=>assert.fail('exact-prefix execution requires the actual CPU adapter')),
       'support.abi':supplied['support.abi']??supplied.supportAbi??shared['support.abi']}});
@@ -164,6 +224,9 @@ export function instantiateCore(module,imports) {
     supportSources.set(memory,()=>{const at=ptr()>>>0,length=len()>>>0;
       assert(at>0&&length>=8&&at+length<=memory.buffer.byteLength,'valid production support descriptor');
       return new Uint8Array(memory.buffer).slice(at,at+length);});
+  if(memory instanceof WebAssembly.Memory&&typeof instance.exports.ring3_abi_v1_core_code_ptr==='function')
+    registerRecoveryProvider(memory,Object.fromEntries(['core_context_ptr','core_code_ptr','core_code_len']
+      .map(name=>[name,instance.exports['ring3_abi_v1_'+name]])));
   if(memory instanceof WebAssembly.Memory&&typeof instance.exports.ring3_abi_v1_core_precise==='function')
     preciseCallbacks.set(memory,instance.exports.ring3_abi_v1_core_precise);
   return instance;

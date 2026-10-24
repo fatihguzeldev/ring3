@@ -1,3 +1,5 @@
+import {bindNativeRecovery} from './recovery.js';
+
 const MAX_CODE_BYTES = 128 * 1024 * 1024;
 const LINK_LOCALS = [...Array.from({length:12},(_,index)=>index+2),
   ...Array.from({length:6},(_,index)=>index+20),99];
@@ -477,10 +479,15 @@ export class CodeCache {
       return unit;
     }
     if (this.chain) this.pruneNative();
+    const nativePointer=this.native.core_code_ptr(),nativeLength=this.native.core_code_len();
     const encoded = this.encoded('core_code_ptr','core_code_len'), length = encoded.length;
     const module = this.compilation
       ? this.measureCompilation('module',()=>new WebAssembly.Module(encoded))
       : new WebAssembly.Module(encoded);
+    const recoveryBase=bindNativeRecovery(module,encoded,{memory:this.memory,pointer:nativePointer,
+      length:nativeLength,identity:id});
+    if(new DataView(this.memory.buffer).getBigUint64(context+120,true)!==id)
+      throw new Error('core recovery owner changed during instantiation');
     const bindings = {memory: this.memory};
     const available = {read: this.native.core_read, write: this.native.core_write, numeric: this.continuationCore ? (context,pc,ordinal)=>this.invokeNumeric(context,pc,ordinal) : this.native.core_numeric};
     if (this.preciseBinding) available.precise = this.preciseBinding;
@@ -489,6 +496,9 @@ export class CodeCache {
       if (item.module !== 'ring3' || found.has(item.name)) throw new Error(`invalid core import ${item.module}.${item.name}`);
       found.add(item.name);
       if (item.name === 'memory' && item.kind === 'memory') continue;
+      if (item.name === 'recovery.base' && item.kind === 'global' && recoveryBase) {
+        bindings[item.name]=recoveryBase;continue;
+      }
       if (item.kind === 'global' && this.#linkGlobals && Object.hasOwn(this.#linkGlobals,item.name)) {
         bindings[item.name] = this.#linkGlobals[item.name]; continue;
       }
@@ -515,7 +525,7 @@ export class CodeCache {
     const publish = this.linkedCore ? instance.exports.publish : null;
     if (this.linkedCore && (typeof link !== 'function' || link.length !== 2 ||
         typeof publish !== 'function' || publish.length !== 1)) throw new Error('invalid core link exports');
-    const unit = {id, pc, run, link, publish, bytes: length};
+    const unit = {id, pc, run, link, publish, bytes: length,...(recoveryBase?{recoveryBase}:{})};
     if (transient) {
       unit.transient = true;
       this.transient = unit;

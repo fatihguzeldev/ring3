@@ -1,4 +1,4 @@
-import {instantiateCore,coreImports,coreSupportSource,instantiateSupport} from './link.mjs';
+import {instantiateCore,coreImports,coreSupportSource,instantiateSupport,registerStandaloneRecovery} from './link.mjs';
 import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
 import {readFileSync, writeFileSync} from 'node:fs';
@@ -19,6 +19,7 @@ const PRIVATE = 0x530100;
 const NUMERIC = 0x540000;
 const RAW80 = Buffer.from('7856341200000080ff3f', 'hex');
 const memory = new WebAssembly.Memory({initial: 96});
+registerStandaloneRecovery(memory,16*1024*1024);
 const bytes = new Uint8Array(memory.buffer), view = new DataView(memory.buffer);
 const get = offset => view.getUint32(offset, true);
 const put = (offset, value) => view.setUint32(offset, value >>> 0, true);

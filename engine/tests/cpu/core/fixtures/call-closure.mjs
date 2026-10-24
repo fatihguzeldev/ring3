@@ -1,4 +1,4 @@
-import {instantiateCore,coreImports} from './link.mjs';
+import {instantiateCore,coreImports,registerStandaloneRecovery} from './link.mjs';
 import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
 import {readFileSync,writeFileSync} from 'node:fs';
@@ -10,7 +10,9 @@ import {runActualPrefix} from './actual-prefix.mjs';
 const directory=process.argv[2], timing=process.argv.includes('--timing');
 const CTX=0x100,MAP=0x10000,PERM=0x410000,EXEC=0x510000;
 const VERSION=0x510100,PAGE_VERSION=0x510200,GENERATION=0x510300,OWNERS=0x510400,BACKING=0x520000;
-const memory=new WebAssembly.Memory({initial:96}),bytes=new Uint8Array(memory.buffer),d=new DataView(memory.buffer);
+const memory=new WebAssembly.Memory({initial:96});
+registerStandaloneRecovery(memory,16*1024*1024);
+const bytes=new Uint8Array(memory.buffer),d=new DataView(memory.buffer);
 const put=(offset,value)=>d.setUint32(offset,value>>>0,true),get=offset=>d.getUint32(offset,true);
 const hash=value=>createHash('sha256').update(value).digest('hex'),hex=value=>Buffer.from(value).toString('hex');
 const regions=new Map(),cases=[],runs=[],reportPath=join(directory,'call-closure-result.json');

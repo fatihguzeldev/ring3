@@ -76,7 +76,7 @@ function instrument(world,units,probes) {
     const measured=instrumentWitnessModule(record.source,readGeneratedModule(record.source));
     const generated=new WebAssembly.Instance(new WebAssembly.Module(measured.bytes),{ring3:{memory:world.memory,
       read:world.api.core_read,write:world.api.core_write,...cacheCallbacks(world.cache),
-      ...support,'support.abi':support.supportAbi}}).exports;
+      ...support,'support.abi':support.supportAbi,'recovery.base':unit.recoveryBase}}).exports;
     Object.assign(unit,{run:generated.run,link:generated.link,publish:generated.publish});
     world.cache.table.set(unit.slot,unit.link);world.cache.publishers.set(unit.slot,unit.publish);
     unit.retained={...record,slot:unit.slot,run:unit.run,link:unit.link,publish:unit.publish};

@@ -101,11 +101,12 @@ function runLinkedPoolCase(artifact,report,iterations) {
     cache.dispatch=support;forceNativeInspection(cache,result);
     diagnostics.push(support);result.supportProof=dispatchDiagnostic.proof;
     for(const module of result.modules){
+      const unit=units.get(module.pc);
       const diagnostic=instrumentWitnessModule(module.source,readGeneratedModule(module.source));
       const bindings={memory,read:api.core_read,write:api.core_write,...cacheCallbacks(cache),
-        ...support,'support.abi':support.supportAbi};
+        ...support,'support.abi':support.supportAbi,'recovery.base':unit.recoveryBase};
       const generated=new WebAssembly.Instance(new WebAssembly.Module(diagnostic.bytes),{ring3:bindings}).exports;
-      const unit=units.get(module.pc);Object.assign(unit,{run:generated.run,link:generated.link,publish:generated.publish});
+      Object.assign(unit,{run:generated.run,link:generated.link,publish:generated.publish});
       cache.table.set(unit.slot,unit.link);cache.publishers.set(unit.slot,unit.publish);diagnostics.push(generated);
       module.instrumentedSha256=hash(diagnostic.bytes);module.proof=diagnostic.proof;delete module.source;
     }

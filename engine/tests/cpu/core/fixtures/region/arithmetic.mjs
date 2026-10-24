@@ -208,11 +208,12 @@ export function runArithmeticOwnerCases(artifact,report) {
       if(cache.continuationCore){support['link.continuation'].value=0;result.forcedNativeInspection=true;}
       cache.dispatch=support;diagnostics.push(support);
       for(const module of result.modules){
+        const unit=units.get(module.pc);
         const diagnostic=instrumentWitnessModule(module.source,readGeneratedModule(module.source));
         const generated=new WebAssembly.Instance(new WebAssembly.Module(diagnostic.bytes),{ring3:{memory,
           read:api.core_read,write:api.core_write,...cacheCallbacks(cache),
-          ...support,'support.abi':support.supportAbi}}).exports;
-        const unit=units.get(module.pc);Object.assign(unit,{run:generated.run,link:generated.link,publish:generated.publish});
+          ...support,'support.abi':support.supportAbi,'recovery.base':unit.recoveryBase}}).exports;
+        Object.assign(unit,{run:generated.run,link:generated.link,publish:generated.publish});
         cache.table.set(unit.slot,unit.link);cache.publishers.set(unit.slot,unit.publish);diagnostics.push(generated);
         module.packing=packingProof(module.source);module.instrumentedSha256=hash(diagnostic.bytes);delete module.source;
       }

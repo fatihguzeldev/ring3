@@ -1,5 +1,5 @@
 import {assertCoreNames,coreFunctionNames} from './names.mjs';
-import {instantiateCore,coreImports} from './link.mjs';
+import {instantiateCore,coreImports,registerStandaloneRecovery} from './link.mjs';
 import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
 import {readFileSync,writeFileSync} from 'node:fs';
@@ -8,7 +8,9 @@ import {runActualPrefix} from './actual-prefix.mjs';
 
 const directory = process.argv[2], CTX = 0x100, MAP = 0x10000, PERM = 0x410000;
 const EXEC = 0x510000, VERSION = 0x510100, PAGE_VERSION = 0x510200, BACKING = 0x520000;
-const memory = new WebAssembly.Memory({initial:96}), bytes = new Uint8Array(memory.buffer), d = new DataView(memory.buffer);
+const memory = new WebAssembly.Memory({initial:96});
+registerStandaloneRecovery(memory,16*1024*1024);
+const bytes = new Uint8Array(memory.buffer), d = new DataView(memory.buffer);
 const put = (offset,value) => d.setUint32(offset,value>>>0,true), get = offset => d.getUint32(offset,true);
 const hex = value => Buffer.from(value).toString('hex');
 const hash = value => createHash('sha256').update(value).digest('hex');

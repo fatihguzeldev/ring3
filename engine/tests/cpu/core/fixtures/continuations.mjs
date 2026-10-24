@@ -42,7 +42,7 @@ try {
     const diagnostic=instrumentWitnessModule(source,readGeneratedModule(source));
     const exports=new WebAssembly.Instance(new WebAssembly.Module(diagnostic.bytes),{ring3:{...cache.dispatch,
       memory,read:api.core_read,write:api.core_write,precise:ctx=>cache.invokePrecise(ctx),
-      'support.abi':cache.dispatch.supportAbi}}).exports;
+      'support.abi':cache.dispatch.supportAbi,'recovery.base':unit.recoveryBase}}).exports;
     Object.assign(unit,{run:exports.run,link:exports.link,publish:exports.publish});
     cache.table.set(unit.slot,unit.link);cache.publishers.set(unit.slot,unit.publish);
     modules.push({unit,exports,source,sha256:hash(source)});

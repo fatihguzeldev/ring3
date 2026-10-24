@@ -1,4 +1,4 @@
-import {instantiateCore,coreImports} from './link.mjs';
+import {instantiateCore,coreImports,registerStandaloneRecovery} from './link.mjs';
 import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
 import {readFileSync, writeFileSync} from 'node:fs';
@@ -12,6 +12,7 @@ const MAP = 0x10000, PERM = 0x410000, EXEC = 0x510000, VERSION = 0x510100;
 const PAGE_VERSION = 0x510200, BACKING = 0x520000, GENERATION = 0x530000;
 const memory = new WebAssembly.Memory({initial: 96}), functions = new WebAssembly.Table({element: 'anyfunc', initial: 9, maximum: 4097});
 const publishers = new WebAssembly.Table({element:'anyfunc',initial:9,maximum:4097});
+registerStandaloneRecovery(memory,16*1024*1024);
 const bytes = new Uint8Array(memory.buffer), view = new DataView(memory.buffer);
 const get = offset => view.getUint32(offset, true), put = (offset, value) => view.setUint32(offset, value >>> 0, true);
 const hex = value => Buffer.from(value).toString('hex');

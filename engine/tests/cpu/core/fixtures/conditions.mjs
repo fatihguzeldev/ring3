@@ -1,4 +1,4 @@
-import {instantiateCore,coreImports} from './link.mjs';
+import {instantiateCore,coreImports,registerStandaloneRecovery} from './link.mjs';
 import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
 import {readFileSync,writeFileSync} from 'node:fs';
@@ -9,7 +9,9 @@ import {runActualPrefix} from './actual-prefix.mjs';
 
 const directory=process.argv[2],CTX=256,PAGE=4096,MAP=0x10000,PERM=0x410000;
 const EXEC=0x510000,VERSION=0x510100,PAGE_VERSION=0x510200,BACKING=0x520000,GENERATION=0x530000;
-const memory=new WebAssembly.Memory({initial:96}),bytes=new Uint8Array(memory.buffer),view=new DataView(memory.buffer);
+const memory=new WebAssembly.Memory({initial:96});
+registerStandaloneRecovery(memory,16*1024*1024);
+const bytes=new Uint8Array(memory.buffer),view=new DataView(memory.buffer);
 const put=(at,value)=>view.setUint32(at,value>>>0,true),hash=value=>createHash('sha256').update(value).digest('hex');
 const programs=new Map(),records=[],report=join(directory,'conditions-result.json');
 const countFlagCalls=source=>instrumentCallCounter(source,'support.flags','test.flag_calls');
