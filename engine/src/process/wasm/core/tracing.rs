@@ -346,33 +346,41 @@ pub(crate) fn core_trace_finish(root: u32, instructions: u32, blocks: u32) -> u3
                 ..CompileOptions::default()
             };
             if !manual {
-                if core.tracing.cold.is_empty() {
-                    // only two identical completed root cycles can become a window;
-                    // the planner never unions unexecuted parent history.
-                    prepare_hot_window(
-                        memory,
-                        GuestAddress(root),
-                        options,
-                        &events,
-                        &owners,
-                        core.tracing.source_version,
-                        &core.tracing.cold,
-                    )
-                    .and_then(|plan| {
-                        plan.map(|plan| admit_window(&mut core.cache, memory, plan))
-                            .transpose()
-                            .map(Option::flatten)
-                    })
-                } else {
-                    // mixed/cold captures retain the bounded unowned frontier path.
-                    prepare_cold_prefix_plan(memory, options, &events, &core.tracing.cold, &|pc| {
-                        core.cache.current_hot_port(memory, pc).is_some()
-                    })
-                    .and_then(|plan| {
-                        plan.map(|plan| admit_fragment(&mut core.cache, memory, plan))
-                            .transpose()
-                            .map(Option::flatten)
-                    })
+                // The selected root keeps priority, but the same completed
+                // timeline can license a compiled interior cycle even when
+                // its prefix/tail contains precise cold observations.
+                let window = prepare_hot_window(
+                    memory,
+                    GuestAddress(root),
+                    options,
+                    &events,
+                    &owners,
+                    core.tracing.source_version,
+                    &core.tracing.cold,
+                )
+                .and_then(|plan| {
+                    plan.map(|plan| admit_window(&mut core.cache, memory, plan))
+                        .transpose()
+                        .map(Option::flatten)
+                });
+                match window {
+                    Ok(None) if !core.tracing.cold.is_empty() => {
+                        // A declined/absent window retains the exact unowned
+                        // cold-prefix path, with no historical family union.
+                        prepare_cold_prefix_plan(
+                            memory,
+                            options,
+                            &events,
+                            &core.tracing.cold,
+                            &|pc| core.cache.current_hot_port(memory, pc).is_some(),
+                        )
+                        .and_then(|plan| {
+                            plan.map(|plan| admit_fragment(&mut core.cache, memory, plan))
+                                .transpose()
+                                .map(Option::flatten)
+                        })
+                    }
+                    result => result,
                 }
             } else {
                 compile_observed_with_growth(

@@ -230,7 +230,101 @@ pub(crate) fn prepare_hot_window(
     expected_source_version: u64,
     cold: &[CompletedColdObservation],
 ) -> Result<Option<WindowPlan>, CompileError> {
-    if !cold.is_empty() || events.iter().any(|event| event.kind == COLD_COMPLETE) {
+    if validate_options(options).is_err()
+        || events.is_empty()
+        || events.len() > CAPACITY
+        || cold.len() > CAPACITY
+        || memory.code_source_version() != expected_source_version
+        || owners.iter().any(|owner| !owner.is_current(memory))
+    {
+        return Ok(None);
+    }
+    let Some(sites) = recorded_sites(memory, events, owners, cold) else {
+        return Ok(None);
+    };
+    if sites[0].first() != root.0 {
+        return Ok(None);
+    }
+    let compiled_only = events.iter().all(|event| event.kind != COLD_COMPLETE);
+    if compiled_only {
+        // Keep the accepted selected-root policy and identity priority intact.
+        if let Some(plan) = prepare_root_window(
+            memory,
+            root,
+            options,
+            events,
+            owners,
+            expected_source_version,
+            cold,
+        )? {
+            return Ok(Some(plan));
+        }
+    }
+
+    // This is only a bounded timeline index, never an executed-edge proof. Each
+    // chosen subwalk is re-certified by the original instruction/offset/source
+    // walker and two-cycle verifier. One attempt per site is at most CAPACITY;
+    // each verifier retains its existing 2 * options.instructions word bound.
+    let mut occurrences = BTreeMap::<u32, Vec<usize>>::new();
+    let mut owner_changes = vec![0usize; sites.len()];
+    for (index, site) in sites.iter().enumerate() {
+        occurrences.entry(site.first()).or_default().push(index);
+        if index != 0 {
+            owner_changes[index] =
+                owner_changes[index - 1] + usize::from(sites[index - 1].owner() != site.owner());
+        }
+    }
+    let mut compiled_end = vec![sites.len(); sites.len()];
+    let mut end = sites.len();
+    for index in (0..sites.len()).rev() {
+        if sites[index].owner() == 0 {
+            end = index;
+        }
+        compiled_end[index] = end;
+    }
+    for (start, site) in sites.iter().enumerate() {
+        if site.owner() == 0 || start == 0 && compiled_only {
+            continue;
+        }
+        let positions = &occurrences[&site.first()];
+        let position = positions.binary_search(&start).unwrap();
+        let after = positions.partition_point(|&index| index < compiled_end[start]);
+        if after < position + 3 {
+            continue;
+        }
+        let end = positions[after - 1];
+        if owner_changes[end] == owner_changes[start] {
+            continue;
+        }
+        // Earliest actual entry wins. BLOCK/NUMERIC may share a PC without
+        // completing a cycle, so keep the last witness in this compiled segment;
+        // the certifier still stops at the actual second closure. No cold
+        // prefix/tail or unrelated parent history is copied into the executable.
+        if let Some(plan) = prepare_root_window(
+            memory,
+            GuestAddress(site.first()),
+            options,
+            &events[start..=end],
+            owners,
+            expected_source_version,
+            cold,
+        )? {
+            return Ok(Some(plan));
+        }
+    }
+    Ok(None)
+}
+
+fn prepare_root_window(
+    memory: &AddressSpace,
+    root: GuestAddress,
+    options: CompileOptions,
+    events: &[TraceEvent],
+    owners: &[&CompiledCode],
+    expected_source_version: u64,
+    cold: &[CompletedColdObservation],
+) -> Result<Option<WindowPlan>, CompileError> {
+    if events.iter().any(|event| event.kind == COLD_COMPLETE) {
         return Ok(None);
     }
     let mut recurrence = RootCycle::new(root.0, options.instructions);
@@ -679,3 +773,6 @@ pub(crate) fn emit_observed_plan(
 mod tests;
 #[cfg(test)]
 mod window_tests;
+
+#[cfg(test)]
+mod interior_tests;

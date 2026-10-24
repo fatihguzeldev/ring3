@@ -223,6 +223,79 @@ enum CaptureFlow {
     Stop,
 }
 
+// Geometry and source authority are checked once before any subwalk selection.
+// A candidate still goes through the same instruction/successor certifier below.
+fn recorded_sites<'a>(
+    memory: &AddressSpace,
+    events: &[TraceEvent],
+    owners: &[&'a CompiledCode],
+    cold: &'a [CompletedColdObservation],
+) -> Option<Vec<Site<'a>>> {
+    let retained: BTreeMap<_, _> = owners
+        .iter()
+        .map(|owner| (owner.identity(), *owner))
+        .collect();
+    let mut sites = Vec::with_capacity(events.len());
+    for event in events {
+        let site = match event.kind {
+            COLD_COMPLETE if event.owner == 0 => {
+                let Some(observation) = cold.get(event.offset as usize) else {
+                    return None;
+                };
+                if observation.pc() != event.pc
+                    || observation.next() != event.end
+                    || !memory.is_code_current(&observation.source)
+                {
+                    return None;
+                }
+                Site::Cold(observation)
+            }
+            BLOCK | NUMERIC if event.owner != 0 => {
+                let Some(owner) = retained.get(&event.owner).copied() else {
+                    return None;
+                };
+                let pcs = if event.kind == BLOCK {
+                    let Ok(index) = owner
+                        .blocks
+                        .binary_search_by_key(&event.pc, |block| block.pc)
+                    else {
+                        return None;
+                    };
+                    let block = &owner.blocks[index];
+                    if event.end != block.end || event.offset >= block.count {
+                        return None;
+                    }
+                    &owner.block_pcs[(block.first + event.offset) as usize
+                        ..(block.first + block.count) as usize]
+                } else {
+                    if event.offset != 0
+                        || !owner.native.iter().any(|instruction| {
+                            instruction.pc == event.pc && instruction.next == event.end
+                        })
+                    {
+                        return None;
+                    }
+                    let Ok(index) = owner.instruction_pcs.binary_search(&event.pc) else {
+                        return None;
+                    };
+                    &owner.instruction_pcs[index..index + 1]
+                };
+                Site::Retained { owner, pcs }
+            }
+            _ => return None,
+        };
+        sites.push(site);
+    }
+    for pair in sites.windows(2) {
+        if let Site::Cold(observation) = &pair[0] {
+            if observation.actual_post_pc() != pair[1].first() {
+                return None;
+            }
+        }
+    }
+    Some(sites)
+}
+
 /// completed cold records carry their own source authority; retained block and
 /// numeric records still require the following event to confirm completion.
 fn capture_graph(
@@ -265,61 +338,9 @@ fn capture_graph_with(
     {
         return Ok(None);
     }
-    let retained: BTreeMap<_, _> = owners
-        .iter()
-        .map(|owner| (owner.identity(), *owner))
-        .collect();
-    let mut sites = Vec::with_capacity(events.len());
-    for event in events {
-        let site = match event.kind {
-            COLD_COMPLETE if event.owner == 0 => {
-                let Some(observation) = cold.get(event.offset as usize) else {
-                    return Ok(None);
-                };
-                if observation.pc() != event.pc
-                    || observation.next() != event.end
-                    || !memory.is_code_current(&observation.source)
-                {
-                    return Ok(None);
-                }
-                Site::Cold(observation)
-            }
-            BLOCK | NUMERIC if event.owner != 0 => {
-                let Some(owner) = retained.get(&event.owner).copied() else {
-                    return Ok(None);
-                };
-                let pcs = if event.kind == BLOCK {
-                    let Ok(index) = owner
-                        .blocks
-                        .binary_search_by_key(&event.pc, |block| block.pc)
-                    else {
-                        return Ok(None);
-                    };
-                    let block = &owner.blocks[index];
-                    if event.end != block.end || event.offset >= block.count {
-                        return Ok(None);
-                    }
-                    &owner.block_pcs[(block.first + event.offset) as usize
-                        ..(block.first + block.count) as usize]
-                } else {
-                    if event.offset != 0
-                        || !owner.native.iter().any(|instruction| {
-                            instruction.pc == event.pc && instruction.next == event.end
-                        })
-                    {
-                        return Ok(None);
-                    }
-                    let Ok(index) = owner.instruction_pcs.binary_search(&event.pc) else {
-                        return Ok(None);
-                    };
-                    &owner.instruction_pcs[index..index + 1]
-                };
-                Site::Retained { owner, pcs }
-            }
-            _ => return Ok(None),
-        };
-        sites.push(site);
-    }
+    let Some(sites) = recorded_sites(memory, events, owners, cold) else {
+        return Ok(None);
+    };
     if sites[0].first() != root.0 {
         return Ok(None);
     }
