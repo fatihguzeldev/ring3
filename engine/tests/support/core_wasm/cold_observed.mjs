@@ -96,6 +96,19 @@ export function coldFixture(artifact,report,name,options,body) {
     context=raw.core_context_ptr()>>>0;assert(context>0&&context%8===0);
     assert.equal(bigint(context,120),0n,'cold initialization has no guest module identity');
     assert.equal(raw.core_code_len()>>>0,0,'cold initialization emits no guest module');
+    if(typeof raw.core_recovery_scratch_ptr==='function') {
+      const pointer=raw.core_recovery_scratch_ptr()>>>0;
+      assert(pointer>0&&pointer%8===0&&pointer+132096<=memory.buffer.byteLength,
+        'a completed cold lease releases its native recovery workspace');
+      const before=[bytes(context,128),bytes(engine.base,56),bytes(engine.base+FP,128),
+        bytes(engine.base+SIMD,160),bytes(engine.base+YMM,144)];
+      assert.equal(raw.core_cold_run(0),2,'a second exact zero-budget lease remains admissible');
+      assert.equal(raw.core_recovery_scratch_ptr()>>>0,pointer,'cold leases retain one stable disarmed allocation');
+      assert.equal(word(pointer,48),0);assert.equal(bigint(pointer,32),0n);assert.equal(bigint(pointer,152),0n);
+      assert.deepEqual([bytes(context,128),bytes(engine.base,56),bytes(engine.base+FP,128),
+        bytes(engine.base+SIMD,160),bytes(engine.base+YMM,144)],before,
+        'repeated zero-budget leases preserve every CPU and floating-point state byte');
+    }
     const Cache=artifact.CodeCache??CodeCache;
     cache=new Cache(engine,{budget:options.budget??50000,instructions:128,blocks:32,chain:true});
     cache.retainContext(context);
