@@ -39,7 +39,9 @@ function fixture(name,{entry=0x1000,target=0x1040,registers=[0,0,0x1080,0x3000,0
   const native = Object.fromEntries(Object.entries(instance.exports).filter(([name]) => name.startsWith('ring3_abi_v1_'))
     .map(([name,value]) => [name.slice(13),value]));
   const selectionCalls = {core_prepare:0,core_lookup:0,core_cold_run:0};
-  if(typeof native.core_chain_resolve_owned==='function')selectionCalls.core_chain_resolve_owned=0;
+  let tracePointer=0;
+  for(const name of ['core_chain_resolve_owned','core_chain_resolve_executable_owned'])
+    if(typeof native[name]==='function')selectionCalls[name]=0;
   if(traceSelection){
     const finish=native.core_trace_finish;
     native.core_trace_finish=(...args)=>{
@@ -56,7 +58,19 @@ function fixture(name,{entry=0x1000,target=0x1040,registers=[0,0,0x1080,0x3000,0
   }
   if (traceSelection) for (const name of Object.keys(selectionCalls)) {
     const operation = native[name];
-    native[name] = (...args) => {selectionCalls[name]++; return operation(...args);};
+    native[name] = (...args) => {
+      selectionCalls[name]++;
+      const route=name.startsWith('core_chain_resolve')?{operation:name,pc:args[1]>>>0,
+        source:String(new DataView(instance.exports.memory.buffer).getBigUint64(args[0]+120,true)),
+        trace:tracePointer?{
+          active:new DataView(instance.exports.memory.buffer).getUint32(tracePointer,true),
+          countdown:new DataView(instance.exports.memory.buffer).getUint32(tracePointer+32+129*24,true),
+          pending:new DataView(instance.exports.memory.buffer).getUint32(tracePointer+32+129*24+4,true),
+        }:null}:null;
+      const value=operation(...args);
+      if(route)(result.routes??=[]).push({...route,slot:value>>>0});
+      return value;
+    };
   }
   const api = Object.freeze(native);
   const engine = new Engine(api,instance.exports.memory,artifact.sha256);
@@ -99,6 +113,7 @@ function fixture(name,{entry=0x1000,target=0x1040,registers=[0,0,0x1080,0x3000,0
     const first = select(entry);cache.instructions=64;
     next??=select(target);select(entry);
     if(calleeFirst)status('core_import',0);
+    tracePointer=api.core_trace_pointer()>>>0;assert(tracePointer>0&&tracePointer%8===0);
     status('core_begin',0); active = true; status('core_end',0); active = false;
     const initialContext = bytes(cache.context,128), backing = word(cache.context,64), residentPages = word(cache.context,68);
     assert.equal(residentPages,16);
@@ -245,6 +260,11 @@ try {
     ...(crossPage?{codePage:crossPageCode,extraCodePages:[[0x5000,crossPageCallee]]}:{}),
   },t => {
     const iterations=manual?9:8192,totalWork=7*iterations;
+    const ports=[0x1300,0x1302,0x1307,0x1308,...(crossPage?[0x5340,0x5343,0x5346]:[0x1340,0x1343,0x1346])];
+    // These explicit legacy source bindings remain authority controls even when
+    // automatic execution later admits a separate hot suffix at a nonhot port.
+    for(const pc of ports)assert.equal(t.select(pc),pc<0x1340?t.first:t.next);
+    assert.equal(t.select(0x1300),t.first);
     const admissionsBefore=t.cache.stats().admissions;
     const callsBefore={...t.selectionCalls},originalModules=t.result.modules.slice();
     const originalExports=[t.first,t.next].map(unit=>({unit,run:unit.run,link:unit.link,publish:unit.publish}));
@@ -265,13 +285,22 @@ try {
       assert(overlayModule);assert.notEqual(overlay.id,t.first.id);assert.notEqual(overlay.id,t.next.id);
     }
     const stats=t.cache.stats(),overlays=[...t.cache.units.values()].filter(unit=>unit!==t.first&&unit!==t.next);
-    assert.equal(overlays.length,Number(manual),
-      'fully owned automatic execution keeps fragments; only an explicit manual request emits a trace');
+    assert.equal(overlays.length,1,'one certified automatic precise frontier or explicit manual trace is installed');
+    const automatic=manual?null:overlays[0],optimized=overlay??automatic;
+    const optimizedModule=t.result.modules.find(module=>module.id===String(optimized.id));
+    assert(optimizedModule);
+    if(automatic) {
+      const capture=t.result.traceAttempts.find(attempt=>attempt.status===0);assert(capture);
+      assert(capture.events.some(event=>event.kind===3&&event.pc===(crossPage?0x5340:0x1340)),
+        'automatic formation uses the real completed precise numerical operation');
+      assert.equal(automatic.pc,crossPage?0x5343:0x1343,'only the nonhot exact callee suffix gains a new executor');
+      assert.notEqual(automatic.id,t.first.id);assert.notEqual(automatic.id,t.next.id);
+    }
     const wantedOwners=originalOwners.slice();
-    if(manual)view(wantedOwners).setBigUint64(overlay.slot*8,overlay.id,true);
+    view(wantedOwners).setBigUint64(optimized.slot*8,optimized.id,true);
     assert.deepEqual(t.bytes(ownerPointer,4097*8),wantedOwners,'original reciprocal fragment slots remain unchanged');
     const wanted={stop:2,pc:0x130a,retired:totalWork,work:totalWork,remaining:0,
-      regions:2*iterations+1,id:t.first.id,selectedId:overlay?.id??t.first.id,sourceVersion,
+      regions:2*iterations+1,id:t.first.id,selectedId:optimized.id,sourceVersion,
       regs:[0,0,0,0x3000,0x4800,0,0,0],flags:0x46,
       wantedFp:fp(t.initialFp,{opcode:0x15b,fip:crossPage?0x5343:0x1343,fdp:0x3008,
         registers:{7:'00000000000000c00140'}})};
@@ -280,17 +309,16 @@ try {
     assert.equal(last.id,t.first.id);assert.equal(t.result.runs.length,1);
     assert.deepEqual([stats.runs,stats.coldRuns,stats.coldRetired,stats.coldWork],[1,0,0,0]);
     assert.deepEqual([stats.admissions,stats.installedUnits,stats.transientAdmissions,stats.transientRuns],
-      [2+Number(manual),2+Number(manual),0,0]);
-    assert.equal(stats.admissions,admissionsBefore+Number(manual));
+      [3,3,0,0]);
+    assert.equal(stats.admissions,admissionsBefore+1);
     assert.equal(stats.generatedModuleBytes,originalModules.reduce((sum,module)=>sum+module.wasmHex.length/2,0)
-      +(overlay?.bytes??0));
-    assert.deepEqual(t.result.modules.filter(module=>!overlay||module.id!==String(overlay.id)),originalModules);
-    assert.equal(t.result.modules.length,originalModules.length+Number(manual));
+      +optimized.bytes);
+    assert.deepEqual(t.result.modules.filter(module=>module.id!==String(optimized.id)),originalModules);
+    assert.equal(t.result.modules.length,originalModules.length+1);
     assert.equal(t.selectionCalls.core_cold_run,callsBefore.core_cold_run);
     if(!manual)assert.equal(t.selectionCalls.core_prepare,callsBefore.core_prepare);
     assert.equal(version(),beforeVersion+2n*BigInt(iterations));
 
-    const ports=[0x1300,0x1302,0x1307,0x1308,...(crossPage?[0x5340,0x5343,0x5346]:[0x1340,0x1343,0x1346])];
     for(const pc of ports) {
       const expected=manual&&pc===0x1300?overlay:pc<0x1340?t.first:t.next;
       assert.equal(t.select(pc),expected,'explicit public-port admission keeps its fragment except the manual trace root');
@@ -308,33 +336,71 @@ try {
     assert.equal(t.cache.stats().admissions,stats.admissions);
     assert.equal(t.cache.stats().generatedModuleBytes,stats.generatedModuleBytes);
 
-    // A fresh architectural input repeats the literal loop after connectivity
-    // learning. Import changes no source/binding authority.
-    const warmState=record('R3ST',56),warmView=view(warmState);
-    [0,9,0,0x3000,0x4800,0,0,0].forEach((value,index)=>warmView.setUint32(16+index*4,value,true));
-    warmView.setUint32(48,0x1300,true);warmView.setUint32(52,2,true);
-    new Uint8Array(t.engine.memory.buffer,t.engine.base,56).set(warmState);
-    new Uint8Array(t.engine.memory.buffer,t.engine.base+4236,128).set(t.initialFp);
-    t.cache.import();
-    // The port-admission controls above selected the callee last. Select the
-    // caller again so the real native capability matches the requested run.
-    const warmSelected=t.cache.select(0x1300);
-    assert.equal(warmSelected,manual?overlay:t.first);
-    const resolves=t.selectionCalls.core_chain_resolve_owned;
-    const {value:warm}=t.run(warmSelected,63);
-    assert.deepEqual([warm.retired,warm.work,warm.pc,warm.coreReason],[63,63,0x130a,2]);
-    wanted.retired+=63;wanted.exitRetired=63;wanted.work=63;wanted.workTotal=totalWork+63;
-    wanted.regions+=manual?1:19;wanted.id=warmSelected.id;wanted.selectedId=warmSelected.id;
-    t.expect(wanted);
-    assert.equal(t.selectionCalls.core_chain_resolve_owned,resolves,
-      'warm generated fragment transitions require zero native ownership resolution');
-    assert.equal(t.cache.stats().admissions,stats.admissions);
-    assert.equal(t.cache.stats().generatedModuleBytes,stats.generatedModuleBytes);
-    assert.equal(version(),beforeVersion+2n*BigInt(iterations+9));
+    // Repeat the complete literal input twice. The first replay can learn the
+    // new suffix boundary; the second must use its stable generated route.
+    const resolverCalls=()=>['core_chain_resolve_owned','core_chain_resolve_executable_owned']
+      .reduce((sum,name)=>sum+(t.selectionCalls[name]??0),0);
+    const warmResults=[];
+    for(let replay=0;replay<3;replay++) {
+      const warmState=record('R3ST',56),warmView=view(warmState);
+      [0,9,0,0x3000,0x4800,0,0,0].forEach((value,index)=>warmView.setUint32(16+index*4,value,true));
+      warmView.setUint32(48,0x1300,true);warmView.setUint32(52,2,true);
+      new Uint8Array(t.engine.memory.buffer,t.engine.base,56).set(warmState);
+      new Uint8Array(t.engine.memory.buffer,t.engine.base+4236,128).set(t.initialFp);
+      t.cache.import();
+      const warmSelected=t.cache.select(0x1300);assert.equal(warmSelected,manual?overlay:t.first);
+      const resolves=resolverCalls(),routeBefore=t.result.routes?.length??0;
+      const captureBefore=t.result.traceAttempts?.length??0;
+      const countdown=t.word(t.api.core_trace_pointer()>>>0,32+129*24);
+      assert(countdown>=1&&countdown<=1024);
+      const {value:warm}=t.run(warmSelected,63);
+      assert.deepEqual([warm.retired,warm.work,warm.pc,warm.coreReason],[63,63,0x130a,2]);
+      wanted.retired+=63;wanted.exitRetired=63;wanted.work=63;wanted.workTotal=totalWork+63*(replay+1);
+      wanted.regions+=manual?1:28;wanted.id=warmSelected.id;wanted.selectedId=warmSelected.id;
+      t.expect(wanted);
+      const learned=(t.result.routes??[]).slice(routeBefore);
+      const captures=(t.result.traceAttempts??[]).slice(captureBefore);
+      const sampled=learned.filter(route=>route.trace.pending===1);
+      const recording=learned.filter(route=>route.trace.active===1);
+      const ordinary=learned.filter(route=>route.trace.pending===0&&route.trace.active===0);
+      const pairs=[{pc:automatic?.pc,source:String(t.next.id),slot:automatic?.slot},
+        {pc:0x1307,source:String(automatic?.id),slot:t.first.slot},
+        {pc:crossPage?0x5340:0x1340,source:String(t.first.id),slot:t.next.slot}];
+      for(const route of learned)assert(pairs.some(pair=>pair.pc===route.pc&&pair.source===route.source&&pair.slot===route.slot),
+        'every native route retains an actual reciprocal callee/suffix/caller capability');
+      if(!manual&&replay===0) {
+        assert.equal(ordinary.length,1,'only the first replay validates the newly installed suffix boundary');
+        assert([automatic.pc,0x1307].includes(ordinary[0].pc));
+      } else assert.deepEqual(ordinary,[],'established ordinary routes never repeat native validation');
+      const sampleBound=Math.floor((27+1024-countdown)/1024);
+      assert(sampled.length<=sampleBound,'only the persistent 1024-route countdown permits a sampling miss');
+      assert(captures.length<=1);
+      for(const capture of captures) {
+        assert.equal(capture.status,18,'already-owned precise observations never emit a replacement executor');
+        assert.equal(capture.header[0],0);assert.equal(capture.header[2],129);assert.equal(capture.header[3],0);
+        assert(capture.header[1]<=129);
+        assert(sampled.length===1,'the observed warm capture is caused by actual generated sampling feedback');
+        assert(capture.events.some(event=>event.kind===3),'the real PC64 precise operation remains explicit in the capture');
+      }
+      assert(recording.length<=captures.reduce((sum,capture)=>sum+capture.header[1],0),
+        'active recording adds at most one native route per actual bounded event');
+      assert.equal(learned.length,ordinary.length+sampled.length+recording.length);
+      if(manual||replay===2) {
+        if(!manual)assert(countdown>27,'the post-capture replay is inside the reset sampling interval');
+        assert.deepEqual(learned,[],'the post-capture warm replay resolves entirely in generated Wasm');
+      }
+      assert.equal(resolverCalls()-resolves,learned.length);
+      assert.equal(t.cache.stats().admissions,stats.admissions);
+      assert.equal(t.cache.stats().generatedModuleBytes,stats.generatedModuleBytes);
+      assert.equal(version(),beforeVersion+2n*BigInt(iterations+9*(replay+1)));
+      warmResults.push({regions:warm.regions,nativeResolves:learned.length,countdown,
+        sampled:sampled.length,capturedRoutes:recording.length,ordinaryRoutes:ordinary.length,
+        captures:captures.map(capture=>({root:capture.args[0],events:capture.header[1],status:capture.status})),routes:learned});
+    }
     t.result.graph={iterations,manual,publicSelection,initialOwners:[String(t.first.id),String(t.next.id)],
-      admissionsBefore,admissionsAfter:t.cache.stats().admissions,
-      warm:{regions:warm.regions,nativeResolves:t.selectionCalls.core_chain_resolve_owned-resolves},
-      trace:overlay?{id:String(overlay.id),slot:overlay.slot,sha256:overlayModule.sha256}:null};
+      admissionsBefore,admissionsAfter:t.cache.stats().admissions,warm:warmResults,
+      trace:{kind:manual?'manual-root-only-trace':'automatic-precise-frontier',
+        id:String(optimized.id),pc:optimized.pc,slot:optimized.slot,sha256:optimizedModule.sha256}};
 
     const callerPort=0x1307;t.status('core_lookup',0,callerPort);
     t.expect({...wanted,selectedId:t.first.id});
@@ -347,12 +413,15 @@ try {
         // has no public callee alias, so resolve its own root to revoke it and
         // select the unchanged caller without executing stale trace bytes.
         t.neutral('stale manual root falls back to the unchanged caller',()=>t.status('core_lookup',0,0x1300));
+      } else {
+        t.neutral('stale automatic suffix revokes its independent source authority',
+          ()=>t.status('core_lookup',4,automatic.pc));
       }
       t.status('core_lookup',0,callerPort);
       t.neutral('unchanged caller remains executable',()=>t.status('core_lookup',0,callerPort));
       const owners=new DataView(t.engine.memory.buffer,t.api.core_link_owners_ptr()>>>0,4097*8);
       assert.equal(owners.getBigUint64(t.next.slot*8,true),0n);
-      if(overlay)assert.equal(owners.getBigUint64(overlay.slot*8,true),0n,'dependent manual trace is revoked with changed callee text');
+      assert.equal(owners.getBigUint64(optimized.slot*8,true),0n,'the dependent optimized owner is revoked with changed callee text');
       assert.equal(owners.getBigUint64(t.first.slot*8,true),t.first.id);
       t.begin();t.end();
       const currentSourceVersion=new DataView(t.engine.memory.buffer).getBigUint64(t.word(t.cache.context,88),true);
@@ -361,9 +430,9 @@ try {
       assert.notEqual(replacement.id,t.next.id);
       assert.equal(t.cache.units.get(t.first.id),t.first);
       assert(!t.cache.units.has(t.next.id));
-      if(overlay)assert(!t.cache.units.has(overlay.id));
-      assert.deepEqual([t.cache.stats().admissions,t.cache.units.size],[3+Number(manual),2]);
-      const stale=overlay??t.next;
+      assert(!t.cache.units.has(optimized.id));
+      assert.deepEqual([t.cache.stats().admissions,t.cache.units.size],[4,2]);
+      const stale=optimized;
       assert.equal(replacement.slot,stale.slot,'explicit replacement uses an actually revoked reciprocal slot');
       t.neutral('old identity cannot unlink a recycled slot',()=>t.status('core_unlink',4,stale.slot,
         Number(stale.id&0xffffffffn),Number(stale.id>>32n)));
@@ -371,7 +440,7 @@ try {
       assert.equal(hash(t.bytes(t.api.core_code_ptr()>>>0,t.api.core_code_len()>>>0)),
         originalModules.find(module=>module.id===String(t.first.id)).sha256);
       t.expect({...wanted,selectedId:t.first.id,sourceVersion:currentSourceVersion});
-      assert.equal(version(),beforeVersion+2n*BigInt(iterations+9)+1n);
+      assert.equal(version(),beforeVersion+2n*BigInt(iterations+27)+1n);
     }
   });
   report.complete = true; checkpoint(); console.log(JSON.stringify({complete:true,cases:report.cases.length,engineSha256:artifact.sha256}));

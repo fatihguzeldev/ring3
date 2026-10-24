@@ -30,9 +30,17 @@ export function runStableGraphCase(artifact,report) {
     const initialFp=bytes(engine.base+4236,128),initialSimd=bytes(engine.base+4364,160),initialYmm=bytes(engine.base+4612,144);
     const prepare=api.core_prepare;let prepares=0,resolves=0;
     api.core_prepare=(...args)=>{prepares++;return prepare(...args);};
-    const resolve=api.core_chain_resolve_owned;
+    const resolverName=typeof api.core_chain_resolve_executable_owned==='function'
+      ? 'core_chain_resolve_executable_owned':'core_chain_resolve_owned';
+    const resolve=api[resolverName];
     assert.equal(typeof resolve,'function','the actual stable-fragment resolver is present');
-    api.core_chain_resolve_owned=(...args)=>{resolves++;return resolve(...args);};
+    const routes=[];
+    api[resolverName]=(...args)=>{
+      const source=String(new DataView(memory.buffer).getBigUint64(args[0]+120,true));
+      resolves++;const slot=resolve(...args)>>>0;routes.push({pc:args[1]>>>0,source,slot});return slot;
+    };
+    const formations=[],finish=api.core_trace_finish;
+    api.core_trace_finish=(...args)=>{const status=finish(...args)>>>0;formations.push({args,status});return status;};
     cache=new CodeCache(engine,{budget,instructions:64,blocks:8,chain:true});
     const select=pc=>{
       const unit=cache.entry(pc),encoded=bytes(api.core_code_ptr()>>>0,api.core_code_len()>>>0);
@@ -58,14 +66,21 @@ export function runStableGraphCase(artifact,report) {
     assert.equal(run.coreReason,2,'a warmed existing graph completes its quota without a code-formation stop');
     assert.deepEqual([run.pc,run.retired,run.work],[0x1048,budget,budget]);
     const overlays=[...cache.units.values()].filter(unit=>unit!==first&&unit!==second);
-    assert.equal(overlays.length,0,'fully owned automatic edges learn connectivity without emitting another executor');
+    assert.equal(overlays.length,1,'the sampled recurrent graph emits one bounded window beside its source owners');
+    const window=overlays[0],accepted=formations.filter(item=>item.status===0);
+    assert.equal(accepted.length,1);
+    const windowRoot=accepted[0].args[0];assert([0x1000,0x1040].includes(windowRoot));
+    assert.equal(cache.select(windowRoot),window);
+    const windowBytes=bytes(api.core_code_ptr()>>>0,api.core_code_len()>>>0);
+    result.window={pc:windowRoot,identity:String(window.id),bytes:windowBytes.length,sha256:hash(windowBytes),slot:window.slot};
+    const wantedOwners=owners.slice();new DataView(wantedOwners.buffer).setBigUint64(window.slot*8,window.id,true);
     assert.equal(run.regions,2*iterations,'the full graph executes the same immutable fragments past 4096 edges');
     assert.equal(prepares,prepared,'fully owned captures require no additional preparation');
-    assert.equal(cache.units.size,2);assert.equal(cache.units.get(first.id),first);assert.equal(cache.units.get(second.id),second);
-    assert.equal(cache.admissions,2);assert.equal(cache.generatedModuleBytes,result.modules[0].bytes+result.modules[1].bytes);
-    assert.equal(cache.nativeCache.compiled,'2');assert.equal(cache.nativeCache.retainedUnits,'2');
+    assert.equal(cache.units.size,3);assert.equal(cache.units.get(first.id),first);assert.equal(cache.units.get(second.id),second);
+    assert.equal(cache.admissions,3);assert.equal(cache.generatedModuleBytes,result.modules[0].bytes+result.modules[1].bytes+window.bytes);
+    assert.equal(cache.nativeCache.compiled,'3');assert.equal(cache.nativeCache.retainedUnits,'3');
     assert.deepEqual([cache.transientAdmissions,cache.transientRuns],[0,0]);
-    assert.deepEqual(bytes(api.core_link_owners_ptr()>>>0,4097*8),owners,'both source slots survive without any new binding');
+    assert.deepEqual(bytes(api.core_link_owners_ptr()>>>0,4097*8),wantedOwners,'one independent window binding preserves both source slots');
     const wantedRegisters=registers.slice();wantedRegisters[1]=0;
     assert.deepEqual(Array.from({length:8},(_,i)=>word(cache.context,i*4)),wantedRegisters);
     assert.deepEqual([word(cache.context,32),word(cache.context,36),word(cache.context,40),word(cache.context,44)],
@@ -92,12 +107,12 @@ export function runStableGraphCase(artifact,report) {
       const warmState=state.slice(),warmView=view(warmState);
       warmView.setUint32(20,warmIterations,true);
       new Uint8Array(memory.buffer,engine.base,56).set(warmState);cache.import();
-      assert.equal(cache.select(0x1000),first);
-      const before=bytes(cache.context,128),resolveBefore=resolves;
-      cache.budget=warmBudget;const warm=cache.execute(first);
+      const warmSelected=cache.select(0x1000);assert.equal(warmSelected,windowRoot===0x1000?window:first);
+      const before=bytes(cache.context,128),resolveBefore=resolves,routeBefore=routes.length;
+      cache.budget=warmBudget;const warm=cache.execute(warmSelected);
       result.warm.push({...warm,id:String(warm.id),nativeResolves:resolves-resolveBefore});
       assert.deepEqual([warm.pc,warm.retired,warm.work,warm.coreReason,warm.regions],
-        [0x1048,warmBudget,warmBudget,2,2*warmIterations]);
+        [0x1048,warmBudget,warmBudget,2,2+Number(windowRoot!==0x1000)]);
       assert.equal(warm.id,second.id);
       const full=before.slice(),f=view(full);
       f.setUint32(4,0,true);f.setUint32(32,0x1048,true);f.setUint32(36,0x46,true);
@@ -112,18 +127,29 @@ export function runStableGraphCase(artifact,report) {
       assert.deepEqual(bytes(backing,expectedRam.length),expectedRam,'whole warm canonical backing');
       assert.equal(new DataView(memory.buffer).getBigUint64(versionPointer,true),
         beforeVersion+2n*BigInt(iterations+(replay+1)*warmIterations));
-      assert.equal(resolves,resolveBefore,'warm edges route without native ownership resolution');
-      assert.equal(prepares,preparedAfterPorts);assert.equal(cache.admissions,2);
-      assert.equal(cache.generatedModuleBytes,generated);assert.equal(cache.units.size,2);
+      const learned=routes.slice(routeBefore);
+      if(replay===0) {
+        const boundary=windowRoot===0x1000
+          ? {pc:0x1047,source:String(window.id),slot:second.slot}
+          : {pc:windowRoot,source:String(first.id),slot:window.slot};
+        assert.deepEqual(learned,[boundary],
+          'the first warm route validates only the newly installed window boundary');
+      } else assert.deepEqual(learned,[],'the repeated warm window and its learned side exit resolve in generated Wasm');
+      assert.equal(resolves-resolveBefore,learned.length);
+      assert.equal(prepares,preparedAfterPorts);assert.equal(cache.admissions,3);
+      assert.equal(cache.generatedModuleBytes,generated);assert.equal(cache.units.size,3);
+      assert.equal(cache.units.get(window.id),window);assert.equal(cache.table.get(window.slot),window.link);
+      assert.equal(hash(bytes(api.core_code_ptr()>>>0,api.core_code_len()>>>0)),result.modules[1].sha256);
     }
     for(const saved of originals){
       assert.equal(saved.unit.slot,saved.slot);assert.equal(saved.unit.run,saved.run);
       assert.equal(saved.unit.link,saved.link);assert.equal(saved.unit.publish,saved.publish);
       assert.equal(cache.table.get(saved.slot),saved.link);assert.equal(cache.publishers.get(saved.slot),saved.publish);
     }
-    assert.deepEqual(bytes(api.core_link_owners_ptr()>>>0,4097*8),owners);
+    assert.deepEqual(bytes(api.core_link_owners_ptr()>>>0,4097*8),wantedOwners);
     result.final={iterations,retired:budget,writes:2*iterations,version:String(beforeVersion+2n*BigInt(iterations)),
-      warmIterations:18,nativeResolves:resolves,ramSha256:hash(expectedRam),identities:[String(first.id),String(second.id)]};result.complete=true;
+      warmIterations:18,nativeResolves:resolves,ramSha256:hash(expectedRam),identities:[String(first.id),String(second.id)],
+      windowIdentity:String(window.id),formations,routes};result.complete=true;
   }catch(error){result.failure={message:String(error),stack:error.stack};throw error;}
   finally{if(cache?.open)api.core_end();if(opened)status('close',0);}
 }

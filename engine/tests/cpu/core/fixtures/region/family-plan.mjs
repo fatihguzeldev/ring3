@@ -86,6 +86,45 @@ function noNewModule(world,checkpoint) {
   assert.equal(world.cache.transientAdmissions,0);assert.equal(world.prepares,0);
 }
 
+const SAMPLE_INTERVAL=1024,CAPTURE_LIMIT=129;
+
+function boundedFeedback(world,transitions,learningEdges,execute) {
+  const cache=world.cache,descriptor=Object.getOwnPropertyDescriptor(cache,'installRecordedTrace');
+  const original=cache.installRecordedTrace,captures=[];
+  const pointer=world.raw.core_trace_pointer()>>>0;
+  const countdown=world.word(pointer,32+24*CAPTURE_LIMIT);
+  assert(countdown>=1&&countdown<=SAMPLE_INTERVAL);
+  const resolves=world.resolverCalls;
+  let value;
+  try {
+    Object.defineProperty(cache,'installRecordedTrace',{configurable:true,writable:true,value:function(...args) {
+      if(world.raw.core_trace_ready()===1)captures.push(world.recording());
+      return Reflect.apply(original,this,args);
+    }});
+    value=execute();
+  } finally {
+    if(descriptor)Object.defineProperty(cache,'installRecordedTrace',descriptor);
+    else delete cache.installRecordedTrace;
+  }
+  assert(captures.length<=1,'one lease has at most one bounded pending capture');
+  for(const capture of captures) {
+    assert.equal(capture.active,0);assert.equal(capture.overflow,0);
+    assert(capture.used<=CAPTURE_LIMIT);
+    assert(capture.events.every(event=>event.kind===1||event.kind===2),
+      'warm feedback records actual compiled operations, with no fabricated cold source');
+  }
+  // Every sampled miss represents 1024 eligible generated cross-owner routes.
+  // Active recording can add at most one native transition per recorded event;
+  // the four A→C, C→B, B→C, C→A edges are the only first-replay learning misses.
+  const sampleBound=Math.floor((transitions+SAMPLE_INTERVAL-countdown)/SAMPLE_INTERVAL);
+  const captureBound=captures.reduce((sum,capture)=>sum+capture.used,0);
+  const misses=world.resolverCalls-resolves,bound=learningEdges+sampleBound+captureBound;
+  assert(misses<=bound,'native feedback is bounded by sampling, actual capture length and finite edge learning');
+  (world.result.feedback??=[]).push({transitions,countdown,misses,sampleBound,captureBound,learningEdges,
+    captures:captures.map(capture=>({used:capture.used,root:capture.events[0]?.pc}))});
+  return{value,misses,captures};
+}
+
 function checkpoint(world) {
   return{admissions:world.cache.admissions,bytes:world.cache.generatedModuleBytes,
     modules:moduleCount(world),records:world.moduleRecords.size};
@@ -135,11 +174,14 @@ export function runFamilyPlanCases(artifact,report,{boundedOnly=false}={}) {
       const retained=checkpoint(world);
       let learned=false;
       for(const[count,fp]of[[9,'00000000000000a80340'],[9,'00000000000000a80340'],[2048,'00000000000018800b40']]) {
-        const resolves=world.resolverCalls;
-        const {run}=bridge(world,count,fp);
+        const feedback=boundedFeedback(world,2*count-2,learned?0:4,()=>bridge(world,count,fp));
+        const {run}=feedback.value;
         assert.equal(run.regions,2*count-1,'each immutable parent and bridge executes once per actual visit');
         assert.equal(run.chainedColdWork,0);noNewModule(world,retained);
-        if(learned)assert.equal(world.resolverCalls,resolves,'learned fragment edges resolve entirely in generated Wasm');
+        if(count>=SAMPLE_INTERVAL) {
+          assert(feedback.misses>0,'long warm execution reaches the real generated sampling path');
+          assert.equal(feedback.captures.length,1,'sampled hotness starts one bounded capture for this lease');
+        }
         learned=true;
       }
       for(const[parent,ports]of[[parents[0],A_PORTS],[parents[1],B_PORTS],[owner,C_PORTS]]) {
@@ -175,11 +217,14 @@ export function runFamilyPlanCases(artifact,report,{boundedOnly=false}={}) {
       const retained=checkpoint(world);
       let learned=false;
       for(const[count,fp]of[[9,'00000000000000a80340'],[9,'00000000000000a80340'],[2048,'00000000000018800b40']]) {
-        const resolves=world.resolverCalls;
-        const {run}=bridge(world,count,fp,0);
+        const feedback=boundedFeedback(world,2*count-2,learned?0:4,()=>bridge(world,count,fp,0));
+        const {run}=feedback.value;
         assert.equal(run.regions,2*count-1,'each immutable parent and the exact bridge prefix executes once per actual visit');
         assert.equal(run.chainedColdWork,0,'the resource refusal never forces known code back through cold execution');
-        if(learned)assert.equal(world.resolverCalls,resolves,'the bounded frontier uses generated stable continuations after learning');
+        if(count>=SAMPLE_INTERVAL) {
+          assert(feedback.misses>0,'bounded refusal still receives sampled generated feedback');
+          assert.equal(feedback.captures.length,1);
+        }
         learned=true;
         noNewModule(world,retained);
         for(const[parent,ports]of[[parents[0],A_PORTS],[parents[1],B_PORTS]])assertOwner(world,parent,ports);
