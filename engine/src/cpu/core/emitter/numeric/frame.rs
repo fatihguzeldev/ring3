@@ -1,4 +1,4 @@
-use super::super::{Output, mem};
+use super::super::{FP_PAYLOAD_TOKENS, FP_TAG_TOKENS, Output, mem};
 use crate::cpu::core::{
     fp_pool as p,
     region::{
@@ -100,11 +100,17 @@ pub(in crate::cpu::core::emitter) fn enter_block(out: &mut Output<'_>, _block: B
         86,
         super::pool::LOADED,
         super::pool::ADMITTED,
+        FP_TAG_TOKENS,
         EXACT_SUFFIX,
     ] {
         out.c().i32_const(0).local_set(local);
     }
-    out.c().i32_const(-1).local_set(SELECTED).end();
+    out.c()
+        .i64_const(0)
+        .local_set(FP_PAYLOAD_TOKENS)
+        .i32_const(-1)
+        .local_set(SELECTED)
+        .end();
 }
 
 fn physical_tags(out: &mut Output<'_>, tags: [TagRecipe; 8], writes: u8) {
@@ -145,6 +151,25 @@ pub(in crate::cpu::core::emitter) fn emit_edge(out: &mut Output<'_>, edge: &Edge
         return;
     }
     let t = &edge.fp_transfer;
+    let continuation = out
+        .fp_schedule
+        .continuation(
+            out.current_block.expect("FP edge has a source block"),
+            edge.target,
+        )
+        .clone();
+    assert_eq!(continuation.source_frame, edge.frame);
+    assert_eq!(continuation.target_frame, out.plan.block(edge.target).entry);
+    assert_eq!(
+        continuation.control.source,
+        out.plan.frame(edge.frame).fp.control_epoch
+    );
+    assert_eq!(
+        continuation.control.target,
+        out.plan.frame(continuation.target_frame).fp.control_epoch
+    );
+    assert_eq!(continuation.payload_sources, t.sources);
+    assert_eq!(continuation.tag_sources, t.tags);
     out.c()
         .local_get(84)
         .local_get(EXACT_SUFFIX)
@@ -178,13 +203,8 @@ pub(in crate::cpu::core::emitter) fn emit_edge(out: &mut Output<'_>, edge: &Edge
                 out.c().local_set(base + target as u32);
             }
         }
-        for source in [85, super::pool::LOADED, super::pool::ADMITTED] {
-            let preserved = if source == super::pool::ADMITTED {
-                256
-            } else {
-                0
-            };
-            out.c().local_get(source).i32_const(preserved).i32_and();
+        for source in [85, super::pool::LOADED] {
+            out.c().i32_const(0);
             for (target, cell) in t.sources.iter().enumerate() {
                 out.c()
                     .local_get(source)
@@ -198,6 +218,53 @@ pub(in crate::cpu::core::emitter) fn emit_edge(out: &mut Output<'_>, edge: &Edge
             }
             out.c().local_set(source);
         }
+        out.c().i64_const(0);
+        for (target, cell) in continuation.payload_sources.iter().enumerate() {
+            out.c()
+                .local_get(FP_PAYLOAD_TOKENS)
+                .i64_const(i64::from(cell.0) * i64::from(super::pool::TOKEN_BITS))
+                .i64_shr_u()
+                .i64_const(31)
+                .i64_and()
+                .i64_const(target as i64 * i64::from(super::pool::TOKEN_BITS))
+                .i64_shl()
+                .i64_or();
+        }
+        out.c().local_set(FP_PAYLOAD_TOKENS);
+    }
+    // The packed architectural tag is independent from the payload aliases.
+    // Remap its successful occupied/empty obligations separately.
+    if continuation
+        .tag_sources
+        .iter()
+        .enumerate()
+        .any(|(index, recipe)| *recipe != TagRecipe::Entry(index as u8))
+    {
+        out.c().i32_const(0);
+        for (target, recipe) in continuation.tag_sources.iter().enumerate() {
+            match *recipe {
+                TagRecipe::Entry(source) => {
+                    for half in [0, 8] {
+                        out.c()
+                            .local_get(FP_TAG_TOKENS)
+                            .i32_const(i32::from(source) + half)
+                            .i32_shr_u()
+                            .i32_const(1)
+                            .i32_and()
+                            .i32_const(target as i32 + half)
+                            .i32_shl()
+                            .i32_or();
+                    }
+                }
+                TagRecipe::Empty => {
+                    out.c().i32_const(1 << (target + 8)).i32_or();
+                }
+                _ => {
+                    out.c().i32_const(1 << target).i32_or();
+                }
+            }
+        }
+        out.c().local_set(FP_TAG_TOKENS);
     }
     let delta = i32::from(t.top_delta).rem_euclid(8);
     if delta != 0 {
@@ -837,10 +904,12 @@ pub(in crate::cpu::core::emitter) fn emit_normalizer(
         86,
         super::pool::LOADED,
         super::pool::ADMITTED,
+        FP_TAG_TOKENS,
         SELECTED,
     ] {
         c.i32_const(0).local_set(local);
     }
+    c.i64_const(0).local_set(FP_PAYLOAD_TOKENS);
     c.end();
 }
 
@@ -1153,10 +1222,12 @@ pub(in crate::cpu::core::emitter) fn emit_inline_commit(out: &mut Output<'_>) {
         86,
         super::pool::LOADED,
         super::pool::ADMITTED,
+        FP_TAG_TOKENS,
         SELECTED,
     ] {
         c.i32_const(0).local_set(local);
     }
+    c.i64_const(0).local_set(FP_PAYLOAD_TOKENS);
     c.end();
 }
 

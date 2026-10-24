@@ -1,4 +1,4 @@
-use super::super::{CTX, LOGICAL_ADDRESS, Output, mem};
+use super::super::{CTX, FP_PAYLOAD_TOKENS, FP_TAG_TOKENS, LOGICAL_ADDRESS, Output, mem};
 use crate::cpu::core::fp_pool as p;
 use crate::cpu::x86::ir::EffectiveAddress;
 use wasm_encoder::{BlockType, Function};
@@ -21,7 +21,15 @@ const BANK: u32 = 96;
 // The frame owns only demanded payloads. Physical pool records remain authoritative
 // for every untouched slot, including empty-stack ghosts.
 pub(super) fn enter(out: &mut Output<'_>) {
+    // Successful environment admission certifies both the imported local view
+    // and its masked CW. All view-discarding paths clear this token together
+    // with ACTIVE, so a prepared continuation needs neither query again.
     out.c()
+        .local_get(super::pool::ADMITTED)
+        .i32_const(super::pool::ENTERED)
+        .i32_and()
+        .i32_eqz()
+        .if_(BlockType::Empty)
         .local_get(ACTIVE)
         .i32_eqz()
         .if_(BlockType::Empty)
@@ -29,7 +37,7 @@ pub(super) fn enter(out: &mut Output<'_>) {
         .i32_load(mem(super::BANK_POINTER, 2))
         .local_tee(BANK)
         .i32_eqz()
-        .br_if(1);
+        .br_if(2);
     super::pool::initialize(out);
     for (offset, local) in [
         (p::CONTROL, CONTROL),
@@ -67,17 +75,26 @@ pub(super) fn enter(out: &mut Output<'_>) {
         .local_set(super::pool::LOADED)
         .i32_const(0)
         .local_set(super::pool::ADMITTED)
+        .i64_const(0)
+        .local_set(FP_PAYLOAD_TOKENS)
+        .i32_const(0)
+        .local_set(FP_TAG_TOKENS)
         .i32_const(1)
         .local_set(ACTIVE)
         .end();
-    resume(out);
     out.c()
         .local_get(CONTROL)
         .i32_const(63)
         .i32_and()
         .i32_const(63)
         .i32_ne()
-        .br_if(0);
+        .br_if(1)
+        .local_get(super::pool::ADMITTED)
+        .i32_const(super::pool::ENTERED)
+        .i32_or()
+        .local_set(super::pool::ADMITTED)
+        .end();
+    resume(out);
 }
 
 /// Scratch aliases are refreshed without rechecking an established environment.
@@ -195,8 +212,10 @@ pub(super) fn forget_view(out: &mut Output<'_>) {
         DIRTY,
         super::pool::LOADED,
         super::pool::ADMITTED,
+        FP_TAG_TOKENS,
         super::double::PENDING,
     ] {
         out.c().i32_const(0).local_set(local);
     }
+    out.c().i64_const(0).local_set(FP_PAYLOAD_TOKENS);
 }

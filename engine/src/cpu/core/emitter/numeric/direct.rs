@@ -145,6 +145,11 @@ pub(super) fn begin(out: &mut Output<'_>, operation: Operation, _next: u32) -> b
             clear_c1(out);
         }
         X87Operation::ChangeSign | X87Operation::Absolute => {
+            // Keep the complete successful source obligation across either
+            // representation branch before a reused destination is overwritten.
+            let source = frame::input_cell(out, 0);
+            let destination = frame::result_cell(out);
+            pool::capture_payload_tokens(out, source, PACKED);
             span::valid(out, 0);
             out.c().if_(BlockType::Empty);
             span::load(out, 0, FA);
@@ -159,6 +164,7 @@ pub(super) fn begin(out: &mut Output<'_>, operation: Operation, _next: u32) -> b
             out.c().else_();
             frame::write_raw_sign(out, matches!(operation, X87Operation::Absolute));
             out.c().end();
+            pool::restore_sign_tokens(out, destination, PACKED);
             clear_c1(out);
         }
         X87Operation::Binary {
@@ -251,9 +257,13 @@ fn occupied(out: &mut Output<'_>, logical: u8) {
         TagRecipe::Empty => {
             out.c().br(0);
         }
-        TagRecipe::Entry(_) => {
+        TagRecipe::Entry(index) => {
+            pool::tag_token(out, index, true);
+            out.c().i32_eqz().if_(BlockType::Empty);
             frame::tag(out, logical);
-            out.c().i32_const(3).i32_eq().br_if(0);
+            out.c().i32_const(3).i32_eq().br_if(1);
+            pool::remember_tag(out, index, true);
+            out.c().end();
         }
         _ => {}
     }
@@ -265,9 +275,13 @@ fn empty(out: &mut Output<'_>, logical: u8) {
     }
     match tag_recipe(out, logical) {
         TagRecipe::Empty => {}
-        TagRecipe::Entry(_) => {
+        TagRecipe::Entry(index) => {
+            pool::tag_token(out, index, false);
+            out.c().i32_eqz().if_(BlockType::Empty);
             frame::tag(out, logical);
-            out.c().i32_const(3).i32_ne().br_if(0);
+            out.c().i32_const(3).i32_ne().br_if(1);
+            pool::remember_tag(out, index, false);
+            out.c().end();
         }
         _ => {
             out.c().br(0);
@@ -300,10 +314,14 @@ fn prepare(out: &mut Output<'_>) {
             pool::admit_input(out, input.logical, kind);
         }
         if input.format {
-            let cell = u32::from(frame::input_cell(out, input.logical));
+            let cell = frame::input_cell(out, input.logical);
+            pool::payload_token(out, cell, pool::FORMAT_TOKEN);
+            out.c().i32_eqz().if_(BlockType::Empty);
             span::valid(out, input.logical);
             out.c().i32_eqz().if_(BlockType::Empty);
-            raw_normal_or_zero(out, cell, 1);
+            raw_normal_or_zero(out, u32::from(cell), 2);
+            out.c().end();
+            pool::remember_payload(out, cell, pool::FORMAT_TOKEN);
             out.c().end();
         }
     }

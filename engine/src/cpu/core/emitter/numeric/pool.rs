@@ -1,4 +1,4 @@
-use super::super::{Output, mem};
+use super::super::{FP_PAYLOAD_TOKENS, FP_TAG_TOKENS, Output, mem};
 use crate::cpu::core::{
     fp_pool as p,
     region::values::{FrameStateId, ProofKind, StorageCell},
@@ -7,9 +7,96 @@ use wasm_encoder::{BlockType, Function, ValType};
 
 pub(super) const POINTER: u32 = 152;
 pub(super) const LOADED: u32 = 153;
-// Low8 certify the complete Native24InSingle domain11 for the current local
-// value; bit256 independently certifies the admitted arithmetic control word.
+// The environment tokens have the same actual CW until a canonical barrier.
+// Payload and tag obligations are independent locals, never raw VALID bits.
 pub(super) const ADMITTED: u32 = 154;
+pub(super) const ENTERED: i32 = 512;
+pub(super) const TOKEN_BITS: u32 = 5;
+pub(super) const FORMAT_TOKEN: i64 = 16;
+
+fn obligation(kind: ProofKind) -> i64 {
+    i64::from(proof_bit(kind))
+}
+
+fn established(kind: ProofKind) -> i64 {
+    FORMAT_TOKEN
+        | match kind {
+            ProofKind::ExactF64 => 1,
+            ProofKind::BoundedF64 => 3,
+            ProofKind::Native24 => 15,
+            ProofKind::Native24InSingle => 11,
+            _ => unreachable!("only payload proofs have payload tokens"),
+        }
+}
+
+pub(super) fn payload_token(out: &mut Output<'_>, cell: u8, token: i64) {
+    out.c()
+        .local_get(FP_PAYLOAD_TOKENS)
+        .i64_const(token << (u32::from(cell) * TOKEN_BITS))
+        .i64_and()
+        .i64_eqz()
+        .i32_eqz();
+}
+
+pub(super) fn remember_payload(out: &mut Output<'_>, cell: u8, tokens: i64) {
+    out.c()
+        .local_get(FP_PAYLOAD_TOKENS)
+        .i64_const(tokens << (u32::from(cell) * TOKEN_BITS))
+        .i64_or()
+        .local_set(FP_PAYLOAD_TOKENS);
+}
+
+pub(super) fn capture_payload_tokens(out: &mut Output<'_>, cell: u8, destination: u32) {
+    out.c()
+        .local_get(FP_PAYLOAD_TOKENS)
+        .i64_const(i64::from(cell) * i64::from(TOKEN_BITS))
+        .i64_shr_u()
+        .i64_const(31)
+        .i64_and()
+        .local_set(destination);
+}
+
+/// FCHS/FABS preserve every admitted payload domain in the same control epoch.
+/// Their independent destination tag is still classified by the frame plan.
+pub(super) fn restore_sign_tokens(out: &mut Output<'_>, cell: u8, source: u32) {
+    let before = out.before_frame.expect("sign transfer has a before frame");
+    let after = out.after_frame.expect("sign transfer has an after frame");
+    assert_eq!(
+        out.plan.frame(before).fp.control_epoch,
+        out.plan.frame(after).fp.control_epoch
+    );
+    out.c()
+        .local_get(FP_PAYLOAD_TOKENS)
+        .i64_const(!(31i64 << (u32::from(cell) * TOKEN_BITS)))
+        .i64_and()
+        .local_get(source)
+        .i64_const(FORMAT_TOKEN)
+        .i64_or()
+        .i64_const(i64::from(cell) * i64::from(TOKEN_BITS))
+        .i64_shl()
+        .i64_or()
+        .local_set(FP_PAYLOAD_TOKENS);
+}
+
+pub(super) fn tag_token(out: &mut Output<'_>, index: u8, occupied: bool) {
+    let shift = u32::from(index) + if occupied { 0 } else { 8 };
+    out.c()
+        .local_get(FP_TAG_TOKENS)
+        .i32_const(1 << shift)
+        .i32_and();
+}
+
+pub(super) fn remember_tag(out: &mut Output<'_>, index: u8, occupied: bool) {
+    let shift = u32::from(index) + if occupied { 0 } else { 8 };
+    let opposite = u32::from(index) + if occupied { 8 } else { 0 };
+    out.c()
+        .local_get(FP_TAG_TOKENS)
+        .i32_const(!(1 << opposite))
+        .i32_and()
+        .i32_const(1 << shift)
+        .i32_or()
+        .local_set(FP_TAG_TOKENS);
+}
 
 /// Initialize from canonical bytes only after a real canonical import. Linked
 /// owners reuse the frame and never execute this eight-slot copy.
@@ -116,29 +203,13 @@ pub(super) fn initialize(out: &mut Output<'_>) {
 /// dominated uses carry an actual successful SSA admission, not another bit test.
 pub(super) fn admit_input(out: &mut Output<'_>, logical: u8, kind: ProofKind) {
     let cell = super::frame::input_cell(out, logical);
-    // The low eight bits certify the mode-correlated arithmetic domain, not
-    // merely a loaded or exact-f64 lane. Native24 is stronger under PC53 and
-    // must still validate its own certificate instead of consuming this bit.
-    let cached = kind == ProofKind::Native24InSingle;
-    if cached {
-        out.c()
-            .local_get(ADMITTED)
-            .i32_const(1 << cell)
-            .i32_and()
-            .i32_eqz()
-            .if_(BlockType::Empty);
-    }
-    super::direct::admit_loaded(out, logical, kind, u32::from(cached));
-    if matches!(kind, ProofKind::Native24 | ProofKind::Native24InSingle) {
-        out.c()
-            .local_get(ADMITTED)
-            .i32_const(1 << cell)
-            .i32_or()
-            .local_set(ADMITTED);
-    }
-    if cached {
-        out.c().end();
-    }
+    payload_token(out, cell, obligation(kind));
+    out.c().i32_eqz().if_(BlockType::Empty);
+    super::direct::admit_loaded(out, logical, kind, 1);
+    // This assignment is reached only after actual successful admission. The
+    // bit follows the complete value through a typed internal continuation.
+    remember_payload(out, cell, established(kind));
+    out.c().end();
 }
 
 pub(super) fn ensure_cell(
@@ -203,34 +274,41 @@ pub(super) fn mark_loaded(out: &mut Output<'_>, cell: u8) {
         .after_frame
         .expect("a produced payload has an after frame");
     let state = out.plan.frame(after);
-    let admitted = (0..8).any(|logical| {
-        out.plan.shape(after).cells[logical].0 == cell
-            && out.plan.proofs_at(after).iter().any(|&id| {
-                let proof = out.plan.proof(id);
-                proof.conditional.is_none()
-                    && proof.epoch == state.fp.control_epoch
-                    && matches!(
-                        proof.kind,
-                        ProofKind::Native24 | ProofKind::Native24InSingle
-                    )
-                    && proof
-                        .value
-                        .is_some_and(|value| state.fp.payload[logical].contains(value))
-            })
-    });
+    let mut tokens = FORMAT_TOKEN;
+    for logical in 0..8 {
+        if out.plan.shape(after).cells[logical].0 != cell {
+            continue;
+        }
+        for &id in out.plan.proofs_at(after) {
+            let proof = out.plan.proof(id);
+            if proof.conditional.is_none()
+                && proof.epoch == state.fp.control_epoch
+                && matches!(
+                    proof.kind,
+                    ProofKind::ExactF64
+                        | ProofKind::BoundedF64
+                        | ProofKind::Native24
+                        | ProofKind::Native24InSingle
+                )
+                && proof
+                    .value
+                    .is_some_and(|value| state.fp.payload[logical].contains(value))
+            {
+                tokens |= established(proof.kind);
+            }
+        }
+    }
     out.c()
         .local_get(LOADED)
         .i32_const(1 << cell)
         .i32_or()
         .local_set(LOADED)
-        .local_get(ADMITTED)
-        .i32_const(if admitted { 1 << cell } else { !(1 << cell) });
-    if admitted {
-        out.c().i32_or();
-    } else {
-        out.c().i32_and();
-    }
-    out.c().local_set(ADMITTED);
+        .local_get(FP_PAYLOAD_TOKENS)
+        .i64_const(!(31i64 << (u32::from(cell) * TOKEN_BITS)))
+        .i64_and()
+        .i64_const(tokens << (u32::from(cell) * TOKEN_BITS))
+        .i64_or()
+        .local_set(FP_PAYLOAD_TOKENS);
 }
 
 fn unchanged_input(out: &mut Output<'_>, logical: u8) {

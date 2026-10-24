@@ -56,7 +56,9 @@ pub(super) const SERVICE_PC: u32 = 173;
 pub(super) const SERVICE_NEXT: u32 = 174;
 pub(super) const SERVICE_TRANSFER: u32 = 175;
 pub(super) const FRESH_OWNER_ENTRY: u32 = 176;
-pub(super) const SCALAR_CACHE_BASE: u32 = 177;
+pub(super) const FP_PAYLOAD_TOKENS: u32 = 177;
+pub(super) const FP_TAG_TOKENS: u32 = 178;
+pub(super) const SCALAR_CACHE_BASE: u32 = 179;
 
 const BLOCK_BITS: u32 = 10;
 
@@ -400,6 +402,8 @@ fn run(
         (2, ValType::I64),
         (15, ValType::I32),
         (4, ValType::I32),
+        (1, ValType::I32),
+        (1, ValType::I64),
         (1, ValType::I32),
         (execution.scalar.cache_count() as u32, ValType::I32),
     ]);

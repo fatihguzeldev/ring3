@@ -4,6 +4,9 @@ use super::*;
 use crate::cpu::x86::{X87Binary, X87Format};
 use std::collections::{BTreeMap, BTreeSet};
 
+#[cfg(test)]
+mod continuation_tests;
+
 #[derive(Clone, Debug, Default)]
 pub(in crate::cpu::core) struct InputGuard {
     pub logical: u8,
@@ -24,6 +27,26 @@ pub(in crate::cpu::core) struct FpGuardPlan {
 
 pub(in crate::cpu::core) struct Guards {
     frames: Vec<FpGuardPlan>,
+    continuations: Vec<Vec<FpContinuation>>,
+}
+
+/// The edge itself changes no control word. Its complete payload parameters
+/// and independent tags rename successful obligations into the target epoch.
+/// This is not a proof granted by a storage layout or an external entry hint.
+#[derive(Clone, Debug)]
+pub(in crate::cpu::core) struct FpContinuation {
+    pub target: BlockId,
+    pub source_frame: FrameStateId,
+    pub target_frame: FrameStateId,
+    pub control: ControlEpochMap,
+    pub payload_sources: [StorageCell; 8],
+    pub tag_sources: [TagRecipe; 8],
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(in crate::cpu::core) struct ControlEpochMap {
+    pub source: EffectId,
+    pub target: EffectId,
 }
 
 #[derive(Default)]
@@ -118,9 +141,56 @@ impl Guards {
         &self.frames[frame.0]
     }
 
+    pub fn continuation(&self, source: BlockId, target: BlockId) -> &FpContinuation {
+        self.continuations[source.0]
+            .iter()
+            .find(|edge| edge.target == target)
+            .expect("FP continuation has an analyzed CFG edge")
+    }
+
     pub fn analyze(graph: &Region, plan: &RegionPlan) -> Self {
         let mut result = Self {
             frames: vec![FpGuardPlan::default(); plan.frames().len()],
+            continuations: graph
+                .blocks
+                .iter()
+                .enumerate()
+                .map(|(index, _)| {
+                    let source = plan.block(BlockId(index));
+                    source
+                        .edges
+                        .iter()
+                        .map(|edge| {
+                            let target_frame = plan.block(edge.target).entry;
+                            let from = plan.frame(edge.frame);
+                            let to = plan.frame(target_frame);
+                            FpContinuation {
+                                target: edge.target,
+                                source_frame: edge.frame,
+                                target_frame,
+                                control: ControlEpochMap {
+                                    source: from.fp.control_epoch,
+                                    target: to.fp.control_epoch,
+                                },
+                                payload_sources: std::array::from_fn(|logical| {
+                                    let cell = edge.fp_transfer.sources[logical];
+                                    for value in from.fp.payload[logical].values() {
+                                        assert_eq!(plan.storage(value).unwrap().cell, cell);
+                                    }
+                                    for value in to.fp.payload[logical].values() {
+                                        assert_eq!(
+                                            plan.storage(value).unwrap().cell,
+                                            StorageCell(logical as u8)
+                                        );
+                                    }
+                                    cell
+                                }),
+                                tag_sources: edge.fp_transfer.tags,
+                            }
+                        })
+                        .collect()
+                })
+                .collect(),
         };
         for (index, block) in graph.blocks.iter().enumerate() {
             // Every block is an advertised external entry. The first actual use
