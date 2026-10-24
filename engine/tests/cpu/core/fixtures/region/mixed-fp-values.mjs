@@ -49,7 +49,7 @@ export function runMixedFpValueCases(fixture) {
     assert.equal(run.activations.length,1);assert.equal(run.helperCalls,0);assert.equal(run.preciseCalls,0);
     assert.equal(t.result.modules.length,1,'the real inline integer kernel preserves the same FP owner');
   });
-  fixture('mixed-fp-real-canonical-control-change-publishes-the-dirty-prefix',{
+  fixture('mixed-fp-typed-control-change-preserves-the-dirty-prefix',{
     segments:[[ROOT,'d903 d96b08 d95b04 ffe6']],registers,initialFlags:FLAGS,
     initialFp,control:0x27f,stateWitness:true,
     data:page=>page.set(Buffer.from('00006040aabbccdd7f00','hex')),
@@ -62,10 +62,10 @@ export function runMixedFpValueCases(fixture) {
     t.writeExpected(0x3004,'00006040');
     const run=t.check({pc:TARGET,retired:4,budget:4,flags:FLAGS,fp:wantedFp});
     for(const[offset,value]of[[32,TARGET],[40,4],[44,0],[112,0]])context.setUint32(offset,value,true);
-    assert.deepEqual(t.bytes(t.context(),128),expectedContext,'canonical CW mutation preserves the full scalar lease');
+    assert.deepEqual(t.bytes(t.context(),128),expectedContext,'typed CW mutation preserves the full scalar lease');
     assert.equal(t.version(),revision+1n);assert.deepEqual(t.bytes(t.api.core_code_ptr()>>>0,t.api.core_code_len()>>>0),encoded);
     t.result.semanticComplete=true;
-    assert.equal(run.helperCalls,1,'FLDCW remains an actual canonical FP-changing callback');
+    assert.equal(run.helperCalls,0,'typed FLDCW preserves the dirty value without a canonical callback');
     assert.equal(run.preciseCalls,0);assert.equal(run.activations.length,1);assert.equal(t.result.modules.length,1);
   });
   fixture('mixed-fp-inline-scalar-then-store-fault-retains-the-completed-dirty-value',{
