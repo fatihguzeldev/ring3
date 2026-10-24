@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
 import {Engine,KEY,record,view} from '../../../../../../sdk/runtime/engine.js';
 import {CodeCache as CurrentCodeCache} from '../../../../../../sdk/runtime/cache.js';
-import {cacheCallbacks,cacheResolver,resolverExport,forceNativeInspection} from '../link.mjs';
+import {cacheCallbacks,cacheResolver,resolverExport,forceNativeInspection,sourceInspectionApi} from '../link.mjs';
 import {readGeneratedModule} from './structure.mjs';
 import {instrumentWitnessModule,readWitness,setWitnessBank,resetWitnessMasks,witnessCounters} from './witness.mjs';
 
@@ -63,7 +63,7 @@ function runLinkedPoolCase(artifact,report,iterations) {
     },
   };
   try{
-    engine=new Engine(api,memory,artifact.sha256);status('open',0,12,...KEY);opened=true;engine.base=raw.arena_ptr()>>>0;
+    engine=new Engine(sourceInspectionApi(api,result),memory,artifact.sha256);status('open',0,12,...KEY);opened=true;engine.base=raw.arena_ptr()>>>0;
     const code=new Uint8Array(4096);
     code.set(unhex('d9c0ddd8d9c9ffe7')); // A: write empty ghost7, swap0/1, then scalar C.
     code.set(unhex('d9c94975bb900f0b'),0x40); // B: restore0/1; DEC/JNZ A; terminal NOP.

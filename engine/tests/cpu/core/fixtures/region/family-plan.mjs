@@ -29,7 +29,7 @@ function assertOwner(world,owner,ports) {
   const {unit}=owner;
   assert.equal(world.cache.units.get(owner.id),unit);
   for(const pc of ports) {
-    assert.equal(world.cache.select(pc),unit,'an exact historical port keeps its immutable owner');
+    assert.equal(world.selectSource(pc),unit,'an exact historical source port keeps its immutable owner');
     assert.equal(world.bigint(world.context,120),owner.id);
     const bytes=source(world);assert.equal(bytes.length,owner.bytes);assert.equal(hash(bytes),owner.sha256);
   }
@@ -103,7 +103,7 @@ function requireRecordedParents(world,parents,prefix=C) {
 function rotatePorts(world,owner,ports) {
   const retained=checkpoint(world);
   for(const pc of ports) {
-    world.reset({registers:bridgeRegisters(9),pc});const before=world.snapshot(),run=world.execute(0,pc);
+    world.reset({registers:bridgeRegisters(9),pc});const before=world.snapshot(),run=world.executeSource(0,pc);
     coldLiteral(world,before,run,{pc,retired:0,budget:0,registers:bridgeRegisters(9),flags:2,
       fp:before.fp,writes:[],versionWrites:0});
     assert.equal(run.id,owner.id);

@@ -90,16 +90,29 @@ export function instrumentWitnessModule(source,parsed,isSupport=false) {
   const readImport=parsed.imports.findIndex(item=>item.module==='ring3'&&item.name==='read');
   const writeImport=parsed.imports.findIndex(item=>item.module==='ring3'&&item.name==='write');
   const proof={addressBasis:'actual effective address minus diagnostic Context92 pointer',
-    canonical:[0,100],header:[512,640],records:[640,896],recordBytes:32,memorySites:0,normalizers:[],wideSnapshots:[]};
+    canonical:[0,100],header:[512,640],records:[640,896],recordBytes:32,memorySites:0,normalizers:[],wideSnapshots:[],arithmeticKernels:[],arithmeticStatus:[]};
   const instrumentBody=(raw,fn,bodyIndex)=>{
     const functionIndex=parsed.imports.length+bodyIndex,name=parsed.names.get(functionIndex);
     const type=parsed.types[parsed.functionTypes[bodyIndex]],params=type.parameters.length;
+    const arithmeticKernel=!isSupport&&new Set(['guest.fp.add','guest.fp.sub','guest.fp.rsub',
+      'guest.fp.mul','guest.fp.mul_exact','guest.fp.div','guest.fp.rdiv']).has(name);
+    const arithmeticStatus=!isSupport&&name==='guest.fp.status';
+    if(arithmeticKernel||arithmeticStatus){
+      const expected=arithmeticKernel?{parameters:[0x7c,0x7c,0x7f,0x7f],results:[0x7c,0x7f,0x7f,0x7f]}:
+        {parameters:[0x7f,0x7f,0x7c,0x7c,0x7c],results:[0x7f]};
+      assert.deepEqual(type,expected,'actual narrow arithmetic/status signature');
+      assert(!fn.ops.some(node=>node.op>=0x23&&node.op<=0x40||
+        [17,18,19,20,21,0xfc,0xfd].includes(node.op)||node.op===16&&
+        (!arithmeticKernel||node.call<parsed.imports.length||parsed.names.get(node.call)!=='guest.fp.status')),
+        'actual arithmetic kernel is pure and calls only its private pure status resolver');
+      (arithmeticKernel?proof.arithmeticKernels:proof.arithmeticStatus).push({functionIndex,name,parameters:type.parameters,results:type.results});
+    }
     const addr=params+fn.locals.reduce((sum,group)=>sum+group.count,0);
     const values={i32:addr+1,i64:addr+2,f32:addr+3,f64:addr+4,v128:addr+5};
     const counter=isSupport?new Map([['support.normalize_kernel','normalizer_calls'],
       ['support.materialize_numeric','materializer_calls'],['support.acquire_group','group_acquisitions'],
       ['support.translate_page','page_translations'],['support.flags','flags_calls'],
-      ['support.resolve_status','status_resolver_calls']]).get(name):name==='guest.run'?'body_entries':undefined;
+      ['support.resolve_status','status_resolver_calls']]).get(name):name==='guest.run'?'body_entries':arithmeticStatus?'status_resolver_calls':undefined;
     if(name==='support.normalize_kernel'){
       const loops=fn.ops.filter(node=>node.op===3).length;
       assert.equal(type.parameters.length,32);assert.equal(type.results.length,30);assert.equal(loops,1);
@@ -130,11 +143,18 @@ export function instrumentWitnessModule(source,parsed,isSupport=false) {
       if(!isSupport&&[0x21,0x22].includes(node.op)&&node.local===91)before.push(increment('fp_metadata_writes'));
       if(!isSupport&&node.op===0x20&&node.local===87&&fn.ops[i+1]?.op===0x41&&
         fn.ops[i+1].value===0xf3f&&fn.ops[i+2]?.op===0x71)before.push(increment('control_admissions'));
+      if(name==='guest.run'||arithmeticKernel){
+        if(node.op===0xa0)before.push(increment('fp_add_ops'));
+        if(node.op===0xb6)before.push(increment('fp_single_rounds'));
+        if(node.op===0xa2)before.push(increment('fp_multiply_ops'));
+        const following=fn.ops.slice(i+1,i+5);
+        if(node.op===0x20&&node.local===(arithmeticKernel?8:66)&&following[0]?.op===0xbd&&following[1]?.op===0x42&&
+          following[1].value===52n&&following[2]?.op===0x88&&following[3]?.op===0xa7)
+          before.push(increment('fp_result_admissions'));
+      }
       if(name==='guest.run'){
         if([0x21,0x22].includes(node.op)&&[85,153,177].includes(node.local))
           before.push(increment(node.local===85?'fp_valid_writes':node.local===153?'fp_loaded_writes':'fp_token_writes'));
-        if(node.op===0xa0)before.push(increment('fp_add_ops'));
-        if(node.op===0xb6)before.push(increment('fp_single_rounds'));
         if(node.op===0x20&&node.local===2)before.push(increment('scalar_eax_input_reads'));
         const following=fn.ops.slice(i+1,i+5);
         if(node.op===16&&node.call===canonicalImport)before.push(increment('canonical_calls'));
@@ -184,7 +204,6 @@ export function instrumentWitnessModule(source,parsed,isSupport=false) {
         }
         if(node.op===0x20&&node.local===151&&following[0]?.op===0x45&&following[1]?.op===4)
           before.push(increment('prefix_quota_queries'));
-        if(node.op===0xa2)before.push(increment('fp_multiply_ops'));
         if(node.op===0x20&&!transported.has(i)&&[20,25].includes(node.local)&&
           !(following[0]?.op===0x21&&following[0].local>=179))
           before.push(increment(node.local===20?'flag_kind_queries':'flag_width_queries'));
@@ -200,11 +219,11 @@ export function instrumentWitnessModule(source,parsed,isSupport=false) {
         if(node.op===0x20&&node.local===89&&following[0]?.op===0x20&&following[0].local===90&&
           following[1]?.op===0x41&&following[1].value>=0&&following[1].value<8&&following[2]?.op===0x6a)
           before.push(increment('fp_occupancy_queries'));
-        if(node.op===0x20&&node.local===66&&following[0]?.op===0xbd&&following[1]?.op===0x42&&
-          following[1].value===52n&&following[2]?.op===0x88&&following[3]?.op===0xa7)
-          before.push(increment('fp_result_admissions'));
         if(node.op===0x21&&node.local===100&&fn.ops[i-1]?.op===0x41&&
           fn.ops[i-1].value>=1&&fn.ops[i-1].value<=3)before.push(increment('fp_pending_recipe_writes'));
+        if(node.op===0x21&&node.local===100&&fn.ops[i-1]?.op===0x20&&fn.ops[i-1].local===43)
+          before.push(concat([setLocal(values.i32),local(values.i32),Uint8Array.of(4,0x40),
+            increment('fp_pending_recipe_writes'),Uint8Array.of(11),local(values.i32)]));
       }
       if(node.op>=0x28&&node.op<=0x3e||node.op===0xfd&&node.ext<=11){
         proof.memorySites++;

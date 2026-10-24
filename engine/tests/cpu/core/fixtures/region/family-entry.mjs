@@ -68,7 +68,7 @@ export function runFamilyEntryCases(artifact,report) {
         before=world.snapshot();
         const helperStart=world.helperCalls.length;
         const preciseStart=world.cache.preciseRuns;
-        run=world.execute(test.budget,test.entry);
+        run=world.executeSource(test.budget,test.entry);
         coldLiteral(world,before,run,{pc:test.pc,retired:test.budget,budget:test.budget,
           registers:test.registers,flags:test.flags,fp:test.fp,writes:[],versionWrites:0});
         world.result.runs.at(-1).entryCase=test.name;

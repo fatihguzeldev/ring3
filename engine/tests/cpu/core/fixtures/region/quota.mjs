@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
 import {Engine,KEY,record,view} from '../../../../../../sdk/runtime/engine.js';
 import {CodeCache} from '../../../../../../sdk/runtime/cache.js';
-import {resolverExport,forceNativeInspection} from '../link.mjs';
+import {resolverExport,forceNativeInspection,sourceInspectionApi} from '../link.mjs';
 
 const unhex=text=>Uint8Array.from(Buffer.from(text.replaceAll(' ',''),'hex'));
 const hash=bytes=>createHash('sha256').update(bytes).digest('hex');
@@ -43,7 +43,7 @@ export function runLinkedQuotaCase(artifact,report) {
     },
   });
   try {
-    engine=new Engine(api,memory,artifact.sha256);status('open',0,12,...KEY);opened=true;engine.base=raw.arena_ptr()>>>0;
+    engine=new Engine(sourceInspectionApi(api,result),memory,artifact.sha256);status('open',0,12,...KEY);opened=true;engine.base=raw.arena_ptr()>>>0;
     const code=new Uint8Array(4096),data=new Uint8Array(4096);
     // The loop's balanced pushes/pops predict logical slots6/7 empty on its backedge.
     // The external producer contradicts that contract. With quota1 only NOP retires;

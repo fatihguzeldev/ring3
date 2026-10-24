@@ -101,6 +101,31 @@ export function resolverExport(api) {
     :typeof api.core_chain_select==='function'?'core_chain_select':'core_chain_probe';
 }
 
+export function sourceLookup(cache,pc=cache.pc) {
+  cache.pristine();
+  assert.equal(cache.native.core_lookup(pc)>>>0,0,'explicit native source lookup retains its private port');
+  const context=cache.native.core_context_ptr()>>>0,buffer=cache.memory.buffer;
+  assert(context>0&&context%8===0&&context+128<=buffer.byteLength,'valid retained source context');
+  assert.equal(context,cache.context,'source lookup retains the existing CPU context');
+  const id=new DataView(buffer).getBigUint64(context+120,true),unit=cache.units.get(id);
+  assert(id!==0n&&unit,'the exact source owner is already instantiated and retained');
+  return unit;
+}
+
+export function sourceInspectionApi(api,result) {
+  if(typeof api.core_chain_resolve_executable_owned!=='function')return api;
+  const resolver=resolverExport(api);
+  result.manualSourceInspection={automaticFormation:false,resolver,
+    scope:'forced intermediate-state inspection through the retained legacy source-selection contract'};
+  // Keep every negotiated capability and its stable binding. These authored
+  // controls deliberately inspect short/private source ingress; ordinary
+  // executable selection is exercised separately by the natural SDK cases.
+  return Object.freeze({...api,core_chain_resolve_executable_owned:(context,pc,retired,remaining)=>{
+    assert(Number.isInteger(remaining)&&remaining>=0&&remaining<=0xffffffff,'actual live executable quota');
+    return api[resolver](context,pc,retired);
+  }});
+}
+
 export function bindCacheContinuation(cache,exports) {
   if(!cache.continuationCore)return;
   const pointer=cache.native.core_continuation_ptr()>>>0;

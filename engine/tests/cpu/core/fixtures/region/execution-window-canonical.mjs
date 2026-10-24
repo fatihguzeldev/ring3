@@ -138,7 +138,7 @@ export function runExecutionWindowCanonicalCases(artifact,report) {
     world.result.semanticComplete=true;
     for(const budget of[3,4]) {
       world.reset({pc:A,registers:REGS,flags:FLAGS,fp:initial});
-      const prefixBefore=world.snapshot(),prefixHelpers=world.helperCalls.length,run=world.execute(budget,A);
+      const prefixBefore=world.snapshot(),prefixHelpers=world.helperCalls.length,run=world.executeSource(budget,A);
       coldLiteral(world,prefixBefore,run,{pc:B+(budget===3?5:7),retired:budget,budget,
         registers:budget===3?[0xffffffff,...REGS.slice(1)]:ZEROED,flags:FLAGS,
         fp:fp(initial,{value:VALUE.five,fip:A}),writes:[],versionWrites:0});

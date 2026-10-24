@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
 import {Engine,KEY,record,view} from '../../../../../../sdk/runtime/engine.js';
 import {CodeCache} from '../../../../../../sdk/runtime/cache.js';
-import {resolverExport,forceNativeInspection} from '../link.mjs';
+import {resolverExport,forceNativeInspection,sourceInspectionApi} from '../link.mjs';
 
 const hex=bytes=>Buffer.from(bytes).toString('hex');
 const unhex=text=>Uint8Array.from(Buffer.from(text,'hex'));
@@ -237,7 +237,7 @@ function runLinkedStatusCase(artifact,report,{operation,code,opcode,left,right,k
     },
   });
   try {
-    engine=new Engine(api,memory,artifact.sha256);status('open',0,12,...KEY);opened=true;
+    engine=new Engine(sourceInspectionApi(api,result),memory,artifact.sha256);status('open',0,12,...KEY);opened=true;
     engine.base=raw.arena_ptr()>>>0;
     const codePage=new Uint8Array(4096),dataPage=new Uint8Array(4096);
     const segments=[[0x1000,`${code} ffe6`],[0x1040,'8d6d07 ffe7'],

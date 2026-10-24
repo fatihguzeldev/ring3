@@ -34,7 +34,7 @@ function remember(world,unit) {
 function assertRetained(world,remembered,pc) {
   assert.equal(world.cache.units.get(remembered.id),remembered.unit,'the same actual immutable SDK instance remains retained');
   for(const port of[pc,pc+1]) {
-    assert.equal(world.cache.select(port),remembered.unit,'both exact original instruction ports retain their owner');
+    assert.equal(world.selectSource(port),remembered.unit,'both exact original source instruction ports retain their owner');
     assert.equal(world.bigint(world.context,120),remembered.id);
     const source=selectedBytes(world);assert.equal(source.length,remembered.bytes);assert.equal(hash(source),remembered.sha256);
   }

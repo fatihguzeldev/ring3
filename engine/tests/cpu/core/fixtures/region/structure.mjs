@@ -768,7 +768,28 @@ export function inspectRegion(bytes,supportBytes) {
   });}while(changed);
   const reachable=new Set(),pending=[0];
   while(pending.length){const node=pending.pop();if(!reachable.has(node)){reachable.add(node);pending.push(...run.edges[node]);}}
-  const arithmetic=node=>node.op>=0xa0&&node.op<=0xa3;
+  const scalarArithmetic=node=>node.op>=0xa0&&node.op<=0xa3;
+  const arithmeticKernels=new Map();
+  const kernelNames=new Set(['guest.fp.add','guest.fp.sub','guest.fp.rsub','guest.fp.mul',
+    'guest.fp.mul_exact','guest.fp.div','guest.fp.rdiv']);
+  const forbidden=node=>node.op>=0x23&&node.op<=0x40||[17,18,19,20,21,0xfc,0xfd].includes(node.op);
+  for(const[index,name]of module.names)if(kernelNames.has(name)) {
+    assert(index>=module.imports.length,'the arithmetic kernel is defined in this owner');
+    const fn=defined(module,index),type=signature(module,index);
+    assert.deepEqual(type,{parameters:[0x7c,0x7c,0x7f,0x7f],results:[0x7c,0x7f,0x7f,0x7f]});
+    assert(!fn.ops.some(node=>forbidden(node)||node.op===16&&module.names.get(node.call)!=='guest.fp.status'),
+      'a cyclic arithmetic call reaches only a memory-free private numerical kernel');
+    for(const node of fn.ops.filter(node=>node.op===16)) {
+      assert(node.call>=module.imports.length,'private status resolution never imports a callback');
+      const status=defined(module,node.call);
+      assert.deepEqual(signature(module,node.call),{parameters:[0x7f,0x7f,0x7c,0x7c,0x7c],results:[0x7f]});
+      assert(!status.ops.some(node=>forbidden(node)||node.op===16),'private status resolution is a pure leaf');
+    }
+    const arithmetic=fn.ops.filter(scalarArithmetic).length;
+    assert(arithmetic>0,'the validated kernel contains actual scalar floating arithmetic');
+    arithmeticKernels.set(index,{index,name,arithmetic});
+  }
+  const arithmetic=node=>scalarArithmetic(node)||node.op===16&&arithmeticKernels.has(node.call);
   const cycles=exclude=>components(run.edges,new Set([...reachable].filter(index=>!exclude(run.ops[index]))))
     .filter(group=>group.some(index=>arithmetic(run.ops[index])))
     .map(group=>({operations:group.length,arithmetic:group.filter(index=>arithmetic(run.ops[index])).length}));
@@ -809,6 +830,7 @@ export function inspectRegion(bytes,supportBytes) {
         p[1]?.op===0x20&&p[1].local===48&&(!single||p[2]?.op===0xb6)?
         [{offset:node.offset,format:single?'f32':'f64',pointerLocal:52,valueLocal:48}]:[];
     }),
+    arithmeticKernels:[...arithmeticKernels.values()],
     arithmeticCycles:cycles(()=>false),withoutCanonicalization:cycles(canonical),
     withoutCanonicalizationOrDispatch:cycles(node=>canonical(node)||dispatch(node)),
     runtimeStackRotations:[...rotations].map(node=>node.offset),
@@ -833,7 +855,7 @@ export function inspectRegion(bytes,supportBytes) {
       const{imported,exported}=supportBinding(module,support,name);return{index:exported,ownerImport:imported,name,...signature(support,exported)};
     }),
     exitEpilogues:['guest.run'].map(name=>inspectExitEpilogue(module,name)),
-    limits:['narrow decoder for generated authored modules; scalar f64 arithmetic cycles only',
+    limits:['narrow decoder for authored modules; direct scalar f64 arithmetic or calls to verified pure numerical kernels',
       'a retained cycle proves a canonicalization-free emitted path, not its runtime frequency or speed']};
 }
 

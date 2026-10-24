@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
 import {Engine,KEY,record,view} from '../../../../../../sdk/runtime/engine.js';
 import {CodeCache} from '../../../../../../sdk/runtime/cache.js';
+import {sourceLookup} from '../link.mjs';
 
 const hash=bytes=>createHash('sha256').update(bytes).digest('hex');
 
@@ -99,7 +100,7 @@ function runInteriorCase(artifact,report,blocks) {
     const third=cache.execute(interior);assert.deepEqual([third.coreReason,third.pc,third.retired,third.work],[2,0x1005,1,1]);
     const prepareCount=result.selections.filter(row=>row.name==='core_prepare').length;
     const lookupCount=result.selections.filter(row=>row.name==='core_lookup').length;
-    const continuation=cache.select();assert.equal(continuation,original,'native lookup selects the retained executable interior port');
+    const continuation=sourceLookup(cache);assert.equal(continuation,original,'explicit source lookup selects the retained private interior port');
     assert.equal(result.selections.filter(row=>row.name==='core_prepare').length,prepareCount,'continuation does not prepare code');
     assert.equal(result.selections.filter(row=>row.name==='core_lookup').length,lookupCount+1,'actual native lookup validates continuation');
     const fourth=cache.execute(continuation);

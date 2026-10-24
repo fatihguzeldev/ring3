@@ -53,6 +53,19 @@ export function assertCoreNames(module, ownerEntry, identity) {
   const wrappers = ['guest.entry', 'guest.link', 'guest.publish_link'];
   names.push(...wrappers);
   if(precise)names.push('guest.hot_entry');
+  if (functions.length > names.length) {
+    names.push('guest.recovery_data');
+    const seen = new Set();
+    while (functions[names.length]?.[1].startsWith('guest.fp.') && functions[names.length][1] !== 'guest.fp.status') {
+      const name = functions[names.length][1];
+      assert.match(name,/^guest\.fp\.(?:add|sub|rsub|mul|mul_exact|div|rdiv)$/);
+      assert(!seen.has(name),'a numerical primitive is emitted only once per exact kernel key');
+      seen.add(name);names.push(name);
+    }
+    if (seen.size > 0) names.push('guest.fp.status');
+    const count = functions.length - names.length;
+    for (let index = 0; index < count; index++) names.push(`guest.recovery_data.${index}`);
+  }
   assert.deepEqual(functions, names.map((name, index) => [index, name]), 'names use actual function indices');
 }
 

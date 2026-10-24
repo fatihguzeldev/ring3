@@ -4,7 +4,7 @@ import {Engine,KEY,record,view} from '../../../../../../sdk/runtime/engine.js';
 import {CodeCache as CurrentCodeCache} from '../../../../../../sdk/runtime/cache.js';
 import {readGeneratedModule} from './structure.mjs';
 import {instrumentWitnessModule,readWitness,setWitnessBank,witnessCounters} from './witness.mjs';
-import {cacheCallbacks,cacheResolver,resolverExport} from '../link.mjs';
+import {cacheCallbacks,cacheResolver,resolverExport,sourceInspectionApi} from '../link.mjs';
 
 const ONE='0000000000000080ff3f',HALF='0000000080000080ff3f';
 const THREE_HALVES='0000000080010080ff3f',TWO_ULPS='0000000000020080ff3f',WIDE='00000000000000807f40';
@@ -172,7 +172,7 @@ export function runArithmeticOwnerCases(artifact,report) {
         const slot=raw[resolverExport(raw)](context,pc,selectionRetired)>>>0;assert.equal(slot,units.get(pc).slot);return slot;
       }};
     try{
-      engine=new Engine(api,memory,artifact.sha256);status('open',0,12,...KEY);opened=true;engine.base=raw.arena_ptr()>>>0;
+      engine=new Engine(sourceInspectionApi(api,result),memory,artifact.sha256);status('open',0,12,...KEY);opened=true;engine.base=raw.arena_ptr()>>>0;
       const code=new Uint8Array(4096),page=new Uint8Array(4096);data(page);
       code.set(Buffer.from('d903d84304ffe6','hex'));
       code.set(Buffer.from('d84304d84304d95b08ffe7','hex'),0x40);

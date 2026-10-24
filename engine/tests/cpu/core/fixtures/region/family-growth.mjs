@@ -24,7 +24,7 @@ function retained(world,unit) {
 function sameFamily(world,unit,saved,ports) {
   const admissions=world.cache.admissions,generated=world.cache.generatedModuleBytes,units=world.cache.units.size;
   for(const pc of ports){
-    assert.equal(world.cache.select(pc),unit,'every historical and newly observed port selects one family object');
+    assert.equal(world.selectSource(pc),unit,'every historical and newly observed source port selects one family object');
     assert.equal(world.bigint(world.context,120),saved.id,'the family native dictionary accompanies each port');
     assert.equal(hash(selectedSource(world)),saved.sourceHash);
     assert.equal(selectedSource(world).length,saved.sourceBytes);
@@ -116,7 +116,7 @@ export function runFamilyGrowthCases(artifact,report) {
         }
       }
       for(const pc of[...A_PORTS,...B_PORTS]){
-        world.reset({registers:REGISTERS,flags:2,pc});before=world.snapshot();run=world.execute(0,pc);
+        world.reset({registers:REGISTERS,flags:2,pc});before=world.snapshot();run=world.executeSource(0,pc);
         coldLiteral(world,before,run,{pc,retired:0,budget:0,registers:REGISTERS,flags:2,
           fp:before.fp,writes:[],versionWrites:0});
         assert.equal(run.id,B_PORTS.includes(pc)?grown.id:first.id,

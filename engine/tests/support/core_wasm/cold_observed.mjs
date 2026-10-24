@@ -24,7 +24,7 @@ export function coldFixture(artifact,report,name,options,body) {
   const word=(pointer,offset=0)=>new DataView(memory.buffer).getUint32(pointer+offset,true);
   const bigint=(pointer,offset=0)=>new DataView(memory.buffer).getBigUint64(pointer+offset,true);
   const setWord=(pointer,offset,value)=>new DataView(memory.buffer).setUint32(pointer+offset,value,true);
-  let prepares=0,resolverCalls=0,cache,engine,context=0,opened=false;
+  let prepares=0,resolverCalls=0,sourceReplay=false,cache,engine,context=0,opened=false;
   const numeric=(operation,pointer,pc,ordinal,args)=>{
     const call={operation,ordinal,identity:String(bigint(pointer,120)),pc,contextPc:word(pointer,32)};
     result.helperCalls.push(call);call.returned=raw[operation](...args);
@@ -43,6 +43,13 @@ export function coldFixture(artifact,report,name,options,body) {
     ...(typeof raw.core_chain_resolve_owned==='function'?{core_chain_resolve_owned:(...args)=>{
       resolverCalls++;return raw.core_chain_resolve_owned(...args);
     }}:{}),
+    ...(typeof raw.core_chain_resolve_executable_owned==='function'?{
+      core_chain_resolve_executable_owned:(pointer,pc,retired,remaining)=>{
+        resolverCalls++;
+        return sourceReplay?raw.core_chain_resolve_owned(pointer,pc,retired):
+          raw.core_chain_resolve_executable_owned(pointer,pc,retired,remaining);
+      },
+    }:{}),
   };
   const moduleDescriptor=Object.getOwnPropertyDescriptor(WebAssembly,'Module'),OriginalModule=WebAssembly.Module;
   const moduleRecords=new Map();
@@ -128,6 +135,36 @@ export function coldFixture(artifact,report,name,options,body) {
         const selected=options.referencePrepared?cache.entry(pc??cache.pc):
           pc===undefined?cache.select():cache.select(pc);
         const run=cache.execute(selected);result.runs.push({...run,id:run.id===null?null:String(run.id)});return run;
+      },
+      // Explicit retained-source controls exercise the legacy private geometry.
+      // Automatic execution above keeps the executable-only lookup policy.
+      selectSource(pc=cache.pc) {
+        assert.equal(raw.core_lookup(pc)>>>0,0,'explicit source lookup retains its exact private port');
+        const id=bigint(context,120),unit=cache.units.get(id);
+        assert(unit,'the exact source owner is already instantiated and retained');
+        return unit;
+      },
+      executeSource(budget,pc) {
+        cache.budget=budget;
+        const selected=this.selectSource(pc);
+        // Manual private-port replay isolates the retained owner's execution.
+        // Natural execute() still installs every completed automatic capture.
+        const installer=Object.getOwnPropertyDescriptor(cache,'installRecordedTrace');
+        const previousReplay=sourceReplay;
+        let run;
+        try {
+          Object.defineProperty(cache,'installRecordedTrace',{value:()=>{},configurable:true,writable:true});
+          sourceReplay=true;
+          run=cache.execute(selected);
+        }
+        finally {
+          sourceReplay=previousReplay;
+          if(installer)Object.defineProperty(cache,'installRecordedTrace',installer);
+          else delete cache.installRecordedTrace;
+        }
+        result.manualSourceReplay={automaticFormation:false,
+          adapter:'legacy source lookup + legacy owned resolver + real owned execution'};
+        result.runs.push({...run,id:run.id===null?null:String(run.id)});return run;
       },
       executeNative(budget) {
         // The SDK rejects Infrastructure as an execution error. Verify that

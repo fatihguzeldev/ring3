@@ -39,6 +39,9 @@ function runLinkedCase(artifact,report,withCold) {
   const instance=new WebAssembly.Instance(artifact.module,{ring3_observability:{now_ns:()=>0n}});
   const raw=Object.fromEntries(Object.entries(instance.exports)
     .filter(([key])=>key.startsWith('ring3_abi_v1_')).map(([key,value])=>[key.slice(13),value]));
+  const resolver=typeof raw.core_chain_resolve_executable_owned==='function'
+    ?'core_chain_resolve_executable_owned':resolverExport(raw);
+  result.resolver=resolver;
   const memory=instance.exports.memory;
   const bytes=(pointer,length)=>new Uint8Array(memory.buffer).slice(pointer,pointer+length);
   const word=(pointer,offset=0)=>new DataView(memory.buffer).getUint32(pointer+offset,true);
@@ -59,7 +62,7 @@ function runLinkedCase(artifact,report,withCold) {
   const api=Object.freeze({...raw,
     core_numeric:(...args)=>{result.numericCalls++;return raw.core_numeric(...args);},
     ...(typeof raw.core_numeric_owned==='function'?{core_numeric_owned:(...args)=>{result.numericCalls++;return raw.core_numeric_owned(...args);}}:{}),
-    [resolverExport(raw)]:(context,pc,selectionRetired)=>{
+    [resolver]:(context,pc,selectionRetired,remaining)=>{
       const first=result.probes.length===0;
       assert.equal(context,cache.context,'the live probe uses the retained CPU context');
       assert.equal(pc,first?registers[6]:0x1080,'the three authored units execute in order');
@@ -70,6 +73,8 @@ function runLinkedCase(artifact,report,withCold) {
       const retired=first?5:withCold?12:9;
       assert.equal(global(13),retired,'the linked instruction prefix remains exact');
       assert.equal(global(12),budget-retired,'the linked quota remains exact');
+      if(resolver==='core_chain_resolve_executable_owned')
+        assert.equal(remaining>>>0,budget-retired,'the actual resolver receives the live quota');
       assert.deepEqual([global(20),global(25),global(21),global(22),global(23),global(24)],
         first?[1,32,-1,1,0,0]:[6,32,0,0,1,1],
         'the ADD or ADC recipe remains deferred with its exact operands and carry');
@@ -95,7 +100,7 @@ function runLinkedCase(artifact,report,withCold) {
         assert.deepEqual(bank(),initialBank,'raw80 payloads and metadata are not packed at an intermediate compiled boundary');
         assert.deepEqual(bytes(context,48),initialContext,'GPRs, flags and work remain private at intermediate probes');
       }
-      const returned=raw[resolverExport(raw)](context,pc,selectionRetired)>>>0;
+      const returned=raw[resolver](context,pc,selectionRetired,remaining)>>>0;
       assert.equal(returned,first&&withCold?COLD:units.get(pc).slot,'the actual native cache chooses the authored owner');
       result.probes.push({pc,returned,retired,remaining:global(12),sequence:String(global(99)),
         canonicalRevision:String(revision()),bankHex:hex(bank()),active:global(84),dirty:global(86)});
