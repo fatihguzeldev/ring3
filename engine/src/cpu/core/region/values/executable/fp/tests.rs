@@ -364,7 +364,7 @@ fn popped_arithmetic_result_uses_its_own_post_pop_domain() {
 }
 
 #[test]
-fn canonical_environment_barrier_has_fresh_post_effect_inputs_and_kills_native_obligations() {
+fn canonical_environment_barrier_has_fresh_post_effect_tagged_inputs() {
     let (_, program) = plan(&[block(
         0x1000,
         &[
@@ -376,7 +376,6 @@ fn canonical_environment_barrier_has_fresh_post_effect_inputs_and_kills_native_o
     let effects: Vec<_> = program.block(BlockId(0)).effects().collect();
     assert!(matches!(effects[1].kind, EffectKind::Exact(_)));
     assert_ne!(effects[1].before.fp.epoch, effects[1].after.fp.epoch);
-    assert!(effects[1].after.fp.ingress.is_empty());
     assert!(matches!(
         effects[1].after.fp.payload[0],
         FpPayload::Tagged { .. }
@@ -1217,4 +1216,130 @@ fn typed_memory_comparisons_keep_exact_address_and_flags_comparisons_stay_canoni
     let effect = program.block(BlockId(0)).effects().next().unwrap();
     assert!(matches!(effect.kind, EffectKind::Exact(_)));
     assert!(matches!(effect.contract.fp, FpEffectClass::Barrier));
+}
+
+#[test]
+fn overwritten_loop_ghost_remains_tagged_for_a_fault_before_its_replacement() {
+    let blocks = [block(
+        0x1000,
+        &[
+            Operation::Move {
+                destination: Location32::Register(Register32::Edx),
+                source: Value32::Memory(EffectiveAddress {
+                    base: Some(Register32::Esi),
+                    ..Default::default()
+                }),
+            },
+            memory_fp(X87Operation::Load(X87Format::Float32), 0),
+            memory_fp(
+                X87Operation::Store {
+                    format: X87Format::Float32,
+                    pop: true,
+                    truncate: false,
+                },
+                4,
+            ),
+            jump(0x1000),
+        ],
+    )];
+    let graph = Region::from_blocks(&blocks, 0x1000).unwrap();
+    let hints = crate::cpu::core::region::values::flow::entries(&graph);
+    assert!(hints[0].native24[7]);
+    assert_eq!(hints[0].tags[7], Some(false));
+    let (values, program) = plan(&blocks);
+    let body = program.block(BlockId(0));
+    let FpPayload::Tagged {
+        low,
+        high,
+        valid,
+        certificate,
+        ..
+    } = body.entry.fp.payload[7]
+    else {
+        panic!("empty recovery ghost keeps its actual raw transport")
+    };
+    assert!(values.block(BlockId(0)).contract.guards.is_empty());
+    assert!(values.proofs_at(values.block(BlockId(0)).entry).is_empty());
+    let first = body.effects().next().unwrap();
+    assert!(matches!(first.kind, EffectKind::PlainRead32 { .. }));
+    assert_eq!(first.before.fp.payload, first.after.fp.payload);
+    assert_eq!(first.before.fp.payload[7], body.entry.fp.payload[7]);
+    let parameters = program.fp_parameters(BlockId(0));
+    assert_ne!(parameters.incoming_dirty & 0x80, 0);
+    let roots = parameters.roots(&body.entry.fp);
+    for value in [low, high, valid, certificate, body.entry.fp.tags[7]] {
+        assert!(
+            roots.contains(&value),
+            "early fault retains complete ghost authority"
+        );
+    }
+}
+
+#[test]
+fn incoming_native24_predictions_cannot_certify_a_tagged_multiply_result() {
+    let blocks = [
+        block(
+            0x1000,
+            &[
+                memory_fp(X87Operation::Load(X87Format::Float32), 0),
+                memory_fp(X87Operation::Load(X87Format::Float32), 4),
+                jump(0x2000),
+            ],
+        ),
+        block(
+            0x2000,
+            &[
+                fp(X87Operation::ChangeSign),
+                fp(X87Operation::Binary {
+                    kind: X87Binary::Multiply,
+                    destination: 0,
+                    source: 1,
+                    pop: false,
+                }),
+            ],
+        ),
+    ];
+    let graph = Region::from_blocks(&blocks, 0x1000).unwrap();
+    let hints = crate::cpu::core::region::values::flow::entries(&graph);
+    assert!(hints[1].native24[0] && hints[1].native24[1]);
+    let (values, program) = plan(&blocks);
+    let body = program.block(BlockId(1));
+    assert!(
+        body.entry
+            .fp
+            .payload
+            .iter()
+            .all(|payload| matches!(payload, FpPayload::Tagged { .. }))
+    );
+    assert!(values.proofs_at(values.block(BlockId(1)).entry).is_empty());
+    let effects: Vec<_> = body.effects().collect();
+    assert!(matches!(
+        effects[0].after.fp.payload[0],
+        FpPayload::Tagged { .. }
+    ));
+    let EffectKind::Fp(effect) = &effects[1].kind else {
+        panic!("multiply is a typed numeric consumer")
+    };
+    assert!(matches!(
+        effect.kind,
+        FpEffectKind::Binary {
+            exact_product: false,
+            ..
+        }
+    ));
+    assert!(matches!(
+        effects[1].after.fp.payload[0],
+        FpPayload::Native {
+            domain: NativeDomain::InSingle,
+            ..
+        }
+    ));
+    let producer = program.block(BlockId(0)).effects().nth(1).unwrap();
+    assert!(matches!(
+        producer.after.fp.payload[0],
+        FpPayload::Native {
+            domain: NativeDomain::Native24,
+            ..
+        }
+    ));
 }

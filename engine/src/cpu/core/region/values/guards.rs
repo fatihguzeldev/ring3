@@ -664,7 +664,7 @@ mod tests {
     }
 
     #[test]
-    fn incoming_contract_facts_keep_the_conditional_first_use_for_every_external_entry() {
+    fn incoming_predictions_keep_generic_guarded_first_use_for_every_external_entry() {
         let load = fp(X87Operation::Load(X87Format::Float32));
         let graph = Region::from_blocks(
             &[
@@ -686,10 +686,10 @@ mod tests {
         let values = RegionPlan::analyze(&graph);
         let guards = Guards::analyze(&graph, &values);
         let target = guards.at(values.block(BlockId(1)).entry);
-        assert!(target.enter && target.control && target.exact_mul);
+        assert!(target.enter && target.control && !target.exact_mul);
         assert_eq!(target.inputs.len(), 2);
         assert!(target.inputs.iter().all(|input| {
-            input.occupied && input.load && input.admit == Some(ProofKind::Native24)
+            input.occupied && input.load && input.admit == Some(ProofKind::Native24InSingle)
         }));
     }
 

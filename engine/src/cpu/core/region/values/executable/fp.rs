@@ -169,24 +169,6 @@ pub(in crate::cpu::core) struct FpMetadata {
     pub ds: ExecValueId,
 }
 
-#[derive(Clone, Copy, Debug)]
-pub(in crate::cpu::core) enum FpObligation {
-    Native {
-        logical: u8,
-        input: FpPayload,
-        value: ExecValueId,
-        domain: NativeDomain,
-    },
-    Occupied {
-        logical: u8,
-        tag: ExecValueId,
-    },
-    Empty {
-        logical: u8,
-        tag: ExecValueId,
-    },
-}
-
 #[derive(Clone, Debug)]
 pub(in crate::cpu::core) struct FpRecovery {
     pub payload: [FpPayload; 8],
@@ -201,8 +183,6 @@ pub(in crate::cpu::core) struct FpRecovery {
     /// Logical changed destinations relative to this block's actual TOP.
     pub written: u8,
     pub tag_written: u8,
-    /// These are executed by external ingress, never granted by entry hints.
-    pub ingress: Vec<FpObligation>,
 }
 
 fn input(
@@ -283,28 +263,7 @@ impl FpRecovery {
     ) -> Self {
         let frame = &values.frame(entry).fp;
         let point = ProgramPoint { block, prefix: 0 };
-        let mut recovery = Self::unknown(builder, point, frame);
-        for logical in 0..8 {
-            if matches!(frame.payload[logical], FpValue::ExactF64(..)) {
-                let input = recovery.payload[logical];
-                let FpPayload::Tagged { native: value, .. } = input else {
-                    unreachable!()
-                };
-                let domain = domain(values, entry, logical);
-                recovery.payload[logical] = FpPayload::Native {
-                    value,
-                    domain,
-                    epoch: frame.control_epoch,
-                };
-                recovery.ingress.push(FpObligation::Native {
-                    logical: logical as u8,
-                    input,
-                    value,
-                    domain,
-                });
-            }
-        }
-        recovery
+        Self::unknown(builder, point, frame)
     }
 
     fn unknown(builder: &mut ExecutableBuilder, point: ProgramPoint, frame: &FpFrame) -> Self {
@@ -342,7 +301,6 @@ impl FpRecovery {
             metadata,
             written: 0,
             tag_written: 0,
-            ingress: Vec::new(),
         }
     }
 

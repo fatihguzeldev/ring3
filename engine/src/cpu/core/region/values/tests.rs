@@ -75,17 +75,36 @@ fn arithmetic_keeps_mode_correlated_precision_without_narrowing_pc53() {
     ];
     let plan = RegionPlan::analyze(&Region::from_blocks(&blocks, 0x1000).unwrap());
     let contract = &plan.block(BlockId(1)).contract;
-    let payload = plan.frame(contract.frame).fp.payload[0];
-    assert!(contract.guards.iter().any(|&id| {
-        let proof = plan.proof(id);
-        proof.kind == ProofKind::Native24InSingle
-            && proof.value.is_some_and(|value| payload.contains(value))
-    }));
-    assert!(!contract.guards.iter().any(|&id| {
-        let proof = plan.proof(id);
-        proof.kind == ProofKind::Native24
-            && proof.value.is_some_and(|value| payload.contains(value))
-    }));
+    let FpValue::Tagged {
+        native,
+        valid,
+        proof,
+        ..
+    } = plan.frame(contract.frame).fp.payload[0]
+    else {
+        panic!("entry transport remains conditional")
+    };
+    assert_eq!(plan.proof(proof).value, Some(native));
+    assert_eq!(plan.proof(proof).conditional, Some(valid));
+    assert!(contract.guards.is_empty());
+    assert!(plan.proofs_at(contract.frame).is_empty());
+    let consumed = plan.instruction(BlockId(1), 0).after;
+    let payload = plan.frame(consumed).fp.payload[0];
+    for (kind, expected) in [
+        (ProofKind::Native24InSingle, true),
+        (ProofKind::BoundedF64, true),
+        (ProofKind::Native24, false),
+    ] {
+        assert_eq!(
+            plan.proofs_at(consumed).iter().any(|&id| {
+                let proof = plan.proof(id);
+                proof.kind == kind
+                    && proof.conditional.is_none()
+                    && proof.value.is_some_and(|value| payload.contains(value))
+            }),
+            expected
+        );
+    }
 }
 
 #[test]
@@ -154,40 +173,41 @@ fn secondary_constant_contract_requires_imported_register_equality() {
 }
 
 #[test]
-fn loop_admissions_and_occupancy_are_guarded_at_public_entry() {
+fn loop_transport_keeps_numeric_admission_at_the_actual_consumer() {
     let blocks = [
         block(0x1000, &[binary(), jump(0x2000)]),
         block(0x2000, &[binary(), jump(0x2000)]),
     ];
-    let plan = RegionPlan::analyze(&Region::from_blocks(&blocks, 0x1000).unwrap());
+    let graph = Region::from_blocks(&blocks, 0x1000).unwrap();
+    let hints = flow::entries(&graph);
+    assert!(hints[1].control_admitted && hints[1].native[0]);
+    let plan = RegionPlan::analyze(&graph);
     let contract = &plan.block(BlockId(1)).contract;
     assert!(contract.external);
-    assert!(
-        contract
-            .guards
-            .iter()
-            .any(|&id| plan.proof(id).kind == ProofKind::Control)
-    );
+    assert!(contract.guards.is_empty());
+    assert!(plan.proofs_at(contract.frame).is_empty());
     for index in 0..2 {
-        let values = plan.frame(contract.frame).fp.payload[index].values();
-        assert!(
-            contract
-                .guards
-                .iter()
-                .any(|&id| plan.proof(id).kind == ProofKind::Occupied
-                    && plan.proof(id).value.is_some_and(|v| values.contains(&v)))
-        );
-        assert!(matches!(
-            plan.frame(contract.frame).fp.payload[index],
-            FpValue::ExactF64(..)
-        ));
-        assert!(contract.guards.iter().any(|&id| {
-            let proof = plan.proof(id);
-            proof.kind == ProofKind::Native24InSingle
-                && proof.conditional.is_none()
-                && proof.value.is_some_and(|v| values.contains(&v))
-        }));
+        let FpValue::Tagged {
+            native,
+            valid,
+            proof,
+            ..
+        } = plan.frame(contract.frame).fp.payload[index]
+        else {
+            panic!("entry transport keeps its raw discriminator")
+        };
+        assert_eq!(plan.proof(proof).value, Some(native));
+        assert_eq!(plan.proof(proof).conditional, Some(valid));
     }
+    let after = plan.instruction(BlockId(1), 0).after;
+    assert!(plan.proofs_at(after).iter().any(|&id| {
+        let proof = plan.proof(id);
+        proof.kind == ProofKind::Control && proof.conditional.is_none()
+    }));
+    assert!(plan.proofs_at(after).iter().any(|&id| {
+        let proof = plan.proof(id);
+        proof.kind == ProofKind::Native24InSingle && proof.conditional.is_none()
+    }));
 }
 
 #[test]
@@ -463,7 +483,7 @@ fn binary_pop_result_and_popped_ghost_keep_separate_physical_destinations() {
 }
 
 #[test]
-fn native24_entry_fact_is_consumed_only_behind_an_actual_import_guard() {
+fn predicted_native24_entry_fact_does_not_license_transport_or_later_results() {
     let blocks = [
         block(
             0x1000,
@@ -478,25 +498,31 @@ fn native24_entry_fact_is_consumed_only_behind_an_actual_import_guard() {
             })],
         ),
     ];
-    let plan = RegionPlan::analyze(&Region::from_blocks(&blocks, 0x1000).unwrap());
+    let graph = Region::from_blocks(&blocks, 0x1000).unwrap();
+    assert!(flow::entries(&graph)[1].native24[0]);
+    let plan = RegionPlan::analyze(&graph);
     let target = plan.block(BlockId(1));
-    let FpValue::ExactF64(value, _) = plan.frame(target.entry).fp.payload[0] else {
-        panic!("successful imported contract has an exact native value");
+    let FpValue::Tagged {
+        native,
+        valid,
+        proof,
+        ..
+    } = plan.frame(target.entry).fp.payload[0]
+    else {
+        panic!("entry payload remains conditional")
     };
-    assert!(target.contract.guards.iter().any(|&id| {
+    assert_eq!(plan.proof(proof).value, Some(native));
+    assert_eq!(plan.proof(proof).conditional, Some(valid));
+    assert!(target.contract.guards.is_empty());
+    assert!(plan.proofs_at(target.entry).is_empty());
+    let producer = plan.instruction(BlockId(0), 0).after;
+    let produced = plan.frame(producer).fp.payload[0].values()[0];
+    assert!(plan.proofs_at(producer).iter().any(|&id| {
         let proof = plan.proof(id);
-        proof.kind == ProofKind::Native24 && proof.value == Some(value)
+        proof.kind == ProofKind::Native24
+            && proof.value == Some(produced)
+            && proof.conditional.is_none()
     }));
-    for kind in [
-        ProofKind::ExactF64,
-        ProofKind::Native24,
-        ProofKind::BoundedF64,
-    ] {
-        assert!(plan.proofs_at(target.entry).iter().any(|&id| {
-            let proof = plan.proof(id);
-            proof.kind == kind && proof.value == Some(value) && proof.conditional.is_none()
-        }));
-    }
     let edge = &plan.block(BlockId(0)).edges[0];
     assert_eq!(edge.fp_transfer.top_delta, 7);
     assert_eq!(edge.fp_transfer.sources, plan.shape(edge.frame).cells);
@@ -568,7 +594,7 @@ fn actual_simd_fast_success_preserves_the_renamed_fp_frame() {
 }
 
 #[test]
-fn actual_simd_fast_success_carries_fp_admission_facts_across_cfg_edges() {
+fn actual_simd_success_preserves_local_proofs_without_licensing_external_entry() {
     use crate::cpu::x86::simd::{SimdKind, SimdOperand, SimdOperation, SimdRegister};
     let operation = Operation::Simd(SimdOperation {
         kind: SimdKind::Move,
@@ -586,25 +612,37 @@ fn actual_simd_fast_success_carries_fp_admission_facts_across_cfg_edges() {
         block(0x1000, &[binary(), operation, jump(0x2000)]),
         block(0x2000, &[Operation::Nop]),
     ];
-    let plan = RegionPlan::analyze(&Region::from_blocks(&blocks, 0x1000).unwrap());
-    let contract = &plan.block(BlockId(1)).contract;
+    let graph = Region::from_blocks(&blocks, 0x1000).unwrap();
+    let hints = flow::entries(&graph);
+    assert!(hints[1].control_admitted && hints[1].native[0]);
+    let plan = RegionPlan::analyze(&graph);
+    let simd = plan.instruction(BlockId(0), 1);
+    assert_eq!(plan.frame(simd.before).fp, plan.frame(simd.after).fp);
+    assert_eq!(plan.proofs_at(simd.before), plan.proofs_at(simd.after));
     for kind in [
         ProofKind::Control,
         ProofKind::Occupied,
         ProofKind::Native24InSingle,
     ] {
-        assert!(
-            contract
-                .guards
-                .iter()
-                .any(|&id| plan.proof(id).kind == kind)
-        );
+        assert!(plan.proofs_at(simd.after).iter().any(|&id| {
+            let proof = plan.proof(id);
+            proof.kind == kind && proof.conditional.is_none()
+        }));
     }
-    assert!(
-        plan.proofs_at(contract.frame)
-            .iter()
-            .any(|&id| { plan.proof(id).kind == ProofKind::ExactF64 })
-    );
+    let contract = &plan.block(BlockId(1)).contract;
+    assert!(contract.guards.is_empty());
+    assert!(plan.proofs_at(contract.frame).is_empty());
+    let FpValue::Tagged {
+        native,
+        valid,
+        proof,
+        ..
+    } = plan.frame(contract.frame).fp.payload[0]
+    else {
+        panic!("external entry keeps actual transport")
+    };
+    assert_eq!(plan.proof(proof).value, Some(native));
+    assert_eq!(plan.proof(proof).conditional, Some(valid));
 }
 
 #[test]

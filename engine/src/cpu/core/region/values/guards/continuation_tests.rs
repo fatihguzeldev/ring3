@@ -70,12 +70,10 @@ fn prepared_native_values_have_an_explicit_epoch_renaming_but_external_use_stays
     );
     assert_ne!(edge.control.source, edge.control.target);
     let target = guards.at(edge.target_frame);
-    assert!(target.enter && target.control && target.exact_mul);
-    assert!(
-        target.inputs.iter().all(|input| {
-            input.occupied && input.load && input.admit == Some(ProofKind::Native24)
-        })
-    );
+    assert!(target.enter && target.control && !target.exact_mul);
+    assert!(target.inputs.iter().all(|input| {
+        input.occupied && input.load && input.admit == Some(ProofKind::Native24InSingle)
+    }));
 }
 
 #[test]
@@ -164,7 +162,7 @@ fn a_join_with_an_unknown_predecessor_does_not_promote_its_payload_contract() {
 }
 
 #[test]
-fn sign_changes_are_new_complete_payloads_in_the_same_admitted_domain() {
+fn sign_changes_keep_payload_identity_without_licensing_external_entry_hints() {
     let load = fp(X87Operation::Load(X87Format::Float32));
     for operation in [X87Operation::ChangeSign, X87Operation::Absolute] {
         let graph = Region::from_blocks(
@@ -186,7 +184,7 @@ fn sign_changes_are_new_complete_payloads_in_the_same_admitted_domain() {
             values.frame(sign.before).fp.control_epoch,
             values.frame(sign.after).fp.control_epoch
         );
-        assert!(guards.at(values.block(BlockId(1)).entry).exact_mul);
+        assert!(!guards.at(values.block(BlockId(1)).entry).exact_mul);
         let edge = guards.continuation(BlockId(0), BlockId(1));
         assert_eq!(
             edge.payload_sources[0],

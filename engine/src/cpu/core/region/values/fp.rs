@@ -21,42 +21,10 @@ pub(super) fn entry(
     let control_epoch = plan.allocate_effect(EffectKind::Control, None);
     let status_effect = plan.allocate_effect(EffectKind::Status, None);
     let metadata_effect = plan.allocate_effect(EffectKind::Metadata, None);
-    let (fp, mut guards, mut available) = input_fp(
-        plan,
-        block,
-        control_epoch,
-        status_effect,
-        metadata_effect,
-        facts,
-    );
-    if facts.control_admitted {
-        let proof = plan.allocate_proof(Proof {
-            value: None,
-            kind: ProofKind::Control,
-            epoch: control_epoch,
-            at: ProgramPoint { block, prefix: 0 },
-            conditional: None,
-        });
-        guards.push(proof);
-        available.push(proof);
-    }
-    for (i, fact) in facts.tags.into_iter().enumerate() {
-        if let Some(occupied) = fact {
-            let proof = plan.allocate_proof(Proof {
-                value: Some(fp.payload[i].values()[0]),
-                kind: if occupied {
-                    ProofKind::Occupied
-                } else {
-                    ProofKind::Empty
-                },
-                epoch: control_epoch,
-                at: ProgramPoint { block, prefix: 0 },
-                conditional: None,
-            });
-            guards.push(proof);
-            available.push(proof);
-        }
-    }
+    // entry predictions never license numeric representation, tags or control.
+    // actual producers and successful use-site guards establish those proofs.
+    let (fp, guards, available) =
+        input_fp(plan, block, control_epoch, status_effect, metadata_effect);
     (
         FrameState {
             pc,
@@ -77,11 +45,8 @@ fn input_fp(
     control_epoch: EffectId,
     status_effect: EffectId,
     metadata_effect: EffectId,
-    facts: flow::Facts,
 ) -> (FpFrame, Vec<ProofId>, Vec<ProofId>) {
     let point = ProgramPoint { block, prefix: 0 };
-    let mut guards = Vec::new();
-    let mut available = Vec::new();
     let payload = std::array::from_fn(|i| {
         let cell = StorageCell(i as u8);
         let native = input(plan, block, InputField::FpNative(i as u8), ValueType::F64);
@@ -97,40 +62,8 @@ fn input_fp(
             kind: ProofKind::ExactF64,
             epoch: control_epoch,
             at: point,
-            conditional: (!facts.native[i]).then_some(valid),
+            conditional: Some(valid),
         });
-        // A prepared internal edge establishes these facts. Arbitrary external
-        // state must pass the same entry adapter before this native contract runs.
-        if facts.native[i] {
-            available.push(proof);
-            if !facts.bounded[i] && !facts.native24[i] {
-                guards.push(proof);
-            }
-            for (kind, known) in [
-                (ProofKind::BoundedF64, facts.bounded[i]),
-                (ProofKind::Native24, facts.native24[i]),
-                (ProofKind::Native24InSingle, facts.native24_in_single[i]),
-            ] {
-                if known {
-                    let fact = plan.allocate_proof(Proof {
-                        value: Some(native),
-                        kind,
-                        epoch: control_epoch,
-                        at: point,
-                        conditional: None,
-                    });
-                    available.push(fact);
-                    if kind == ProofKind::Native24
-                        || (!facts.native24[i]
-                            && (kind == ProofKind::Native24InSingle
-                                || !facts.native24_in_single[i]))
-                    {
-                        guards.push(fact);
-                    }
-                }
-            }
-            return FpValue::ExactF64(native, proof);
-        }
         FpValue::Tagged {
             lo,
             hi,
@@ -159,8 +92,8 @@ fn input_fp(
             metadata_effect,
             metadata: MetadataRecipe::default(),
         },
-        guards,
-        available,
+        Vec::new(),
+        Vec::new(),
     )
 }
 
@@ -202,15 +135,7 @@ pub(super) fn kill(
     let control = plan.allocate_effect(EffectKind::Control, Some(point));
     let status = plan.allocate_effect(EffectKind::Status, Some(point));
     let metadata = plan.allocate_effect(EffectKind::Metadata, Some(point));
-    frame.fp = input_fp(
-        plan,
-        point.block,
-        control,
-        status,
-        metadata,
-        flow::Facts::default(),
-    )
-    .0;
+    frame.fp = input_fp(plan, point.block, control, status, metadata).0;
     frame.fp.metadata.canonical = true;
     *shape = FpShape {
         cells: std::array::from_fn(|i| StorageCell(i as u8)),

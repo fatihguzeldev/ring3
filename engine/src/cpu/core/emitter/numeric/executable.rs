@@ -8,8 +8,8 @@ pub(in crate::cpu::core::emitter) mod primitive;
 use super::super::{CTX, Output, mem};
 use super::{direct, double, frame, ieee, memory, pool};
 use crate::cpu::core::region::values::executable::fp::{
-    FpEffect, FpEffectKind, FpInput, FpObligation, FpOperand, FpPayload, FpRecovery, FpStatus,
-    FpValueNode, NativeDomain, StatusEffect,
+    FpEffect, FpEffectKind, FpInput, FpOperand, FpPayload, FpRecovery, FpStatus, FpValueNode,
+    NativeDomain, StatusEffect,
 };
 use crate::cpu::core::region::values::executable::{
     EffectKind, ExecValueId, FpEffectClass, OrderedEffect, ValueNode,
@@ -616,49 +616,6 @@ fn arithmetic_control(out: &mut Output<'_>, depth: u32) {
         .end();
 }
 
-fn admit_parameter(
-    out: &mut Output<'_>,
-    entry: &FpRecovery,
-    logical: u8,
-    input: FpPayload,
-    value: ExecValueId,
-    domain: NativeDomain,
-    depth: u32,
-) {
-    let point = crate::cpu::core::region::values::ProgramPoint {
-        block: out.current_block.expect("FP parameter belongs to an entry"),
-        prefix: 0,
-    };
-    // This adapter precedes every typed operation in the block. The actual
-    // physical input record is authoritative, including its independent tag.
-    record(out, point, logical);
-    out.c()
-        .local_get(HIGH)
-        .i32_load(mem(p::VALID, 2))
-        .local_get(HIGH)
-        .i32_load(mem(p::PROOFS, 2))
-        .i32_const(pool::proof_bit(domain.proof()))
-        .i32_and()
-        .i32_eqz()
-        .i32_eqz()
-        .i32_and()
-        .local_get(HIGH)
-        .i32_load(mem(p::PROOF_CONTROL, 2))
-        .local_get(87)
-        .i32_eq()
-        .i32_and()
-        .if_(BlockType::Empty);
-    let before = out.available.clone();
-    out.c()
-        .local_get(HIGH)
-        .f64_load(mem(p::NATIVE, 3))
-        .local_set(LEFT);
-    let first = otherwise(out, &before);
-    native(out, input, LEFT, domain, entry.control, depth + 1);
-    joined(out, first);
-    put(out, value, LEFT);
-}
-
 fn arithmetic(out: &mut Output<'_>, kind: X87Binary, exact_product: bool) {
     let kernel = super::super::PrivateKernel::Arithmetic(primitive::Kernel {
         kind,
@@ -1067,9 +1024,9 @@ mod tests {
     }
 }
 
-/// External adapter. Native block parameters are validated from their complete
-/// payloads; a reciprocal typed internal edge can enter with already defined SSA
-/// arguments. The runtime local-view branch distinguishes those actual paths.
+/// external entries snapshot complete tagged values without numeric admission.
+/// reciprocal internal edges already supplied these same typed arguments.
+/// actual consumers validate only the payload domain their operation requires.
 pub(in crate::cpu::core::emitter) fn emit_ingress(out: &mut Output<'_>, entry: &FpRecovery) {
     if out.native.is_empty() {
         return;
@@ -1089,19 +1046,6 @@ pub(in crate::cpu::core::emitter) fn emit_ingress(out: &mut Output<'_>, entry: &
     if parameters.imports {
         import_header(out);
         take(out, entry.control, 87);
-        for obligation in &entry.ingress {
-            if let FpObligation::Native {
-                logical,
-                input,
-                value,
-                domain,
-            } = *obligation
-            {
-                if parameters.payloads & (1 << logical) != 0 {
-                    admit_parameter(out, entry, logical, input, value, domain, 1);
-                }
-            }
-        }
         for &value in &required {
             out.demand(value);
             out.c().drop();
@@ -1113,8 +1057,8 @@ pub(in crate::cpu::core::emitter) fn emit_ingress(out: &mut Output<'_>, entry: &
     }
     out.c().end().i32_const(0).local_set(marker).br(1).end();
     out.available = before.clone();
-    // No operation completed on admission failure; the authoritative pool must
-    // stay untouched, even when the failed predicted parameter was native.
+    // no operation completed when the external bank is unavailable. the pool
+    // remains authoritative rather than projecting undefined entry arguments.
     out.c()
         .i32_const(0)
         .local_set(84)
@@ -1162,61 +1106,48 @@ fn stage_payload(
     out: &mut Output<'_>,
     source: FpPayload,
     target: FpPayload,
-    control: ExecValueId,
     targets: &mut Vec<ExecValueId>,
-    depth: u32,
 ) {
-    match target {
+    let FpPayload::Tagged {
+        low,
+        high,
+        native: target_native,
+        valid: target_valid,
+        certificate: target_certificate,
+    } = target
+    else {
+        unreachable!("FP block entries transport complete tagged payloads")
+    };
+    // numeric facts come from the actual source definition. transport preserves
+    // that certificate without admitting an unrelated incoming ghost.
+    match source {
         FpPayload::Native { value, domain, .. } => {
-            native(out, source, LEFT, domain, control, depth);
-            out.c().local_get(LEFT);
-            targets.push(value);
+            out.c().i64_const(0).i32_const(0);
+            out.demand(value);
+            out.c()
+                .i32_const(1)
+                .i32_const(domain.certificate_bits() as i32);
+        }
+        FpPayload::Opaque { low, high } => {
+            out.demand(low);
+            out.demand(high);
+            out.c().f64_const(0.0.into()).i32_const(0).i32_const(0);
         }
         FpPayload::Tagged {
             low,
             high,
-            native: target_native,
-            valid: target_valid,
-            certificate: target_certificate,
-        } => match source {
-            FpPayload::Native { value, domain, .. } => {
-                out.c().i64_const(0).i32_const(0);
-                out.demand(value);
-                out.c()
-                    .i32_const(1)
-                    .i32_const(domain.certificate_bits() as i32);
-                targets.extend([low, high, target_native, target_valid, target_certificate]);
-            }
-            FpPayload::Opaque {
-                low: source_low,
-                high: source_high,
-            } => {
-                out.demand(source_low);
-                out.demand(source_high);
-                out.c().f64_const(0.0.into()).i32_const(0).i32_const(0);
-                targets.extend([low, high, target_native, target_valid, target_certificate]);
-            }
-            FpPayload::Tagged {
-                low: source_low,
-                high: source_high,
-                native: source_native,
-                valid: source_valid,
-                certificate: source_certificate,
-            } => {
-                out.demand(source_low);
-                out.demand(source_high);
-                out.demand(source_native);
-                out.demand(source_valid);
-                out.demand(source_certificate);
-                targets.extend([low, high, target_native, target_valid, target_certificate]);
-            }
-        },
-        FpPayload::Opaque { low, high } => {
-            raw(out, source);
-            out.c().local_get(SIG).local_get(HIGH);
-            targets.extend([low, high]);
+            native,
+            valid,
+            certificate,
+        } => {
+            out.demand(low);
+            out.demand(high);
+            out.demand(native);
+            out.demand(valid);
+            out.demand(certificate);
         }
     }
+    targets.extend([low, high, target_native, target_valid, target_certificate]);
 }
 
 fn transfer_tag_word(out: &mut Output<'_>, source: &FpRecovery) {
@@ -1258,13 +1189,13 @@ pub(in crate::cpu::core::emitter) fn emit_edge(
     let marker = out.fp_entry_marker;
     let parameters = out.executable.fp_parameters(target_block).clone();
     out.c()
-        .block(BlockType::Empty)
-        .block(BlockType::Empty)
         .i32_const(0)
         .local_set(marker)
         .local_get(84)
         .if_(BlockType::Empty);
     let mut targets = Vec::new();
+    // common tagged parameters cannot fail a domain guard at this boundary.
+    // every source lane is staged before any target local is overwritten.
     if parameters.header {
         take(out, source.control, 87);
         // The actual carried CW is a typed argument. First-use consumers
@@ -1275,9 +1206,7 @@ pub(in crate::cpu::core::emitter) fn emit_edge(
                     out,
                     source.payload[logical],
                     target.payload[logical],
-                    source.control,
                     &mut targets,
-                    1,
                 );
             }
             if parameters.tags & (1 << logical) != 0 {
@@ -1339,21 +1268,7 @@ pub(in crate::cpu::core::emitter) fn emit_edge(
         .local_set(frame::SELECTED)
         .i32_const(target_block.0 as i32 + 1)
         .local_set(marker)
-        .end()
-        .br(1)
         .end();
-    out.available = before.clone();
-    // Source COUNT has already completed at this point. Recover the source
-    // state, then execute the target's current instruction exactly once.
-    let source_frame = out.plan.block(out.current_block.unwrap()).exit;
-    out.frame = Some(source_frame);
-    recover(out, source);
-    let pc = match out.plan.frame(out.plan.block(target_block).entry).pc {
-        crate::cpu::core::region::ResumePc::Exact(pc) => pc,
-        _ => unreachable!(),
-    };
-    out.exit(StopReason::ExactPrefix, Some(pc), 0);
-    out.c().end();
     out.available = before;
 }
 

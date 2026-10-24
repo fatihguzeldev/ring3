@@ -10,7 +10,7 @@ use crate::cpu::core::region::{
         ValueType,
         executable::{
             ExecValueId, ExecutableProgram, Expr32, FlagsOrigin, Recovery, ValueNode,
-            fp::{FpObligation, FpValueNode},
+            fp::FpValueNode,
         },
     },
 };
@@ -248,22 +248,6 @@ fn memberships(
                 0,
                 true,
             );
-            for obligation in &body.entry.fp.ingress {
-                match *obligation {
-                    FpObligation::Native { input, value, .. } => {
-                        use_values(
-                            program,
-                            &mut local_values,
-                            input.roots().into_iter().chain([value]),
-                            0,
-                            true,
-                        );
-                    }
-                    FpObligation::Occupied { tag, .. } | FpObligation::Empty { tag, .. } => {
-                        use_values(program, &mut local_values, [tag], 0, true);
-                    }
-                }
-            }
         }
         for effect in body.effects() {
             let before = effect.point.prefix * 2;

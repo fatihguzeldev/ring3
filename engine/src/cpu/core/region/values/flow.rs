@@ -178,8 +178,8 @@ pub(super) fn entries(region: &Region) -> Vec<Facts> {
             break;
         }
     }
-    // Cyclic entry hints remain guarded by actual imports. An external entry is
-    // not a fictitious unknown predecessor that erases generated loop proofs.
+    // cyclic facts remain predictions; common entry transport grants no numeric
+    // proof. actual consumers guard inputs and local producers license results.
     inputs.into_iter().map(PendingFacts::complete).collect()
 }
 
