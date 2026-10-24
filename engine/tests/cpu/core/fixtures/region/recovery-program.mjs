@@ -28,6 +28,19 @@ function format(bytes) {
   const dataFunctions=[...module.names].filter(([,name])=>name==='guest.recovery_data'||/^guest\.recovery_data\.\d+$/.test(name));
   const main=dataFunctions.filter(([,name])=>name==='guest.recovery_data');
   const dataIndices=new Set(dataFunctions.map(([index])=>index));
+  const bases=module.globalImports.flatMap((item,index)=>item.module==='ring3'&&item.name==='recovery.base'?[{...item,index}]:[]);
+  const sections=WebAssembly.Module.customSections(new WebAssembly.Module(bytes),'ring3.recovery');
+  const blob=sections.length===1&&sections[0].byteLength>=40?new Uint8Array(sections[0]):undefined;
+  let metadata;
+  if(blob){
+    const d=new DataView(blob.buffer,blob.byteOffset,blob.byteLength);
+    metadata={bytes:blob.byteLength,magic:Buffer.from(blob.subarray(0,4)).toString(),version:d.getUint32(4,true),
+      wordCount:d.getUint32(8,true),bits:d.getUint32(12,true),packedCount:d.getUint32(16,true),
+      dictionaryCount:d.getUint32(20,true),packedOffset:d.getUint32(24,true),dictionaryOffset:d.getUint32(28,true),
+      owner:String(d.getBigUint64(32,true)),
+      mode:d.getUint32(4,true)===2&&blob.byteLength>=48?d.getUint32(40,true):undefined,
+      highCount:d.getUint32(4,true)===2&&blob.byteLength>=48?d.getUint32(44,true):undefined};
+  }
   const at=(index,op,local)=>run.ops[index]?.op===op&&(local===undefined||run.ops[index].local===local);
   const zero=(index,local)=>at(index,0x41)&&run.ops[index].value===0&&at(index+1,0x21,local);
   const tokenZero=index=>at(index,0x42)&&run.ops[index].value===0n&&at(index+1,0x21,177);
@@ -52,12 +65,31 @@ function format(bytes) {
   const getterCalls=run.ops.filter(node=>node.op===16&&dataIndices.has(node.call)).map(node=>node.offset);
   const functions=dataFunctions.map(([index,name])=>{
     const type=module.types[module.functionTypes[index-module.imports.length]],fn=module.functions[index-module.imports.length];
-    const forbidden=fn?.ops.filter(node=>node.op>=0x23&&node.op<=0x40||
-      [17,18,19,20,21,0xfc,0xfd].includes(node.op)||node.op===16&&!dataIndices.has(node.call))??[];
-    return{index,name,type,bytes:fn?.raw.length,forbidden:forbidden.map(node=>({op:node.op,offset:node.offset}))};
+    const ops=fn?.ops??[],base=bases[0]?.index,guard=ops[3]?.frame;
+    const memoryRead=node=>[0x28,0x29,0x2d,0x2f].includes(node.op);
+    const forbidden=ops.filter(node=>node.op===3||node.op===14||node.op>=16&&node.op<=21||node.op===0x24||
+      node.op>=0x25&&node.op<=0x40&&!memoryRead(node)||[0xfc,0xfd].includes(node.op)||
+      node.op===0x23&&node.global!==base);
+    const loads=ops.filter(memoryRead),globals=ops.filter(node=>node.op===0x23);
+    const prefix=ops.slice(0,4).map(node=>node.op),suffix=ops.slice(-4).map(node=>node.op);
+    const crossing=loads[1]?.frames.find(frame=>{
+      const p=ops.slice(frame.open-5,frame.open);
+      return frame!==guard&&frame.kind===4&&frame.type===-2&&p.length===5&&
+        p[0].op===0x20&&p[0].local===2&&p[1].op===0x41&&p[1].value===metadata?.bits&&
+        p[2].op===0x6a&&p[3].op===0x41&&p[3].value===64&&p[4].op===0x4b;
+    });
+    const bounded=JSON.stringify(prefix)===JSON.stringify([0x20,0x41,0x49,4])&&ops[0].local===0&&
+      ops[1].value===metadata?.wordCount&&guard?.type===-2&&
+      loads.every(node=>node.frames.includes(guard))&&crossing!==undefined&&
+      loads.filter((_,index)=>index!==1).every(node=>!node.frames.includes(crossing))&&
+      JSON.stringify(suffix)===JSON.stringify([5,0x42,11,11])&&ops.at(-3)?.value===0n;
+    return{index,name,type,bytes:fn?.raw.length,forbidden:forbidden.map(node=>({op:node.op,offset:node.offset})),bounded,
+      loads:loads.map(node=>({op:node.op,align:node.align,offset:node.memoryOffset})),baseReads:globals.map(node=>node.global),
+      exported:[...module.exports.values()].includes(index)};
   });
   return{bytes:bytes.length,bodyBytes:run.raw.length,operators:run.ops.length,
-    mainGetters:main.length,projectionStarts,resetOrigins,getterCalls,functions,callbackSpine};
+    mainGetters:main.length,projectionStarts,resetOrigins,getterCalls,functions,callbackSpine,
+    metadataSections:sections.length,metadata,bases};
 }
 
 function contextLiteral(t,wanted) {
@@ -97,10 +129,40 @@ export function runRecoveryProgramCases(fixture) {
         assert.equal(witness.fp_single_rounds,single?count:0);
         assert.equal(proof.mainGetters,1,'one actual immutable recovery descriptor getter');
         assert(proof.getterCalls.length>0,'the actual guest body consumes the descriptor function');
-        assert(proof.functions.length>0);
+        assert.equal(proof.bases.length,1,'one immutable owner-bound recovery base replaces the code dispatcher');
+        assert.deepEqual(proof.bases[0],{module:'ring3',name:'recovery.base',valueType:0x7f,mutable:0,index:26});
+        assert.equal(proof.metadataSections,1,'the charged encoded owner contains exactly one portable metadata blob');
+        const metadata=proof.metadata;assert(metadata);
+        assert.equal(metadata.magic,'R3RD');assert.equal(metadata.version,2);assert.equal(metadata.owner,String(identity));
+        assert(metadata.wordCount>0&&metadata.dictionaryCount>0&&metadata.dictionaryCount<=metadata.wordCount);
+        assert.equal(metadata.bits,Math.max(1,Math.ceil(Math.log2(metadata.dictionaryCount))));
+        assert.equal(metadata.packedCount,Math.ceil(metadata.wordCount*metadata.bits/64));
+        assert.equal(metadata.packedOffset,48);assert.equal(metadata.dictionaryOffset,48+8*metadata.packedCount);
+        assert([0,1,2].includes(metadata.mode),'one compile-time dictionary representation is selected');
+        const entryBytes=metadata.mode===0?8:4+metadata.mode;
+        const highOffset=metadata.dictionaryOffset+entryBytes*metadata.dictionaryCount;
+        assert.equal(metadata.bytes,highOffset+4*metadata.highCount);
+        if(metadata.mode===0)assert.equal(metadata.highCount,0,'raw dictionaries have no high-word table');
+        else {
+          assert(metadata.highCount>0&&metadata.highCount<=(metadata.mode===1?256:65536));
+          if(metadata.mode===2)assert(metadata.highCount>256,'u16 indices are needed only beyond the u8 domain');
+          assert(entryBytes*metadata.dictionaryCount+4*metadata.highCount<8*metadata.dictionaryCount,
+            'split dictionaries are used only when they reduce immutable storage');
+        }
+        assert.equal(proof.functions.length,1,'metadata access uses one bounded getter, without chunk functions');
         for(const fn of proof.functions){
-          assert.deepEqual(fn.type,{parameters:[0x7f],results:[0x7e]},`${fn.name}: private i32→i64 constants`);
-          assert.equal(fn.forbidden.length,0,`${fn.name}: descriptors cannot read/write memory, globals or native callbacks`);
+          assert.deepEqual(fn.type,{parameters:[0x7f],results:[0x7e]},`${fn.name}: private i32→i64 metadata read`);
+          assert.equal(fn.forbidden.length,0,`${fn.name}: descriptors have no loops, dispatch tables, stores or callbacks`);
+          assert(fn.bounded,`${fn.name}: the unsigned word bound dominates every load and OOB returns zero`);
+          const packed=[{op:0x29,align:0,offset:48},{op:0x29,align:0,offset:48}];
+          const dictionary=metadata.mode===0?[{op:0x29,align:0,offset:metadata.dictionaryOffset}]:
+            [{op:0x28,align:0,offset:metadata.dictionaryOffset},
+              {op:metadata.mode===1?0x2d:0x2f,align:0,offset:metadata.dictionaryOffset+4},
+              {op:0x28,align:0,offset:highOffset}];
+          assert.deepEqual(fn.loads,[...packed,...dictionary],
+            'the bounded getter has exactly three raw or five split load sites, including the conditional packed crossing');
+          assert.deepEqual(fn.baseReads,Array(metadata.mode===0?3:5).fill(26));
+          assert.equal(fn.exported,false,'metadata is private to the guarded body');
         }
         assert.equal(proof.resetOrigins.shared.length,1,'one actual descriptor-driven FP projection executor');
         assert.equal(proof.resetOrigins.blockEntry.length,1,'one unchanged block-entry view reset');

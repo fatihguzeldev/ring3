@@ -387,12 +387,12 @@ pub(super) fn emit(out: &mut Output<'_>) {
     out.recovery = state;
 }
 
-pub(super) fn functions(
-    words: &[i64],
-    numeric: bool,
-    kernels: usize,
-) -> Vec<wasm_encoder::Function> {
-    data::functions(words, numeric, kernels)
+pub(super) fn metadata(words: &[i64], identity: u64) -> Vec<u8> {
+    data::encode(words, identity)
+}
+
+pub(super) fn getter(words: &[i64], base_global: u32) -> wasm_encoder::Function {
+    data::getter(words, base_global)
 }
 
 #[cfg(test)]

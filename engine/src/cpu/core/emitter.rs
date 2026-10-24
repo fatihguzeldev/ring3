@@ -24,8 +24,9 @@ use crate::cpu::x86::{
     ir::{BranchTarget, Condition, Location32, Operation},
 };
 use wasm_encoder::{
-    BlockType, CodeSection, EntityType, ExportKind, ExportSection, Function, FunctionSection,
-    ImportSection, MemArg, MemoryType, Module, NameMap, NameSection, TypeSection, ValType,
+    BlockType, CodeSection, CustomSection, EntityType, ExportKind, ExportSection, Function,
+    FunctionSection, GlobalType, ImportSection, MemArg, MemoryType, Module, NameMap, NameSection,
+    TypeSection, ValType,
 };
 
 pub(super) const CTX: u32 = 0;
@@ -169,9 +170,10 @@ fn emit_graph(
     let (body, recovery_data, arithmetic_kernels) =
         run(&graph, &plan, identity, native, family, spans);
     let has_arithmetic = !arithmetic_kernels.is_empty();
-    let arithmetic_helpers = arithmetic_kernels.len() + usize::from(has_arithmetic);
     let status_resolver = support::owner_defined(10 + arithmetic_kernels.len() as u32, numeric);
-    let recovery_functions = recovery::functions(&recovery_data, numeric, arithmetic_helpers);
+    let recovery_blob = recovery::metadata(&recovery_data, identity);
+    let recovery_base = link::GLOBAL_COUNT + 1;
+    let recovery_getter = recovery::getter(&recovery_data, recovery_base);
     let mut module = Module::new();
     let mut types = TypeSection::new();
     types.ty().function([ValType::I32; 2], [ValType::I32]);
@@ -271,6 +273,17 @@ fn emit_graph(
     imports.import("ring3", "precise", EntityType::Function(4));
     link::imports(&mut imports);
     support::imports(&mut imports, [3, 6, 9, 10, 12, 7, 7, 7, 13, 14, 15, 17]);
+    if !recovery_blob.is_empty() {
+        imports.import(
+            "ring3",
+            "recovery.base",
+            EntityType::Global(GlobalType {
+                val_type: ValType::I32,
+                mutable: false,
+                shared: false,
+            }),
+        );
+    }
     module.section(&imports);
     let mut functions = FunctionSection::new();
     for kind in [0, 4, 5, 11, 16, 0, 0, 8, 0] {
@@ -282,9 +295,6 @@ fn emit_graph(
     }
     if has_arithmetic {
         functions.function(9);
-    }
-    for _ in recovery_functions.iter().skip(1) {
-        functions.function(19);
     }
     module.section(&functions);
     let mut exports = ExportSection::new();
@@ -328,7 +338,7 @@ fn emit_graph(
         spans,
         (graph.is_observed && !family).then_some(entry),
     ));
-    code.function(&recovery_functions[0]);
+    code.function(&recovery_getter);
     for kernel in &arithmetic_kernels {
         code.function(&numeric::executable::primitive::emit(
             kernel,
@@ -337,9 +347,6 @@ fn emit_graph(
     }
     if has_arithmetic {
         code.function(&numeric::executable::primitive::emit_status());
-    }
-    for function in recovery_functions.iter().skip(1) {
-        code.function(function);
     }
     module.section(&code);
     let mut names = NameSection::new();
@@ -381,15 +388,14 @@ fn emit_graph(
     if has_arithmetic {
         functions.append(status_resolver, "guest.fp.status");
     }
-    for index in 1..recovery_functions.len() {
-        let name = format!("guest.recovery_data.{}", index - 1);
-        functions.append(
-            support::owner_defined(9 + arithmetic_helpers as u32 + index as u32, numeric),
-            &name,
-        );
-    }
     names.functions(&functions);
     module.section(&names);
+    if !recovery_blob.is_empty() {
+        module.section(&CustomSection {
+            name: "ring3.recovery".into(),
+            data: recovery_blob.into(),
+        });
+    }
     module.finish()
 }
 

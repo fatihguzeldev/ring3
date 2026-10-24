@@ -165,3 +165,99 @@ fn callback_spine_emits_only_modes_requested_by_the_authored_program() {
         String::from_utf8_lossy(&result.stderr)
     );
 }
+
+#[test]
+fn rejected_entries_never_load_poisoned_recovery_metadata() {
+    use crate::cpu::core::{
+        StopReason, compile_observed,
+        trace::{BLOCK, TraceEvent},
+    };
+    use std::{fmt::Write, process::Command};
+
+    let mut memory = AddressSpace::new(1).unwrap();
+    memory
+        .map_zeroed(
+            PageRange::new(GuestAddress(0x1000), 1).unwrap(),
+            Permissions::ALL,
+        )
+        .unwrap();
+    memory
+        .write(GuestAddress(0x1000), &[0x83, 0x03, 1, 0xff, 0xe6])
+        .unwrap();
+    let original = compile(&memory, GuestAddress(0x1000), CompileOptions::default()).unwrap();
+    let event = TraceEvent {
+        kind: BLOCK,
+        pc: 0x1000,
+        end: 0x1005,
+        offset: 0,
+        owner: original.identity(),
+    };
+    let code = compile_observed(
+        &memory,
+        GuestAddress(0x1000),
+        CompileOptions::default(),
+        &[event, event],
+        &[&original],
+        memory.code_source_version(),
+    )
+    .unwrap()
+    .unwrap();
+    assert_eq!(code.instruction_count(), 2);
+    assert!(code.supports_entry(0x1000));
+    assert!(!code.supports_entry(0x1003));
+    let mut script = String::from("const owner=Buffer.from('");
+    for byte in code.wasm() {
+        write!(&mut script, "{byte:02x}").unwrap();
+    }
+    script.push_str("','hex'),driver=Buffer.from('");
+    for byte in crate::cpu::core::dispatch::emit_dispatch() {
+        write!(&mut script, "{byte:02x}").unwrap();
+    }
+    write!(
+        &mut script,
+        "','hex'),identity={}n,expected=[{},{},{},{},{}];",
+        code.identity(),
+        StopReason::Infrastructure as u32,
+        StopReason::Infrastructure as u32,
+        StopReason::Debug as u32,
+        StopReason::NeedCode as u32,
+        StopReason::CodeInvalidated as u32,
+    )
+    .unwrap();
+    script.push_str(
+        r#"
+const assert=require('node:assert/strict'),module=new WebAssembly.Module(owner);
+assert.deepEqual(WebAssembly.Module.imports(module).filter(x=>x.name==='recovery.base'),
+  [{module:'ring3',name:'recovery.base',kind:'global'}]);
+assert.equal(WebAssembly.Module.customSections(module,'ring3.recovery').length,1);
+const memory=new WebAssembly.Memory({initial:2}),table=()=>new WebAssembly.Table({element:'anyfunc',initial:4097,maximum:4097});
+const unexpected=()=>assert.fail('a rejected entry cannot invoke a native service');
+const support=new WebAssembly.Instance(new WebAssembly.Module(driver),{ring3:{memory,functions:table(),publishers:table(),
+  probe:unexpected,cold:unexpected}}).exports;
+const instance=new WebAssembly.Instance(module,{ring3:{...support,memory,read:unexpected,write:unexpected,precise:unexpected,
+  'support.abi':support.supportAbi,'recovery.base':new WebAssembly.Global({value:'i32',mutable:false},-1)}});
+const view=new DataView(memory.buffer),put=(at,value)=>view.setUint32(at,value>>>0,true),CTX=256;
+for(let kind=0;kind<5;kind++){
+  new Uint8Array(memory.buffer).fill(0);
+  new Uint8Array(memory.buffer,2048,512).fill(0xa5);
+  [0x13579bdf,3,0x2468ace0,0x3000,0x4800,0x89abcdef,0x1800,0x76543210].forEach((value,index)=>put(CTX+4*index,value));
+  put(CTX+32,kind===3?0x1003:0x1000);put(CTX+36,kind===2?0x102:2);
+  put(CTX+40,0x11223344);put(CTX+44,7);put(CTX+80,1024);put(CTX+88,1032);put(CTX+112,kind===0?0:1);
+  view.setBigUint64(1024,0x123456789abcdef0n,true);view.setBigUint64(1032,kind===4?12n:11n,true);
+  view.setBigUint64(CTX+96,11n,true);view.setBigUint64(CTX+120,identity+(kind===1?1n:0n),true);
+  const before=new Uint8Array(memory.buffer).slice();
+  assert.equal(instance.exports.run(CTX,7),expected[kind],'the exact entry guard rejects before any poisoned metadata load');
+  assert.deepEqual(new Uint8Array(memory.buffer),before,'rejection preserves complete Context, backing, ghosts and authority bytes');
+}
+"#,
+    );
+    let result = Command::new("node")
+        .args(["-e", &script])
+        .output()
+        .expect("execute generated owner rejection guards with poisoned metadata");
+    assert!(
+        result.status.success(),
+        "{}",
+        String::from_utf8_lossy(&result.stderr)
+    );
+}
