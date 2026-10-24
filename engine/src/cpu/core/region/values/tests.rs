@@ -293,21 +293,38 @@ fn explicit_fp_output_cell_survives_aliases_and_a_nonzero_destination_pop() {
 }
 
 #[test]
-fn helper_and_control_change_kill_all_previous_admission_proofs() {
+fn a_control_change_rebases_exact_payloads_without_inventing_stronger_admission() {
     let plan = single(&[binary(), fp(X87Operation::LoadControl), binary()]);
     let first = plan.instruction(BlockId(0), 0);
-    let helper = plan.instruction(BlockId(0), 1);
+    let control = plan.instruction(BlockId(0), 1);
     let resumed = plan.instruction(BlockId(0), 2);
+    let before = plan.frame(control.before);
+    let after = plan.frame(control.after);
     assert!(plan.proofs_at(first.before).is_empty());
     assert!(
         plan.proofs_at(first.after)
             .iter()
             .any(|&id| plan.proof(id).kind == ProofKind::BoundedF64)
     );
-    assert_ne!(
-        plan.frame(first.after).fp.control_epoch,
-        plan.frame(helper.after).fp.control_epoch
-    );
+    assert_ne!(before.fp.control_epoch, after.fp.control_epoch);
+    for (old, new) in before.fp.payload.iter().zip(after.fp.payload.iter()) {
+        assert_eq!(old.values(), new.values());
+    }
+    assert_eq!(before.fp.tags, after.fp.tags);
+    assert_eq!(plan.shape(control.before), plan.shape(control.after));
+    assert_eq!(before.fp.metadata, after.fp.metadata);
+    assert_eq!(before.fp.metadata_effect, after.fp.metadata_effect);
+    assert!(plan.proofs_at(resumed.before).iter().all(|&id| {
+        let proof = plan.proof(id);
+        proof.kind == ProofKind::ExactF64 && proof.epoch == after.fp.control_epoch
+    }));
+}
+
+#[test]
+fn a_real_canonical_helper_kills_previous_payload_and_admission_authority() {
+    let plan = single(&[binary(), Operation::InitializeX87, binary()]);
+    let helper = plan.instruction(BlockId(0), 1);
+    let resumed = plan.instruction(BlockId(0), 2);
     assert!(plan.proofs_at(resumed.before).is_empty());
     assert!(
         plan.frame(helper.after)

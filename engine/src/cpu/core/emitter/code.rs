@@ -128,6 +128,7 @@ impl<'a> Sink<'a> {
         f64_abs();
         f64_add();
         f64_const(x: Ieee64);
+        f64_convert_i32_s();
         f64_div();
         f64_eq();
         f64_load(m: MemArg);
@@ -157,6 +158,7 @@ impl<'a> Sink<'a> {
         i32_gt_u();
         i32_le_u();
         i32_load(m: MemArg);
+        i32_load16_s(m: MemArg);
         i32_load16_u(m: MemArg);
         i32_lt_s();
         i32_lt_u();

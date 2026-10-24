@@ -205,6 +205,24 @@ pub(super) fn direct_fp(operation: X87Operation) -> bool {
     )
 }
 
+/// Operations with an executable typed consumer, including effects that do not
+/// use the native arithmetic domain.
+pub(super) fn typed_fp(operation: X87Operation) -> bool {
+    direct_fp(operation)
+        || matches!(
+            operation,
+            X87Operation::LoadControl
+                | X87Operation::StoreControl
+                | X87Operation::Load(
+                    X87Format::Integer16 | X87Format::Integer32 | X87Format::Integer64
+                )
+                | X87Operation::Store {
+                    format: X87Format::Integer16 | X87Format::Integer32 | X87Format::Integer64,
+                    ..
+                }
+        )
+}
+
 pub(super) fn scalar_transfer(gpr: &mut [Option<u32>; 8], operation: Option<Operation>) {
     let mut pending = (*gpr).map(Fact::from_option);
     scalar_transfer_values(&mut pending, operation);
@@ -415,6 +433,67 @@ fn transfer(facts: &mut PendingFacts, operation: Option<Operation>) {
         }
         return;
     };
+    if matches!(operation, X87Operation::StoreControl) {
+        return;
+    }
+    if matches!(operation, X87Operation::LoadControl) {
+        // Payload representation and independent tag facts survive a CW write;
+        // stronger numerical/environment promises do not cross its epoch.
+        facts.bounded = [Fact::Unknown; 8];
+        facts.native24 = [Fact::Unknown; 8];
+        facts.native24_in_single = [Fact::Unknown; 8];
+        facts.control_admitted = Fact::Unknown;
+        return;
+    }
+    if let X87Operation::Load(
+        format @ (X87Format::Integer16 | X87Format::Integer32 | X87Format::Integer64),
+    ) = operation
+    {
+        for known in [
+            &mut facts.native,
+            &mut facts.bounded,
+            &mut facts.native24,
+            &mut facts.native24_in_single,
+        ] {
+            known.rotate_right(1);
+        }
+        facts.native[0] = if format == X87Format::Integer64 {
+            Fact::Unknown
+        } else {
+            Fact::Known(())
+        };
+        facts.bounded[0] = facts.native[0];
+        facts.native24[0] = if format == X87Format::Integer16 {
+            Fact::Known(())
+        } else {
+            Fact::Unknown
+        };
+        facts.native24_in_single[0] = facts.native24[0];
+        facts.tags.rotate_right(1);
+        facts.tags[0] = Fact::Known(true);
+        return;
+    }
+    if let X87Operation::Store {
+        format: X87Format::Integer16 | X87Format::Integer32 | X87Format::Integer64,
+        pop,
+        ..
+    } = operation
+    {
+        facts.tags[0] = Fact::Known(true);
+        if pop {
+            facts.tags[0] = Fact::Known(false);
+            facts.tags.rotate_left(1);
+            for known in [
+                &mut facts.native,
+                &mut facts.bounded,
+                &mut facts.native24,
+                &mut facts.native24_in_single,
+            ] {
+                known.rotate_left(1);
+            }
+        }
+        return;
+    }
     transfer_payload(&mut facts.native, operation, false);
     transfer_payload(&mut facts.bounded, operation, false);
     transfer_payload(&mut facts.native24, operation, true);
@@ -748,5 +827,24 @@ mod tests {
         assert_eq!(facts[0], Facts::default());
         assert_eq!(facts[1], Facts::default());
         assert_eq!(facts[2], Facts::default());
+    }
+    #[test]
+    fn integer32_exact_load_does_not_grant_binary32_precision_through_a_cross_block_edge() {
+        let blocks = [
+            block(
+                0x1000,
+                &[fp(X87Operation::Load(X87Format::Integer32)), jump(0x1100)],
+            ),
+            block(0x1100, &[Operation::Nop]),
+        ];
+        let region = Region::from_blocks(&blocks, 0x1000).unwrap();
+        let incoming = entries(&region)[1];
+        assert!(incoming.native[0] && incoming.bounded[0]);
+        assert!(
+            !incoming.native24[0] && !incoming.native24_in_single[0],
+            "FILD32 preserves 16777217 even at PC24; only a later arithmetic/store may round it"
+        );
+        assert_ne!(16_777_217_i32, (16_777_217_i32 as f32) as i32);
+        assert_eq!(incoming.tags[0], Some(true));
     }
 }

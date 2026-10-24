@@ -157,6 +157,29 @@ pub(super) fn emit_observed_family(
     emit_graph(&spans, entry, identity, native, graph, true)
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum PrivateKernel {
+    Arithmetic(numeric::executable::primitive::Kernel),
+    Integer(numeric::executable::integer::Kernel),
+}
+
+impl PrivateKernel {
+    fn type_index(self) -> u32 {
+        match self {
+            Self::Arithmetic(_) => 20,
+            Self::Integer(numeric::executable::integer::Kernel::Load64) => 21,
+            Self::Integer(_) => 22,
+        }
+    }
+
+    fn name(self) -> &'static str {
+        match self {
+            Self::Arithmetic(kernel) => kernel.name(),
+            Self::Integer(kernel) => kernel.name(),
+        }
+    }
+}
+
 fn emit_graph(
     spans: &[super::program::spans::ExecutableSpan],
     entry: u32,
@@ -167,10 +190,12 @@ fn emit_graph(
 ) -> Vec<u8> {
     let plan = super::region::values::RegionPlan::analyze(&graph);
     let numeric = !native.is_empty();
-    let (body, recovery_data, arithmetic_kernels) =
+    let (body, recovery_data, numeric_kernels) =
         run(&graph, &plan, identity, native, family, spans);
-    let has_arithmetic = !arithmetic_kernels.is_empty();
-    let status_resolver = support::owner_defined(10 + arithmetic_kernels.len() as u32, numeric);
+    let has_arithmetic = numeric_kernels
+        .iter()
+        .any(|kernel| matches!(kernel, PrivateKernel::Arithmetic(_)));
+    let status_resolver = support::owner_defined(10 + numeric_kernels.len() as u32, numeric);
     let recovery_blob = recovery::metadata(&recovery_data, identity);
     let recovery_base = link::GLOBAL_COUNT + 1;
     let recovery_getter = recovery::getter(&recovery_data, recovery_base);
@@ -252,6 +277,14 @@ fn emit_graph(
         [ValType::F64, ValType::F64, ValType::I32, ValType::I32],
         [ValType::F64, ValType::I32, ValType::I32, ValType::I32],
     );
+    types.ty().function(
+        numeric::executable::integer::Kernel::Load64.parameters(),
+        numeric::executable::integer::Kernel::Load64.results(),
+    );
+    types.ty().function(
+        [ValType::F64, ValType::I32, ValType::I32],
+        [ValType::I64, ValType::I32, ValType::I32],
+    );
     module.section(&types);
     let mut imports = ImportSection::new();
     imports.import(
@@ -290,8 +323,8 @@ fn emit_graph(
         functions.function(kind);
     }
     functions.function(19);
-    for _ in &arithmetic_kernels {
-        functions.function(20);
+    for kernel in &numeric_kernels {
+        functions.function(kernel.type_index());
     }
     if has_arithmetic {
         functions.function(9);
@@ -339,11 +372,18 @@ fn emit_graph(
         (graph.is_observed && !family).then_some(entry),
     ));
     code.function(&recovery_getter);
-    for kernel in &arithmetic_kernels {
-        code.function(&numeric::executable::primitive::emit(
-            kernel,
-            status_resolver,
-        ));
+    for kernel in &numeric_kernels {
+        match kernel {
+            PrivateKernel::Arithmetic(kernel) => {
+                code.function(&numeric::executable::primitive::emit(
+                    kernel,
+                    status_resolver,
+                ));
+            }
+            PrivateKernel::Integer(kernel) => {
+                code.function(&numeric::executable::integer::emit_kernel(kernel));
+            }
+        }
     }
     if has_arithmetic {
         code.function(&numeric::executable::primitive::emit_status());
@@ -379,7 +419,7 @@ fn emit_graph(
     }
     functions.append(support::owner_defined(8, numeric), "guest.hot_entry");
     functions.append(support::owner_defined(9, numeric), "guest.recovery_data");
-    for (index, kernel) in arithmetic_kernels.iter().enumerate() {
+    for (index, kernel) in numeric_kernels.iter().enumerate() {
         functions.append(
             support::owner_defined(10 + index as u32, numeric),
             kernel.name(),
@@ -494,11 +534,7 @@ fn run(
     native: &[NativeInstruction],
     family: bool,
     spans: &[super::program::spans::ExecutableSpan],
-) -> (
-    Vec<u8>,
-    Vec<i64>,
-    Vec<numeric::executable::primitive::Kernel>,
-) {
+) -> (Vec<u8>, Vec<i64>, Vec<PrivateKernel>) {
     let execution = super::region::values::ExecutionPlan::analyze(graph, plan);
     let expression_base = SCALAR_CACHE_BASE + execution.scalar.cache_count();
     let local_layout = executable::locals::Layout::build(
@@ -577,7 +613,7 @@ fn run(
         local_layout: &local_layout,
         fp_entry_marker,
         recovery: recovery::State::new(recovery_limit, recovery_locals),
-        arithmetic_kernels: Vec::new(),
+        numeric_kernels: Vec::new(),
         available: std::collections::BTreeSet::new(),
         physical_gpr: None,
         physical_flags: None,
@@ -722,7 +758,7 @@ fn run(
         .end();
     assert_eq!(out.depth, 0, "the region exit wrapper is closed");
     let recovery_data = out.recovery.finish_data();
-    let arithmetic_kernels = std::mem::take(&mut out.arithmetic_kernels);
+    let numeric_kernels = std::mem::take(&mut out.numeric_kernels);
     (
         exits::finish(
             function,
@@ -730,7 +766,7 @@ fn run(
             graph.is_observed.then_some(identity),
         ),
         recovery_data,
-        arithmetic_kernels,
+        numeric_kernels,
     )
 }
 
@@ -749,7 +785,7 @@ pub(super) struct Output<'a> {
     local_layout: &'a executable::locals::Layout,
     fp_entry_marker: u32,
     recovery: recovery::State,
-    arithmetic_kernels: Vec<numeric::executable::primitive::Kernel>,
+    numeric_kernels: Vec<PrivateKernel>,
     available: std::collections::BTreeSet<super::region::values::executable::ExecValueId>,
     physical_gpr: Option<[super::region::values::executable::ExecValueId; 8]>,
     physical_flags: Option<super::region::values::executable::FlagsState>,
@@ -775,6 +811,19 @@ pub(super) struct Output<'a> {
 }
 
 impl Output<'_> {
+    fn integer_kernel(&mut self, kernel: numeric::executable::integer::Kernel) -> u32 {
+        let kernel = PrivateKernel::Integer(kernel);
+        let position = self
+            .numeric_kernels
+            .iter()
+            .position(|old| *old == kernel)
+            .unwrap_or_else(|| {
+                self.numeric_kernels.push(kernel);
+                self.numeric_kernels.len() - 1
+            });
+        support::owner_defined(10 + position as u32, true)
+    }
+
     pub(super) fn c(&mut self) -> code::Sink<'_> {
         code::Sink::new(
             self.function.instructions(),

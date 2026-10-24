@@ -209,7 +209,19 @@ impl Guards {
                     }
                     continue;
                 };
-                if !flow::direct_fp(operation) {
+                if matches!(operation, X87Operation::StoreControl) {
+                    continue;
+                }
+                if matches!(operation, X87Operation::LoadControl) {
+                    // A successful CW load preserves the actual payload/tag
+                    // identities, but no environment/domain admission crosses
+                    // its epoch. The next use keeps its runtime authority test.
+                    facts.entered = false;
+                    facts.control = false;
+                    facts.admitted.clear();
+                    continue;
+                }
+                if !flow::typed_fp(operation) {
                     if !matches!(operation, X87Operation::Wait | X87Operation::StatusToAx) {
                         facts = Facts::default();
                     }
@@ -228,7 +240,12 @@ impl Guards {
                         source,
                         ..
                     } => vec![destination, source],
-                    X87Operation::Load(X87Format::Float32) => vec![],
+                    X87Operation::Load(
+                        X87Format::Float32
+                        | X87Format::Integer16
+                        | X87Format::Integer32
+                        | X87Format::Integer64,
+                    ) => vec![],
                     _ => vec![0],
                 };
                 // Admission can use arithmetic scratch. All distinct inputs are
@@ -306,7 +323,12 @@ impl Guards {
                 }
                 if matches!(
                     operation,
-                    X87Operation::Load(X87Format::Float32) | X87Operation::LoadRegister { .. }
+                    X87Operation::Load(
+                        X87Format::Float32
+                            | X87Format::Integer16
+                            | X87Format::Integer32
+                            | X87Format::Integer64
+                    ) | X87Operation::LoadRegister { .. }
                 ) {
                     if let Some(tag) = tag_input(plan, step.before, 7) {
                         if facts.empty.insert(tag) {
@@ -464,28 +486,59 @@ mod tests {
     }
 
     #[test]
-    fn canonical_or_control_changing_effects_kill_the_actual_admission_epoch() {
-        for barrier in [fp(X87Operation::LoadControl), simd(true)] {
-            let (values, guards) = analyze(&[
-                binary(X87Binary::Add, 1),
-                barrier,
-                binary(X87Binary::Add, 1),
-            ]);
-            let later = at(&values, &guards, 2);
-            assert!(later.enter && later.control);
-            assert!(later.inputs.iter().all(|input| {
-                input.occupied
-                    && input.load
-                    && !input.format
-                    && input.admit == Some(ProofKind::Native24InSingle)
-            }));
-            let first = values.instruction(BlockId(0), 0).before;
-            let last = values.instruction(BlockId(0), 2).before;
-            assert_ne!(
-                values.frame(first).fp.control_epoch,
-                values.frame(last).fp.control_epoch
-            );
+    fn control_changes_recheck_environment_without_reimporting_unchanged_payloads() {
+        let (values, guards) = analyze(&[
+            binary(X87Binary::Add, 1),
+            fp(X87Operation::LoadControl),
+            binary(X87Binary::Add, 1),
+        ]);
+        let later = at(&values, &guards, 2);
+        assert!(later.enter && later.control);
+        assert!(later.inputs.iter().all(|input| !input.occupied
+            && !input.load
+            && !input.format
+            && input.admit == Some(ProofKind::Native24InSingle)));
+        let first = values.instruction(BlockId(0), 0).before;
+        let last = values.instruction(BlockId(0), 2).before;
+        assert_ne!(
+            values.frame(first).fp.control_epoch,
+            values.frame(last).fp.control_epoch
+        );
+    }
+
+    #[test]
+    fn a_real_canonical_barrier_reimports_all_actual_inputs() {
+        let (values, guards) = analyze(&[
+            binary(X87Binary::Add, 1),
+            Operation::InitializeX87,
+            binary(X87Binary::Add, 1),
+        ]);
+        let later = at(&values, &guards, 2);
+        assert!(later.enter && later.control);
+        assert!(later.inputs.iter().all(|input| input.occupied
+            && input.load
+            && !input.format
+            && input.admit == Some(ProofKind::Native24InSingle)));
+    }
+
+    #[test]
+    fn same_epoch_numeric_effects_schedule_only_the_first_successful_environment_guard() {
+        let (values, guards) = analyze(&[
+            fp(X87Operation::Load(X87Format::Integer32)),
+            binary(X87Binary::Add, 1),
+            binary(X87Binary::Add, 1),
+            fp(X87Operation::StoreControl),
+            binary(X87Binary::Add, 1),
+            fp(X87Operation::LoadControl),
+            binary(X87Binary::Add, 1),
+            binary(X87Binary::Add, 1),
+        ]);
+        assert!(at(&values, &guards, 0).enter);
+        assert!(!at(&values, &guards, 1).enter && at(&values, &guards, 1).control);
+        for prefix in [2, 4, 7] {
+            assert!(!at(&values, &guards, prefix).enter && !at(&values, &guards, prefix).control);
         }
+        assert!(at(&values, &guards, 6).enter && at(&values, &guards, 6).control);
     }
 
     #[test]

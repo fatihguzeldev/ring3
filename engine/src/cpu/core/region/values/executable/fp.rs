@@ -441,10 +441,29 @@ pub(in crate::cpu::core) enum StatusEffect {
     ClearC1,
     Arithmetic,
     Store,
+    Control,
 }
 
 #[derive(Clone, Debug)]
 pub(in crate::cpu::core) enum FpEffectKind {
+    LoadControl {
+        address: AddressValue,
+        result: ExecValueId,
+    },
+    StoreControl {
+        address: AddressValue,
+    },
+    IntegerLoad {
+        address: AddressValue,
+        format: X87Format,
+        result: FpPayload,
+    },
+    IntegerStore {
+        address: AddressValue,
+        source: FpPayload,
+        format: X87Format,
+        truncate: bool,
+    },
     Load32 {
         address: AddressValue,
         result: ExecValueId,
@@ -482,6 +501,7 @@ pub(in crate::cpu::core) struct FpEffect {
     pub before_frame: FrameStateId,
     pub after_frame: FrameStateId,
     pub kind: FpEffectKind,
+    pub waiting: bool,
     pub control: ExecValueId,
     pub mode: ExecValueId,
     pub epoch: EffectId,
@@ -498,7 +518,16 @@ impl FpEffect {
         roots.extend(self.status_before.roots());
         roots.extend(self.occupied.iter().chain(&self.empty).map(|(_, tag)| *tag));
         match &self.kind {
-            FpEffectKind::Load32 { address, .. } => roots.push(address.offset),
+            FpEffectKind::Load32 { address, .. }
+            | FpEffectKind::LoadControl { address, .. }
+            | FpEffectKind::StoreControl { address }
+            | FpEffectKind::IntegerLoad { address, .. } => roots.push(address.offset),
+            FpEffectKind::IntegerStore {
+                address, source, ..
+            } => {
+                roots.push(address.offset);
+                roots.extend(source.roots());
+            }
             FpEffectKind::Binary { left, right, .. } => {
                 roots.extend(left.roots());
                 roots.extend(right.roots());
@@ -782,14 +811,17 @@ pub(in crate::cpu::core) fn lower_effect(
     values: &RegionPlan,
     effect: ExecEffectId,
 ) -> Option<(FpEffect, FpRecovery)> {
-    let Operation::X87 {
-        operation,
-        address,
-        opcode,
-        ..
-    } = operation
-    else {
-        return None;
+    let (operation, address, opcode, waiting) = match operation {
+        Operation::X87 {
+            operation,
+            address,
+            opcode,
+            waiting,
+        } => (operation, address, opcode, waiting),
+        Operation::X87ControlToMemory { address } => {
+            (X87Operation::StoreControl, Some(address), 0, false)
+        }
+        _ => return None,
     };
     let mut after = before.fp.clone();
     let mut occupied = Vec::new();
@@ -815,6 +847,108 @@ pub(in crate::cpu::core) fn lower_effect(
         }
     };
     let kind = match operation {
+        X87Operation::LoadControl => {
+            let address = builder.address_value(address?, &before.gpr)?;
+            let control = result(builder, effect, 0, ValueType::I32);
+            outputs.push(control);
+            after.control = control;
+            after.mode = builder.push_value(
+                ValueType::I32,
+                ValueNode::Fp(FpValueNode::PrecisionMode { control }),
+            );
+            after.epoch = values.frame(after_frame).fp.control_epoch;
+            let no_certificate = constant(builder, 0);
+            for payload in &mut after.payload {
+                *payload = match *payload {
+                    FpPayload::Native { value, .. } => FpPayload::Native {
+                        value,
+                        domain: NativeDomain::Exact,
+                        epoch: after.epoch,
+                    },
+                    FpPayload::Tagged {
+                        low,
+                        high,
+                        native,
+                        valid,
+                        ..
+                    } => FpPayload::Tagged {
+                        low,
+                        high,
+                        native,
+                        valid,
+                        certificate: no_certificate,
+                    },
+                    opaque => opaque,
+                };
+            }
+            status_effect = StatusEffect::Control;
+            FpEffectKind::LoadControl {
+                address,
+                result: control,
+            }
+        }
+        X87Operation::StoreControl => FpEffectKind::StoreControl {
+            address: builder.address_value(address?, &before.gpr)?,
+        },
+        X87Operation::Load(
+            format @ (X87Format::Integer16 | X87Format::Integer32 | X87Format::Integer64),
+        ) => {
+            let address = builder.address_value(address?, &before.gpr)?;
+            empty.push((7, before.fp.tags[7]));
+            after.push();
+            let payload = if format == X87Format::Integer64 {
+                let low = result(builder, effect, 0, ValueType::I64);
+                let high = result(builder, effect, 1, ValueType::I32);
+                let native = result(builder, effect, 2, ValueType::F64);
+                let valid = result(builder, effect, 3, ValueType::I32);
+                let certificate = result(builder, effect, 9, ValueType::I32);
+                outputs.extend([low, high, native, valid, certificate]);
+                FpPayload::Tagged {
+                    low,
+                    high,
+                    native,
+                    valid,
+                    certificate,
+                }
+            } else {
+                let value = result(builder, effect, 0, ValueType::F64);
+                outputs.push(value);
+                FpPayload::Native {
+                    value,
+                    domain: if format == X87Format::Integer16 {
+                        NativeDomain::Native24
+                    } else {
+                        NativeDomain::Bounded
+                    },
+                    epoch: after.epoch,
+                }
+            };
+            after.write(builder, 0, payload);
+            status_effect = StatusEffect::ClearC1;
+            FpEffectKind::IntegerLoad {
+                address,
+                format,
+                result: payload,
+            }
+        }
+        X87Operation::Store {
+            format: format @ (X87Format::Integer16 | X87Format::Integer32 | X87Format::Integer64),
+            truncate,
+            pop,
+        } => {
+            let source = read(0);
+            let address = builder.address_value(address?, &before.gpr)?;
+            if pop {
+                after.pop(builder);
+            }
+            status_effect = StatusEffect::Store;
+            FpEffectKind::IntegerStore {
+                address,
+                source,
+                format,
+                truncate,
+            }
+        }
         X87Operation::Load(X87Format::Float32) => {
             let address = builder.address_value(address?, &before.gpr)?;
             empty.push((7, before.fp.tags[7]));
@@ -991,37 +1125,42 @@ pub(in crate::cpu::core) fn lower_effect(
             }
         };
     }
-    after.metadata.fip = constant(
-        builder,
-        match values.frame(before.frame).pc {
-            crate::cpu::core::region::ResumePc::Exact(pc) => pc,
-            _ => 0,
-        },
-    );
-    after.metadata.opcode = constant(builder, u32::from(opcode));
-    // Segment selector reads are immutable value inputs, not guest memory loads.
-    after.metadata.cs = input(
-        builder,
-        point,
-        FpInput::Selector(crate::cpu::x86::SegmentRegister::Cs),
-        ValueType::I32,
-    );
-    let address = match &kind {
-        FpEffectKind::Load32 { address, .. } | FpEffectKind::Store { address, .. } => Some(address),
-        FpEffectKind::Binary {
-            right: FpOperand::Memory32(address),
-            ..
-        } => Some(address),
-        _ => None,
-    };
-    if let Some(address) = address {
-        after.metadata.fdp = address.offset;
-        after.metadata.ds = input(
+    if operation.is_computation() {
+        after.metadata.fip = constant(
+            builder,
+            match values.frame(before.frame).pc {
+                crate::cpu::core::region::ResumePc::Exact(pc) => pc,
+                _ => 0,
+            },
+        );
+        after.metadata.opcode = constant(builder, u32::from(opcode));
+        // Segment selector reads are immutable value inputs, not guest memory loads.
+        after.metadata.cs = input(
             builder,
             point,
-            FpInput::Selector(address.address.resolved_segment()),
+            FpInput::Selector(crate::cpu::x86::SegmentRegister::Cs),
             ValueType::I32,
         );
+        let address = match &kind {
+            FpEffectKind::Load32 { address, .. }
+            | FpEffectKind::Store { address, .. }
+            | FpEffectKind::IntegerLoad { address, .. }
+            | FpEffectKind::IntegerStore { address, .. } => Some(address),
+            FpEffectKind::Binary {
+                right: FpOperand::Memory32(address),
+                ..
+            } => Some(address),
+            _ => None,
+        };
+        if let Some(address) = address {
+            after.metadata.fdp = address.offset;
+            after.metadata.ds = input(
+                builder,
+                point,
+                FpInput::Selector(address.address.resolved_segment()),
+                ValueType::I32,
+            );
+        }
     }
     Some((
         FpEffect {
@@ -1030,6 +1169,7 @@ pub(in crate::cpu::core) fn lower_effect(
             before_frame: before.frame,
             after_frame,
             kind,
+            waiting,
             control: before.fp.control,
             mode: before.fp.mode,
             epoch: before.fp.epoch,

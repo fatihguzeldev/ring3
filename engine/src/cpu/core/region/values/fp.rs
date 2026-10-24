@@ -185,7 +185,7 @@ pub(super) fn operation(
 
 pub(super) fn canonical_numeric(operation: Operation) -> bool {
     if let Some((operation, ..)) = self::operation(operation) {
-        !flow::direct_fp(operation)
+        !flow::typed_fp(operation)
             && !matches!(operation, X87Operation::Wait | X87Operation::StatusToAx)
     } else {
         crate::cpu::core::emitter::is_native(&operation)
@@ -420,15 +420,128 @@ pub(super) fn lower(
     available: &mut Vec<ProofId>,
 ) -> Option<StorageCell> {
     let mut output = None;
+    if matches!(operation, X87Operation::StoreControl) {
+        return None;
+    }
+    if matches!(operation, X87Operation::LoadControl) {
+        frame.fp.control_epoch = plan.allocate_effect(EffectKind::Control, Some(point));
+        frame.fp.status_effect = plan.allocate_effect(EffectKind::Status, Some(point));
+        available.clear();
+        for logical in 0..8 {
+            frame.fp.payload[logical] = match frame.fp.payload[logical] {
+                FpValue::ExactF64(value, _) => {
+                    let exact = proof(
+                        plan,
+                        frame,
+                        point,
+                        available,
+                        Some(value),
+                        ProofKind::ExactF64,
+                    );
+                    FpValue::ExactF64(value, exact)
+                }
+                FpValue::Tagged {
+                    lo,
+                    hi,
+                    native,
+                    valid,
+                    ..
+                } => {
+                    let exact = plan.allocate_proof(Proof {
+                        value: Some(native),
+                        kind: ProofKind::ExactF64,
+                        epoch: frame.fp.control_epoch,
+                        at: point,
+                        conditional: Some(valid),
+                    });
+                    FpValue::Tagged {
+                        lo,
+                        hi,
+                        native,
+                        valid,
+                        proof: exact,
+                    }
+                }
+                opaque => opaque,
+            };
+        }
+        return None;
+    }
     if matches!(operation, X87Operation::Wait | X87Operation::StatusToAx) {
         return None;
     }
-    if !flow::direct_fp(operation) {
+    if !flow::typed_fp(operation) {
         kill(plan, frame, shape, point);
         available.clear();
         return None;
     }
     match operation {
+        X87Operation::Load(
+            format @ (X87Format::Integer16 | X87Format::Integer32 | X87Format::Integer64),
+        ) => {
+            proof(
+                plan,
+                frame,
+                point,
+                available,
+                Some(frame.fp.payload[7].values()[0]),
+                ProofKind::Empty,
+            );
+            push(frame, shape);
+            if format != X87Format::Integer64 {
+                output = Some(native_result(
+                    plan,
+                    frame,
+                    shape,
+                    point,
+                    available,
+                    0,
+                    format == X87Format::Integer16,
+                ));
+            } else {
+                let cell = free_cell(shape, 0);
+                let lo = lower::definition(plan, point, 24, ValueType::I64);
+                let hi = lower::definition(plan, point, 25, ValueType::I32);
+                let native = lower::definition(plan, point, 26, ValueType::F64);
+                let valid = lower::definition(plan, point, 27, ValueType::I32);
+                for (value, lane) in [
+                    (lo, StorageLane::Low),
+                    (hi, StorageLane::High),
+                    (native, StorageLane::Native),
+                    (valid, StorageLane::Valid),
+                ] {
+                    plan.bind(value, cell, lane);
+                }
+                let exact = plan.allocate_proof(Proof {
+                    value: Some(native),
+                    kind: ProofKind::ExactF64,
+                    epoch: frame.fp.control_epoch,
+                    at: point,
+                    conditional: Some(valid),
+                });
+                frame.fp.payload[0] = FpValue::Tagged {
+                    lo,
+                    hi,
+                    native,
+                    valid,
+                    proof: exact,
+                };
+                frame.fp.tags[0] = TagFact::Value(native);
+                shape.cells[0] = cell;
+                written(shape, 0);
+                output = Some(cell);
+            }
+        }
+        X87Operation::Store {
+            format: X87Format::Integer16 | X87Format::Integer32 | X87Format::Integer64,
+            pop: should_pop,
+            ..
+        } => {
+            occupied(plan, frame, point, available, 0);
+            if should_pop {
+                pop(frame, shape);
+            }
+        }
         X87Operation::Load(X87Format::Float32) => {
             proof(
                 plan,

@@ -364,12 +364,12 @@ fn popped_arithmetic_result_uses_its_own_post_pop_domain() {
 }
 
 #[test]
-fn canonical_control_barrier_has_fresh_post_effect_inputs_and_kills_native_obligations() {
+fn canonical_environment_barrier_has_fresh_post_effect_inputs_and_kills_native_obligations() {
     let (_, program) = plan(&[block(
         0x1000,
         &[
             memory_fp(X87Operation::Load(X87Format::Float32), 0),
-            memory_fp(X87Operation::LoadControl, 8),
+            memory_fp(X87Operation::LoadEnvironment { operand16: false }, 8),
             fp(X87Operation::ChangeSign),
         ],
     )]);
@@ -545,7 +545,10 @@ fn canonical_fp_barrier_stops_backward_old_payload_demands() {
         block(0x1000, &[Operation::Nop, jump(0x1100)]),
         block(
             0x1100,
-            &[memory_fp(X87Operation::LoadControl, 12), jump(0x1200)],
+            &[
+                memory_fp(X87Operation::LoadEnvironment { operand16: false }, 12),
+                jump(0x1200),
+            ],
         ),
         block(
             0x1200,
@@ -676,7 +679,7 @@ fn tagged_certificate_follows_aliases_but_not_changed_or_barrier_payloads() {
             fp(X87Operation::LoadRegister { index: 0 }),
             Operation::X87StatusToAx,
             fp(X87Operation::ChangeSign),
-            memory_fp(X87Operation::LoadControl, 12),
+            memory_fp(X87Operation::LoadEnvironment { operand16: false }, 12),
         ],
     )]);
     let body = program.block(BlockId(0));
@@ -787,15 +790,21 @@ fn opaque_scalar_definitions_preserve_unpublished_fp_values_and_effects() {
             count: ShiftCount::Immediate(1),
         },
     ] {
-        let (_, program) = plan(&[block(0x1000, &[
-            memory_fp(X87Operation::Load(X87Format::Float32), 0),
-            operation,
-            memory_fp(X87Operation::Store {
-                format: X87Format::Float32,
-                pop: true,
-                truncate: false,
-            }, 4),
-        ])]);
+        let (_, program) = plan(&[block(
+            0x1000,
+            &[
+                memory_fp(X87Operation::Load(X87Format::Float32), 0),
+                operation,
+                memory_fp(
+                    X87Operation::Store {
+                        format: X87Format::Float32,
+                        pop: true,
+                        truncate: false,
+                    },
+                    4,
+                ),
+            ],
+        )]);
         let effects: Vec<_> = program.block(BlockId(0)).effects().collect();
         let scalar = effects[1];
         assert!(matches!(scalar.kind, EffectKind::Exact(_)));
@@ -807,7 +816,10 @@ fn opaque_scalar_definitions_preserve_unpublished_fp_values_and_effects() {
         assert_eq!(scalar.before.fp.top, scalar.after.fp.top);
         assert_eq!(scalar.before.fp.control, scalar.after.fp.control);
         assert_eq!(scalar.before.fp.epoch, scalar.after.fp.epoch);
-        assert_eq!(scalar.before.fp.status.roots(), scalar.after.fp.status.roots());
+        assert_eq!(
+            scalar.before.fp.status.roots(),
+            scalar.after.fp.status.roots()
+        );
         assert_eq!(scalar.before.fp.written, scalar.after.fp.written);
         assert_eq!(scalar.before.fp.tag_written, scalar.after.fp.tag_written);
         let EffectKind::Fp(store) = &effects[2].kind else {
@@ -816,4 +828,158 @@ fn opaque_scalar_definitions_preserve_unpublished_fp_values_and_effects() {
         assert!(matches!(store.kind,
             FpEffectKind::Store { source, .. } if source == scalar.before.fp.payload[0]));
     }
+}
+
+#[test]
+fn typed_control_write_keeps_dirty_payload_tag_top_and_metadata_but_rebases_cw_proofs() {
+    let (_, program) = plan(&[block(
+        0x1000,
+        &[
+            memory_fp(X87Operation::Load(X87Format::Float32), 0),
+            memory_fp(X87Operation::LoadControl, 8),
+            Operation::X87ControlToMemory {
+                address: EffectiveAddress {
+                    base: Some(Register32::Ebx),
+                    displacement: 12,
+                    ..Default::default()
+                },
+            },
+            fp(X87Operation::ChangeSign),
+        ],
+    )]);
+    let effects: Vec<_> = program.block(BlockId(0)).effects().collect();
+    let cw = &effects[1];
+    assert!(matches!(
+        cw.kind,
+        EffectKind::Fp(FpEffect {
+            kind: FpEffectKind::LoadControl { .. },
+            waiting: true,
+            ..
+        })
+    ));
+    let before = &cw.before.fp;
+    let after = &cw.after.fp;
+    assert_ne!(before.control, after.control);
+    assert_ne!(before.epoch, after.epoch);
+    assert_ne!(before.status.bits, after.status.bits);
+    assert_ne!(before.status.pending, after.status.pending);
+    assert_eq!(before.tags, after.tags);
+    assert_eq!(before.top, after.top);
+    assert_eq!(before.top_delta, after.top_delta);
+    assert_eq!(before.written, after.written);
+    assert_eq!(before.tag_written, after.tag_written);
+    for (old, new) in before.payload.into_iter().zip(after.payload) {
+        match (old, new) {
+            (
+                FpPayload::Native { value: old, .. },
+                FpPayload::Native {
+                    value: new,
+                    domain: NativeDomain::Exact,
+                    epoch,
+                },
+            ) => {
+                assert_eq!(old, new);
+                assert_eq!(epoch, after.epoch);
+            }
+            (
+                FpPayload::Tagged {
+                    low: l,
+                    high: h,
+                    native: n,
+                    valid: v,
+                    ..
+                },
+                FpPayload::Tagged {
+                    low,
+                    high,
+                    native,
+                    valid,
+                    certificate,
+                },
+            ) => {
+                assert_eq!((l, h, n, v), (low, high, native, valid));
+                assert!(matches!(
+                    program.value(certificate).node,
+                    ValueNode::Fp(FpValueNode::I32(0))
+                ));
+            }
+            pair => panic!("CW write changed an architectural payload: {pair:?}"),
+        }
+    }
+    assert_eq!(
+        (
+            before.metadata.fip,
+            before.metadata.fdp,
+            before.metadata.opcode,
+            before.metadata.cs,
+            before.metadata.ds
+        ),
+        (
+            after.metadata.fip,
+            after.metadata.fdp,
+            after.metadata.opcode,
+            after.metadata.cs,
+            after.metadata.ds
+        )
+    );
+    let store = &effects[2];
+    assert!(matches!(
+        store.kind,
+        EffectKind::Fp(FpEffect {
+            kind: FpEffectKind::StoreControl { .. },
+            waiting: false,
+            ..
+        })
+    ));
+    assert_eq!(store.before.fp.payload, store.after.fp.payload);
+    assert_eq!(store.before.fp.control, store.after.fp.control);
+    assert_eq!(store.before.fp.status.bits, store.after.fp.status.bits);
+    assert_eq!(
+        store.before.fp.status.pending,
+        store.after.fp.status.pending
+    );
+    assert_eq!(store.before.fp.metadata.fip, store.after.fp.metadata.fip);
+}
+
+#[test]
+fn integer_load64_defines_all_exact_payload_lanes_and_pop_preserves_the_empty_ghost() {
+    let (_, program) = plan(&[block(
+        0x1000,
+        &[
+            memory_fp(X87Operation::Load(X87Format::Integer64), 0),
+            memory_fp(
+                X87Operation::Store {
+                    format: X87Format::Integer64,
+                    truncate: true,
+                    pop: true,
+                },
+                8,
+            ),
+        ],
+    )]);
+    let effects: Vec<_> = program.block(BlockId(0)).effects().collect();
+    let load = &effects[0];
+    let EffectKind::Fp(effect) = &load.kind else {
+        panic!("typed FILD64")
+    };
+    let FpEffectKind::IntegerLoad {
+        result: payload,
+        format: X87Format::Integer64,
+        ..
+    } = effect.kind
+    else {
+        panic!("integer64 load")
+    };
+    assert!(matches!(payload, FpPayload::Tagged { .. }));
+    assert_eq!(payload.roots().len(), 5);
+    for value in payload.roots() {
+        assert!(effect.definitions().contains(&value));
+    }
+    assert_eq!(load.after.fp.top_delta, 7);
+    assert_eq!(effects[1].after.fp.top_delta, 0);
+    assert_eq!(effects[1].after.fp.payload[7], payload);
+    assert!(matches!(
+        program.value(effects[1].after.fp.tags[7]).node,
+        ValueNode::Fp(FpValueNode::I32(3))
+    ));
 }

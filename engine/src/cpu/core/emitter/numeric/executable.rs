@@ -1,5 +1,7 @@
 //! Consume typed FP values/effects. Architectural cell publication is confined
 //! to recovery; successful native producers define F64 SSA values directly.
+mod control;
+pub(in crate::cpu::core::emitter) mod integer;
 pub(in crate::cpu::core::emitter) mod primitive;
 use super::super::{CTX, Output, mem};
 use super::{direct, double, frame, ieee, memory, pool};
@@ -42,11 +44,11 @@ const LEFT: u32 = 48;
 const RIGHT: u32 = 49;
 const POINTER: u32 = 52;
 
-fn take(out: &mut Output<'_>, value: ExecValueId, local: u32) {
+pub(super) fn take(out: &mut Output<'_>, value: ExecValueId, local: u32) {
     out.demand(value);
     out.c().local_set(local);
 }
-fn put(out: &mut Output<'_>, value: ExecValueId, local: u32) {
+pub(super) fn put(out: &mut Output<'_>, value: ExecValueId, local: u32) {
     out.c().local_get(local);
     out.define(value);
 }
@@ -390,7 +392,7 @@ fn certificate_satisfies(
     }
 }
 
-fn native(
+pub(super) fn native(
     out: &mut Output<'_>,
     payload: FpPayload,
     destination: u32,
@@ -537,7 +539,7 @@ fn format_guard(out: &mut Output<'_>, payload: FpPayload, depth: u32) {
     }
 }
 
-fn load_status(out: &mut Output<'_>, status: FpStatus) {
+pub(super) fn load_status(out: &mut Output<'_>, status: FpStatus) {
     for (value, local) in [
         (status.bits, STATUS),
         (status.pending, 100),
@@ -564,7 +566,7 @@ fn define_status(out: &mut Output<'_>, effect: &FpEffect) {
         }
     }
 }
-fn clear_c1(out: &mut Output<'_>) {
+pub(super) fn clear_c1(out: &mut Output<'_>) {
     out.c()
         .local_get(STATUS)
         .i32_const(!0x200)
@@ -572,6 +574,27 @@ fn clear_c1(out: &mut Output<'_>) {
         .local_set(STATUS)
         .i32_const(0)
         .local_set(100);
+}
+
+/// This token belongs to the current carried CW, not to physical payload validity.
+pub(super) fn masked_environment(out: &mut Output<'_>, depth: u32) {
+    out.c()
+        .local_get(pool::ADMITTED)
+        .i32_const(pool::ENTERED)
+        .i32_and()
+        .i32_eqz()
+        .if_(BlockType::Empty)
+        .local_get(87)
+        .i32_const(63)
+        .i32_and()
+        .i32_const(63)
+        .i32_ne()
+        .br_if(depth + 1)
+        .local_get(pool::ADMITTED)
+        .i32_const(pool::ENTERED)
+        .i32_or()
+        .local_set(pool::ADMITTED)
+        .end();
 }
 
 fn arithmetic_control(out: &mut Output<'_>, depth: u32) {
@@ -634,17 +657,17 @@ fn admit_parameter(
 }
 
 fn arithmetic(out: &mut Output<'_>, kind: X87Binary, exact_product: bool) {
-    let kernel = primitive::Kernel {
+    let kernel = super::super::PrivateKernel::Arithmetic(primitive::Kernel {
         kind,
         exact_product: exact_product && kind == X87Binary::Multiply,
+    });
+    let position = if let Some(position) = out.numeric_kernels.iter().position(|old| *old == kernel)
+    {
+        position
+    } else {
+        out.numeric_kernels.push(kernel);
+        out.numeric_kernels.len() - 1
     };
-    let position =
-        if let Some(position) = out.arithmetic_kernels.iter().position(|old| *old == kernel) {
-            position
-        } else {
-            out.arithmetic_kernels.push(kernel);
-            out.arithmetic_kernels.len() - 1
-        };
     let function = super::super::support::owner_defined(10 + position as u32, true);
     out.c()
         .local_get(LEFT)
@@ -689,6 +712,21 @@ pub(in crate::cpu::core::emitter) fn emit_effect(out: &mut Output<'_>, effect: &
     take(out, effect.control, 87);
     take(out, effect.mode, 54);
     load_status(out, effect.status_before);
+    if !matches!(
+        effect.kind,
+        FpEffectKind::LoadControl { .. } | FpEffectKind::StoreControl { .. }
+    ) {
+        // Every executable block has a full-span entry. Only an actually
+        // dominating successful effect in this block/CW epoch can omit a later
+        // runtime admission site; public interior and short entries stay exact.
+        let first_use = out.fp_schedule.at(effect.before_frame).clone();
+        if first_use.enter {
+            masked_environment(out, 0);
+        }
+        if matches!(effect.kind, FpEffectKind::Binary { .. }) && first_use.control {
+            arithmetic_control(out, 0);
+        }
+    }
     for (_, tag) in &effect.occupied {
         if matches!(&out.executable.value(*tag).node,
             ValueNode::Fp(node) if occupied_by_definition(node))
@@ -703,6 +741,12 @@ pub(in crate::cpu::core::emitter) fn emit_effect(out: &mut Output<'_>, effect: &
         out.c().i32_const(3).i32_ne().br_if(0);
     }
     match &effect.kind {
+        FpEffectKind::LoadControl { .. } | FpEffectKind::StoreControl { .. } => {
+            assert!(control::emit(out, effect));
+        }
+        FpEffectKind::IntegerLoad { .. } | FpEffectKind::IntegerStore { .. } => {
+            assert!(integer::emit(out, effect));
+        }
         FpEffectKind::Load32 { address, result } => {
             memory::prepare_value(out, address, 4, false, false, POINTER);
             out.c()
@@ -1030,16 +1074,6 @@ pub(in crate::cpu::core::emitter) fn emit_ingress(out: &mut Output<'_>, entry: &
     if parameters.imports {
         import_header(out);
         take(out, entry.control, 87);
-        out.c()
-            .local_get(87)
-            .i32_const(63)
-            .i32_and()
-            .i32_const(63)
-            .i32_ne()
-            .br_if(1);
-        if parameters.arithmetic {
-            arithmetic_control(out, 1);
-        }
         for obligation in &entry.ingress {
             if let FpObligation::Native {
                 logical,
@@ -1218,11 +1252,8 @@ pub(in crate::cpu::core::emitter) fn emit_edge(
     let mut targets = Vec::new();
     if parameters.header {
         take(out, source.control, 87);
-        // ACTIVE was granted only by an actual masked-CW adapter. Neither a
-        // typed producer nor an internal edge changes that same control epoch.
-        if parameters.arithmetic {
-            arithmetic_control(out, 1);
-        }
+        // The actual carried CW is a typed argument. First-use consumers
+        // validate its current epoch; a prior FLDCW may have changed it.
         for logical in 0..8 {
             if parameters.payloads & (1 << logical) != 0 {
                 stage_payload(
