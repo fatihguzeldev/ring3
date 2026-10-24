@@ -215,17 +215,20 @@ test('continuation generations retain their exact u64 positions without widening
     const declarations='export_process_calls! {\n'+
       'core_numeric_owned(context: u32, slot: u32, generation: u64, pc: u32, ordinal: u32);\n'+
       'core_precise_owned(context: u32, slot: u32, generation: u64);\n'+
-      'core_end_owned(context: u32, slot: u32, generation: u64, reason: u32);\n}\n';
+      'core_end_owned(context: u32, slot: u32, generation: u64, reason: u32);\n'+
+      'core_end_accounted_owned(context: u32, slot: u32, generation: u64, reason: u32, initial_retired: u32, budget: u32);\n}\n';
     const source=declarations+coreReadSource,core=join(dir,'core.rs');
-    const actual=moduleWith(['core_numeric_owned','core_precise_owned','core_end_owned','core_read','core_cold_run']
+    const actual=moduleWith(['core_numeric_owned','core_precise_owned','core_end_owned','core_end_accounted_owned','core_read','core_cold_run']
       .map(name=>'ring3_abi_v1_'+name));
     writeFileSync(core,source);
-    assert.deepEqual(assertEngineExports(actual,root).functions.slice(0,3).map(row=>row.arity),[5,3,4]);
+    assert.deepEqual(assertEngineExports(actual,root).functions.slice(0,4).map(row=>row.arity),[5,3,4,6]);
     for(const invalid of[
       source.replace('generation: u64','generation: u32'),
       source.replace('slot: u32, generation: u64','generation: u64, slot: u32'),
       source.replace('generation: u64, pc: u32','generation: u64, pc: u64'),
       source.replace('generation: u64, ',''),
+      source.replace('initial_retired: u32, budget: u32','budget: u32, initial_retired: u32'),
+      source.replace('initial_retired: u32','initial_retired: u64'),
     ]) {
       writeFileSync(core,invalid);
       assert.throws(()=>assertEngineExports(actual,root),/exact continuation generation parameters/);

@@ -109,11 +109,22 @@ fn install_old(
 }
 
 #[test]
-fn strictly_covering_actual_window_replaces_only_the_old_execution_tier() {
+fn strictly_covering_window_retires_redundant_body_and_migrates_contexts() {
     let (memory, mut cache, owners) = fixture();
     let old = install_old(&memory, &mut cache, &owners);
     let old_generation = cache.slot_generations[9];
     let bytes: Vec<_> = owners.iter().map(|owner| owner.wasm().to_vec()).collect();
+    let contexts = [
+        PreferredKey {
+            origin: Some(0),
+            target: A,
+        },
+        PreferredKey {
+            origin: Some(0x9900),
+            target: B,
+        },
+    ];
+    assert!(cache.bind_window_preferences(&memory, &old, &contexts));
     let before = cache.snapshot();
     let pending = plan(&memory, &owners, true, true);
     assert!(
@@ -127,21 +138,12 @@ fn strictly_covering_actual_window_replaces_only_the_old_execution_tier() {
     let code = emit_hot_window(&memory, pending).unwrap().unwrap();
     let new_bytes = code.wasm().len();
     let replacement = cache.commit_window(&memory, admission, code).unwrap();
-    assert_eq!(
-        cache.snapshot()[5],
-        before[5],
-        "one optimized executor replaces one executor"
-    );
+    assert_eq!(cache.snapshot()[5], before[5]);
     assert_eq!(
         cache.snapshot()[6],
         before[6] - old.wasm().len() as u64 + new_bytes as u64
     );
-    assert_eq!(
-        cache.snapshot()[3..5],
-        before[3..5],
-        "supersession is neither byte eviction nor SMC"
-    );
-    assert_eq!(cache.window_entries.len(), replacement.entrypoints().len());
+    assert_eq!(cache.snapshot()[3..5], before[3..5]);
     assert!(cache.region(old.key).is_none());
     assert_eq!(cache.link_owners[9], 0);
     assert!(cache.slot_generations[9] > old_generation);
@@ -151,22 +153,38 @@ fn strictly_covering_actual_window_replaces_only_the_old_execution_tier() {
         assert_eq!(cache.link_owners[slot], owner.identity());
         assert!(owner.is_current(&memory));
     }
-    assert_eq!(
-        cache.lookup_executable(&memory, A).unwrap().identity(),
-        replacement.identity(),
-        "replacement preserves every previously public window entry"
-    );
-    assert_eq!(
-        cache.lookup_executable(&memory, C).unwrap().identity(),
-        replacement.identity()
-    );
+    for key in contexts {
+        assert_eq!(
+            cache
+                .lookup_executable_context(&memory, key.origin, key.target)
+                .unwrap()
+                .identity(),
+            replacement.identity()
+        );
+        assert_eq!(
+            cache.route_rows[cache.route_position_key(key).unwrap()].candidates[0].identity,
+            replacement.identity()
+        );
+    }
     cache.install_link(&replacement, 9).unwrap();
-    assert!(cache.slot_generations[9] > old_generation);
     assert!(cache.begin_continuation(&memory, 0x80, 0x100, Some(&replacement), C));
     assert!(
         cache
             .continuation_source(&memory, 0x80, 9, old_generation, Some(&old), false, true)
             .is_none()
+    );
+    assert!(
+        cache
+            .continuation_source(
+                &memory,
+                0x80,
+                9,
+                cache.slot_generations[9],
+                Some(&replacement),
+                false,
+                true
+            )
+            .is_some()
     );
     cache.end_continuation();
     let checkpoint = cache.snapshot();
@@ -175,21 +193,12 @@ fn strictly_covering_actual_window_replaces_only_the_old_execution_tier() {
             .preflight_window(&memory, &plan(&memory, &owners, true, true))
             .is_none()
     );
-    assert!(
-        cache
-            .preflight_window(&memory, &plan(&memory, &owners, false, true))
-            .is_none()
-    );
-    assert_eq!(
-        cache.snapshot(),
-        checkpoint,
-        "equal or covered-old graph does not emit or mutate residency"
-    );
+    assert_eq!(cache.snapshot(), checkpoint);
     resources(&cache);
 }
 
 #[test]
-fn larger_incomparable_overlap_is_declined_before_emission_without_retiring_any_owner() {
+fn incomparable_actual_paths_get_separate_bounded_bodies_without_source_union() {
     let (memory, mut cache, owners) = fixture();
     let old = install_old(&memory, &mut cache, &owners);
     let pending = plan(&memory, &owners, true, false);
@@ -199,13 +208,22 @@ fn larger_incomparable_overlap_is_declined_before_emission_without_retiring_any_
             .fingerprint()
             .strictly_covers(old.window_fingerprint().unwrap())
     );
+    let expected_pcs: Vec<_> = pending.instruction_pcs().collect();
     let before = cache.snapshot();
     let order = (cache.oldest(), cache.newest());
-    assert!(cache.preflight_window(&memory, &pending).is_none());
+    let admission = cache.preflight_window(&memory, &pending).unwrap();
     assert_eq!(cache.snapshot(), before);
     assert_eq!((cache.oldest(), cache.newest()), order);
-    assert_eq!(cache.window_entries.get(&A), Some(&old.key));
+    let code = emit_hot_window(&memory, pending).unwrap().unwrap();
+    let new = cache.commit_window(&memory, admission, code).unwrap();
+    assert_eq!(new.instruction_pcs().collect::<Vec<_>>(), expected_pcs);
+    assert!(cache.region(old.key).is_some());
     assert_eq!(cache.link_owners[9], old.identity());
+    assert_eq!(cache.snapshot()[5], before[5] + 1);
+    assert_eq!(cache.snapshot()[3..5], before[3..5]);
+    for (owner, slot) in owners.iter().zip([7, 8, 10]) {
+        assert_eq!(cache.link_owners[slot], owner.identity());
+    }
     resources(&cache);
 }
 
@@ -228,10 +246,14 @@ fn weighted_hot_samples_preserve_residual_visits_and_per_site_backoff() {
 }
 
 #[test]
-fn weighted_candidates_require_the_actual_retained_nonwindow_owner() {
+fn weighted_candidates_require_actual_retained_entry_and_include_windows() {
     let (memory, mut cache, owners) = fixture();
     let old = install_old(&memory, &mut cache, &owners);
-    assert!(!cache.sample_candidate(&old, A));
+    assert!(cache.sample_candidate(&old, A));
+    for _ in 0..3 {
+        assert!(!cache.sample_candidate(&old, A));
+    }
+    assert!(cache.sample_candidate(&old, A));
     assert!(!cache.sample_candidate(&owners[0], C));
     assert!(cache.sample_candidate(&owners[0], A));
     for _ in 0..3 {

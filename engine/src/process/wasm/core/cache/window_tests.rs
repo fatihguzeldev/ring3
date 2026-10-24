@@ -306,10 +306,15 @@ fn hot_window_same_root_and_rotated_equal_graph_are_refused_before_emission() {
     assert!(cache.preflight_window(&memory, &rotated).is_none());
     assert_eq!(cache.snapshot(), before);
     cache.remove(window.key);
-    assert!(
-        cache.preflight_window(&memory, &rotated).is_none(),
-        "bounded feedback survives ordinary owner removal"
-    );
+    let attempts = cache.policy.attempts;
+    let retry = cache
+        .preflight_window(&memory, &rotated)
+        .expect("removed executable may be reconsidered using earned credit");
+    assert_eq!(cache.policy.attempts, attempts + 1);
+    // a real reserved-but-failed attempt keeps bounded negative feedback; owner
+    // removal itself is not an immortal ban on this source-stable graph.
+    cache.reject_window(retry);
+    assert!(cache.preflight_window(&memory, &rotated).is_none());
     let other = cache
         .admit(
             &memory,
