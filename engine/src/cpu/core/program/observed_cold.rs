@@ -200,6 +200,27 @@ impl Site<'_> {
             Self::Cold(observation) => observation.pc(),
         }
     }
+
+    fn owner(&self) -> u64 {
+        match self {
+            Self::Retained { owner, .. } => owner.identity(),
+            Self::Cold(_) => 0,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+struct CertifiedTransition {
+    instruction: Instruction,
+    successor: u32,
+    owner: u64,
+    successor_owner: u64,
+    begins_site: bool,
+}
+
+enum CaptureFlow {
+    Continue,
+    Stop,
 }
 
 /// completed cold records carry their own source authority; retained block and
@@ -212,6 +233,28 @@ fn capture_graph(
     owners: &[&CompiledCode],
     expected_source_version: u64,
     cold: &[CompletedColdObservation],
+) -> Result<Option<CapturedGraph>, CompileError> {
+    capture_graph_with(
+        memory,
+        root,
+        options,
+        events,
+        owners,
+        expected_source_version,
+        cold,
+        &mut |_| CaptureFlow::Continue,
+    )
+}
+
+fn capture_graph_with(
+    memory: &AddressSpace,
+    root: GuestAddress,
+    options: CompileOptions,
+    events: &[TraceEvent],
+    owners: &[&CompiledCode],
+    expected_source_version: u64,
+    cold: &[CompletedColdObservation],
+    transition: &mut impl FnMut(CertifiedTransition) -> CaptureFlow,
 ) -> Result<Option<CapturedGraph>, CompileError> {
     if validate_options(options).is_err()
         || events.is_empty()
@@ -289,7 +332,7 @@ fn capture_graph(
         return Ok(None);
     }
 
-    for (index, site) in sites.iter().enumerate() {
+    'timeline: for (index, site) in sites.iter().enumerate() {
         match site {
             Site::Cold(observation) => {
                 if sites
@@ -320,6 +363,18 @@ fn capture_graph(
                 edges.insert((instruction.pc, observation.actual_post_pc()));
                 if edges.len() > edge_limit {
                     return Ok(None);
+                }
+                if matches!(
+                    transition(CertifiedTransition {
+                        instruction,
+                        successor: observation.actual_post_pc(),
+                        owner: 0,
+                        successor_owner: sites.get(index + 1).map_or(0, Site::owner),
+                        begins_site: true,
+                    }),
+                    CaptureFlow::Stop
+                ) {
+                    break 'timeline;
                 }
             }
             Site::Retained { owner, pcs } => {
@@ -367,6 +422,22 @@ fn capture_graph(
                     edges.insert((pc, successor));
                     if edges.len() > edge_limit {
                         return Ok(None);
+                    }
+                    if matches!(
+                        transition(CertifiedTransition {
+                            instruction,
+                            successor,
+                            owner: owner.identity(),
+                            successor_owner: if position + 1 < selected.len() {
+                                owner.identity()
+                            } else {
+                                next_site.owner()
+                            },
+                            begins_site: position == 0,
+                        }),
+                        CaptureFlow::Stop
+                    ) {
+                        break 'timeline;
                     }
                 }
             }

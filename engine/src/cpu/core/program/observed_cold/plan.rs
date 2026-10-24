@@ -57,6 +57,8 @@ pub(crate) struct WindowPlan {
     blocks: Vec<Block>,
     entries: Vec<GuestAddress>,
     cross_owner_edges: usize,
+    completed_cycles: usize,
+    cycle_instructions: usize,
 }
 
 impl WindowFingerprint {
@@ -101,10 +103,16 @@ impl WindowPlan {
         &self.entries
     }
     pub(crate) fn has_executable_gain(&self) -> bool {
-        self.cross_owner_edges != 0
+        self.completed_cycles >= 2 && self.cross_owner_edges != 0
     }
     pub(crate) fn cross_owner_edge_count(&self) -> usize {
         self.cross_owner_edges
+    }
+    pub(crate) fn completed_cycle_count(&self) -> usize {
+        self.completed_cycles
+    }
+    pub(crate) fn cycle_instruction_count(&self) -> usize {
+        self.cycle_instructions
     }
     pub(crate) fn is_current(&self, memory: &AddressSpace) -> bool {
         memory.identity() == self.fingerprint.memory_identity
@@ -115,26 +123,70 @@ impl WindowPlan {
     }
 }
 
-fn retained_site_pc(owner: &CompiledCode, event: &TraceEvent, last: bool) -> Option<u32> {
-    match event.kind {
-        NUMERIC => Some(event.pc),
-        BLOCK => {
-            let index = owner
-                .blocks
-                .binary_search_by_key(&event.pc, |block| block.pc)
-                .ok()?;
-            let block = &owner.blocks[index];
-            let offset = if last {
-                block.count.checked_sub(1)?
-            } else {
-                event.offset
-            };
-            owner
-                .block_pcs
-                .get((block.first + offset) as usize)
-                .copied()
+struct RootCycle {
+    root: u32,
+    limit: usize,
+    word: Vec<CertifiedTransition>,
+    starts: BTreeSet<u32>,
+    transfers: usize,
+    completed: usize,
+    compared: usize,
+}
+
+impl RootCycle {
+    fn new(root: u32, limit: usize) -> Self {
+        Self {
+            root,
+            limit,
+            word: Vec::new(),
+            starts: BTreeSet::from([root]),
+            transfers: 0,
+            completed: 0,
+            compared: 0,
         }
-        _ => None,
+    }
+
+    fn observe(&mut self, transition: CertifiedTransition) -> CaptureFlow {
+        if transition.owner == 0 || transition.successor_owner == 0 {
+            return CaptureFlow::Stop;
+        }
+        if self.completed == 0 {
+            if self.word.len() == self.limit
+                || self.word.is_empty() && transition.instruction.pc != self.root
+            {
+                return CaptureFlow::Stop;
+            }
+            if transition.begins_site {
+                self.starts.insert(transition.instruction.pc);
+            }
+            if terminates(transition.instruction.operation) {
+                self.starts.insert(transition.successor);
+            }
+            self.transfers += usize::from(transition.owner != transition.successor_owner);
+            self.word.push(transition);
+            if transition.successor == self.root {
+                if self.transfers == 0 {
+                    return CaptureFlow::Stop;
+                }
+                self.completed = 1;
+            }
+            return CaptureFlow::Continue;
+        }
+        let expected = self.word[self.compared];
+        if !same_instruction(&expected.instruction, &transition.instruction)
+            || expected.successor != transition.successor
+            || expected.owner != transition.owner
+            || expected.successor_owner != transition.successor_owner
+        {
+            return CaptureFlow::Stop;
+        }
+        self.compared += 1;
+        if self.compared == self.word.len() {
+            self.completed = 2;
+            CaptureFlow::Stop
+        } else {
+            CaptureFlow::Continue
+        }
     }
 }
 
@@ -150,7 +202,8 @@ pub(crate) fn prepare_hot_window(
     if !cold.is_empty() || events.iter().any(|event| event.kind == COLD_COMPLETE) {
         return Ok(None);
     }
-    let Some(CapturedGraph { graph, sources }) = capture_graph(
+    let mut recurrence = RootCycle::new(root.0, options.instructions);
+    let Some(CapturedGraph { mut graph, sources }) = capture_graph_with(
         memory,
         root,
         options,
@@ -158,46 +211,15 @@ pub(crate) fn prepare_hot_window(
         owners,
         expected_source_version,
         cold,
+        &mut |transition| recurrence.observe(transition),
     )?
     else {
         return Ok(None);
     };
-    let retained: BTreeMap<_, _> = owners
-        .iter()
-        .map(|owner| (owner.identity(), *owner))
-        .collect();
-    let mut cross_owner_edges = BTreeSet::new();
-    for pair in events.windows(2) {
-        let [before, after] = pair else {
-            unreachable!()
-        };
-        if before.owner == after.owner || before.owner == 0 || after.owner == 0 {
-            continue;
-        }
-        let Some(source) = retained
-            .get(&before.owner)
-            .and_then(|owner| retained_site_pc(owner, before, true))
-        else {
-            return Ok(None);
-        };
-        let Some(target) = retained
-            .get(&after.owner)
-            .and_then(|owner| retained_site_pc(owner, after, false))
-        else {
-            return Ok(None);
-        };
-        // a final retained event only confirms its predecessor; it does not
-        // certify executing its own node or eliminating that owner boundary.
-        if graph.nodes.contains_key(&source)
-            && graph.nodes.contains_key(&target)
-            && graph.edges.contains(&(source, target))
-        {
-            cross_owner_edges.insert((source, target));
-        }
-    }
-    if cross_owner_edges.is_empty() {
+    if recurrence.completed != 2 {
         return Ok(None);
     }
+    graph.starts = recurrence.starts;
     let Some(plan) = form_plan(memory, root.0, options, graph, sources, Vec::new()) else {
         return Ok(None);
     };
@@ -218,7 +240,9 @@ pub(crate) fn prepare_hot_window(
         sources,
         blocks,
         entries: vec![root],
-        cross_owner_edges: cross_owner_edges.len(),
+        cross_owner_edges: recurrence.transfers,
+        completed_cycles: recurrence.completed,
+        cycle_instructions: recurrence.word.len(),
     }))
 }
 

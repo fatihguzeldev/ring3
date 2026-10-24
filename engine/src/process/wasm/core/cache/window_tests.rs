@@ -112,6 +112,8 @@ fn events(caller: &CompiledCode, callee: &CompiledCode, rotated: bool) -> Vec<Tr
     if rotated {
         rows.rotate_left(1);
     }
+    let cycle = rows.clone();
+    rows.extend_from_slice(&cycle);
     rows.push(rows[0]);
     rows.into_iter()
         .map(|(pc, end, owner)| TraceEvent {
