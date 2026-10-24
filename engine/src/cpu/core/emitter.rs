@@ -584,8 +584,8 @@ fn run(
         colors: local_layout.next - expression_base,
         expression_base,
     };
-    locals.push((16 + recovery_locals.colors, ValType::I32));
-    locals.push((3, ValType::I64));
+    locals.push((32 + recovery_locals.colors, ValType::I32));
+    locals.push((8, ValType::I64));
     locals.push((1, ValType::F64));
     let points = graph
         .blocks

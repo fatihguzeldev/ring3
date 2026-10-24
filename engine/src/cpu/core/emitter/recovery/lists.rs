@@ -9,12 +9,13 @@ use std::collections::BTreeMap;
 
 const CHUNK: usize = 8;
 
+#[derive(Clone)]
 struct Node {
     next: u32,
     rows: Vec<u32>,
 }
 
-#[derive(Default)]
+#[derive(Clone, Default)]
 pub(super) struct ListPool {
     nodes: Vec<Node>,
     interned: BTreeMap<(u32, Vec<u32>), u32>,

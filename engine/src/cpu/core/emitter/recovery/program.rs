@@ -168,6 +168,7 @@ pub(in crate::cpu::core::emitter) enum Error {
 /// program. Exact keys are used for interning; no hash/fingerprint equivalence
 /// substitutes for the source, color or value identity. Pure literal sources
 /// have no defining effect, so identical bits/type/color share one reference.
+#[derive(Clone)]
 pub(in crate::cpu::core::emitter) struct Program {
     refs: Vec<SourceRef>,
     interned: BTreeMap<Vec<u64>, RefId>,

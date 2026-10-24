@@ -3,8 +3,11 @@ mod data;
 mod executor;
 pub(super) mod fp;
 mod leaves;
+mod legacy;
 mod lists;
 pub(super) mod program;
+mod recipe_vm;
+mod recipes;
 
 use super::Output;
 use crate::cpu::core::region::values::{
@@ -38,6 +41,8 @@ pub(super) struct ExitAction {
 #[derive(Default)]
 struct Header {
     list: u32,
+    closure: u32,
+    closure_count: u32,
     fp_info: u32,
     frame: u32,
     certificates: i64,
@@ -70,11 +75,14 @@ impl Header {
             metadata as i64,
             pair(self.kind_plus_one, self.width),
             pair(self.exit.retired, self.exit.pc.unwrap_or(0)),
+            pair(self.closure, self.closure_count),
         ]
     }
 }
 
+#[derive(Clone)]
 pub(super) struct State {
+    compact: bool,
     pub program: Program,
     pub words: Vec<i64>,
     sites: BTreeMap<Vec<i64>, u32>,
@@ -82,6 +90,9 @@ pub(super) struct State {
     row_ids: BTreeMap<[i64; 2], u32>,
     lists: lists::ListPool,
     relocations: Vec<usize>,
+    closure_relocations: Vec<usize>,
+    closures: BTreeMap<Vec<u32>, u32>,
+    recipes: recipes::Recipes,
     leaf_base: u32,
     frozen: bool,
     pub locals: Locals,
@@ -102,19 +113,20 @@ impl Locals {
         self.base + offset
     }
     pub fn need(self, color: u32) -> u32 {
-        self.base + 16 + color - self.expression_base
+        self.base + 32 + color - self.expression_base
     }
     pub fn wide(self, offset: u32) -> u32 {
-        self.base + 16 + self.colors + offset
+        self.base + 32 + self.colors + offset
     }
     pub fn float(self) -> u32 {
-        self.wide(3)
+        self.wide(8)
     }
 }
 
 impl State {
     pub fn new(limit: usize, locals: Locals) -> Self {
         Self {
+            compact: true,
             program: Program::new(limit),
             words: Vec::new(),
             sites: BTreeMap::new(),
@@ -122,10 +134,34 @@ impl State {
             row_ids: BTreeMap::new(),
             lists: lists::ListPool::default(),
             relocations: Vec::new(),
+            closure_relocations: Vec::new(),
+            closures: BTreeMap::new(),
+            recipes: recipes::Recipes::default(),
             leaf_base: 0,
             frozen: false,
             locals,
         }
+    }
+    fn intern_closure(&mut self, roots: &[RefId]) -> (u32, u32) {
+        let closure = self
+            .program
+            .validate_roots(roots)
+            .expect("one recovery request has unique live colors");
+        let closure_count = u32::try_from(closure.len()).expect("bounded recovery closure count");
+        let markers: Vec<_> = closure
+            .into_iter()
+            .map(|id| id.0.checked_add(1).expect("bounded recovery source marker"))
+            .collect();
+        let closure = if markers.is_empty() {
+            0
+        } else {
+            let next = u32::try_from(self.closures.len())
+                .ok()
+                .and_then(|count| count.checked_add(1))
+                .expect("bounded recovery closure identity");
+            *self.closures.entry(markers).or_insert(next)
+        };
+        (closure, closure_count)
     }
     fn row(&self, rows: &mut Vec<i64>, id: RefId, destination: u32, gate: u64) {
         let source = self.program.get(id);
@@ -220,7 +256,33 @@ impl State {
         for &index in &self.relocations {
             self.words[index] = i64::from(lists[self.words[index] as usize]);
         }
-        self.leaf_base = leaves::append(&self.program, &mut self.words);
+        if !self.compact {
+            // Only the compact executor consumes the seventh private word.
+            for &index in &self.closure_relocations {
+                self.words[index] = 0;
+            }
+            self.leaf_base = leaves::append(&self.program, &mut self.words);
+            return;
+        }
+        self.recipes = recipes::append(&self.program, &mut self.words, self.locals.expression_base);
+        let mut closures = vec![0; self.closures.len() + 1];
+        for (markers, &id) in &self.closures {
+            closures[id as usize] =
+                u32::try_from(self.words.len()).expect("bounded recovery closure address");
+            for pair in markers.chunks(2) {
+                self.words.push(
+                    (u64::from(pair[0]) | u64::from(pair.get(1).copied().unwrap_or(0)) << 32)
+                        as i64,
+                );
+            }
+            u32::try_from(self.words.len()).expect("bounded recovery closure end");
+        }
+        for &index in &self.closure_relocations {
+            let value = self.words[index] as u64;
+            self.words[index] = ((value & !u64::from(u32::MAX))
+                | u64::from(closures[value as u32 as usize]))
+                as i64;
+        }
     }
     pub fn finish_data(&mut self) -> Vec<i64> {
         assert!(
@@ -276,10 +338,7 @@ pub(super) fn request(
         .flat_map(ScalarProjection::roots)
         .chain(fp.iter().flat_map(fp::Projection::roots))
         .collect();
-    out.recovery
-        .program
-        .validate_roots(&roots)
-        .expect("one recovery request has unique live colors");
+    let (closure, closure_count) = out.recovery.intern_closure(&roots);
     let mut rows = Vec::new();
     if let Some(scalar) = &scalar {
         out.recovery.scalar_rows(&mut rows, scalar);
@@ -319,6 +378,8 @@ pub(super) fn request(
     let list = out.recovery.lists.intern(&row_ids);
     let mut header = Header {
         list,
+        closure,
+        closure_count,
         frame: frame_word,
         exit,
         ..Header::default()
@@ -348,6 +409,7 @@ pub(super) fn request(
         let index = i32::try_from(out.recovery.words.len())
             .expect("bounded signed recovery descriptor selector") as u32;
         out.recovery.relocations.push(index as usize);
+        out.recovery.closure_relocations.push(index as usize + 6);
         out.recovery.words.extend_from_slice(&words);
         out.recovery.sites.insert(words, index);
         index
@@ -382,9 +444,64 @@ pub(super) fn request_fp(out: &mut Output<'_>, fp: &FpRecovery) {
 pub(super) fn emit(out: &mut Output<'_>) {
     let locals = out.recovery.locals;
     let mut state = std::mem::replace(&mut out.recovery, State::new(0, locals));
+    let mut legacy = state.clone();
+    legacy.compact = false;
+    legacy.freeze_data();
+    let prefix = out.function.clone();
+    let depth = out.depth;
+    executor::emit(out, &legacy);
+    assert_eq!(out.depth, depth, "legacy recovery controls are balanced");
+    let legacy_cost = candidate_cost(out, &legacy);
+    let legacy_function = std::mem::replace(out.function, prefix);
     state.freeze_data();
     executor::emit(out, &state);
-    out.recovery = state;
+    assert_eq!(out.depth, depth, "compact recovery controls are balanced");
+    if candidate_cost(out, &state).improves(legacy_cost) {
+        out.recovery = state;
+    } else {
+        *out.function = legacy_function;
+        out.recovery = legacy;
+    }
+}
+
+#[derive(Clone, Copy)]
+struct CandidateCost {
+    run: usize,
+    getter: usize,
+    data: usize,
+}
+
+impl CandidateCost {
+    fn improves(self, previous: Self) -> bool {
+        // The unchanged run suffix is appended later. Requiring its raw body
+        // and the total code payload to be nonincreasing also makes both run
+        // and CodeSection length prefixes nonincreasing. Getter and custom
+        // section framing are already encoded exactly below. Thus the strict
+        // final sum is a real module-byte reduction, without a guessed margin.
+        self.run <= previous.run
+            && self.run + self.getter <= previous.run + previous.getter
+            && self.run + self.getter + self.data < previous.run + previous.getter + previous.data
+    }
+}
+
+fn candidate_cost(out: &Output<'_>, state: &State) -> CandidateCost {
+    use std::borrow::Cow;
+    use wasm_encoder::Encode;
+    // Owner identity occupies a fixed raw u64 header, so it cannot affect cost.
+    let blob = metadata(&state.words, 1);
+    let mut data = Vec::new();
+    wasm_encoder::CustomSection {
+        name: Cow::Borrowed("ring3.recovery"),
+        data: Cow::Borrowed(&blob),
+    }
+    .encode(&mut data);
+    let mut encoded_getter = Vec::new();
+    getter(&state.words, super::link::GLOBAL_COUNT + 1).encode(&mut encoded_getter);
+    CandidateCost {
+        run: out.function.byte_len(),
+        getter: encoded_getter.len(),
+        data: data.len(),
+    }
 }
 
 pub(super) fn metadata(words: &[i64], identity: u64) -> Vec<u8> {
@@ -400,10 +517,12 @@ mod header_tests {
     use super::*;
 
     #[test]
-    fn six_word_header_preserves_full_width_boundaries_and_certificate_bits() {
+    fn seven_word_header_preserves_full_width_boundaries_and_certificate_bits() {
         for certificates in [0, i64::MIN, i64::MAX, -1, 0x0123_4567_89ab_cdef] {
             let words = Header {
                 list: u32::MAX,
+                closure: u32::MAX,
+                closure_count: u32::MAX,
                 fp_info: 7 | 255 << 8 | 1 << 16,
                 frame: u32::MAX,
                 certificates,
@@ -417,7 +536,7 @@ mod header_tests {
                 },
             }
             .words();
-            assert_eq!(words.len(), 6);
+            assert_eq!(words.len(), 7);
             assert_eq!(words[0] as u64, u64::from(u32::MAX));
             let info = words[1] as u64;
             assert_eq!(info as u32, 7 | 255 << 8 | 1 << 16 | 1 << 17);
@@ -433,13 +552,14 @@ mod header_tests {
             assert_eq!(((words[4] as u64) >> 32) as u32, u32::MAX);
             assert_eq!(words[5] as u32, u32::MAX);
             assert_eq!(((words[5] as u64) >> 32) as u32, u32::MAX);
+            assert_eq!(words[6] as u64, u64::MAX);
         }
     }
 
     #[test]
     fn zero_pc_and_metadata_remain_distinct_from_absent_actions() {
         let empty = Header::default().words();
-        assert_eq!(empty, [0; 6]);
+        assert_eq!(empty, [0; 7]);
         let explicit = Header {
             frame: 1,
             instruction: Some((0, 0)),
@@ -466,7 +586,7 @@ mod header_tests {
     }
 
     #[test]
-    fn six_word_sites_relocate_lists_after_headers_and_rows_before_leaf_map() {
+    fn seven_word_sites_relocate_lists_after_headers_and_rows_before_recipes() {
         let mut state = State::new(
             0,
             Locals {
@@ -493,14 +613,326 @@ mod header_tests {
             }
             .words(),
         );
-        state.relocations.extend([0, 6]);
+        state.relocations.extend([0, 7]);
         state.freeze_data();
-        assert_eq!(state.words.len(), 17);
-        assert_eq!(state.words[0], 14);
-        assert_eq!(state.words[6], 14);
+        assert_eq!(state.words.len(), 19);
+        assert_eq!(state.words[0], 16);
+        assert_eq!(state.words[7], 16);
         assert_eq!(state.words[2], i64::MIN);
-        assert_eq!((state.words[7] as u64) >> 32, u64::from(u32::MAX));
-        assert_eq!(&state.words[12..], &[17, 23, 0, 1, 12]);
-        assert_eq!(state.leaf_base, 17);
+        assert_eq!((state.words[8] as u64) >> 32, u64::from(u32::MAX));
+        assert_eq!(&state.words[14..], &[17, 23, 0, 1, 14]);
+        assert_eq!(state.recipes.base, 19);
+        assert_eq!(state.recipes.count, 0);
+    }
+
+    #[test]
+    fn descriptor_closures_pack_odd_and_even_markers_deduplicate_and_relocate_exactly() {
+        use crate::cpu::core::region::values::{
+            ValueType,
+            executable::{Binary32, ExecValueId},
+        };
+        use program::{Color, SourceOp, ValueKey};
+
+        let mut state = State::new(
+            8,
+            Locals {
+                base: 300,
+                colors: 3,
+                expression_base: 180,
+            },
+        );
+        let mut reference = |value, local, op| {
+            state
+                .program
+                .reference(
+                    ValueKey::Executable(ExecValueId(value)),
+                    Color {
+                        local,
+                        ty: ValueType::I32,
+                    },
+                    op,
+                )
+                .unwrap()
+        };
+        let first = reference(0, 180, SourceOp::Available);
+        let second = reference(1, 181, SourceOp::Constant { bits: 0x8000_0001 });
+        let sum = reference(
+            2,
+            182,
+            SourceOp::Binary32 {
+                kind: Binary32::Add,
+                left: first,
+                right: second,
+            },
+        );
+        let (odd, odd_count) = state.intern_closure(&[sum, first, sum]);
+        let (even, even_count) = state.intern_closure(&[second, first]);
+        assert_eq!(
+            state.intern_closure(&[first, sum, second]),
+            (odd, odd_count)
+        );
+        assert_eq!((odd_count, even_count), (3, 2));
+        assert_ne!(odd, even);
+        assert_eq!(state.closures.len(), 2);
+        assert_eq!(state.intern_closure(&[]), (0, 0));
+        let headers = [
+            Header {
+                closure: odd,
+                closure_count: odd_count,
+                certificates: i64::MIN,
+                ..Header::default()
+            }
+            .words(),
+            Header {
+                closure: even,
+                closure_count: even_count,
+                frame: u32::MAX,
+                ..Header::default()
+            }
+            .words(),
+            Header {
+                closure: odd,
+                closure_count: odd_count,
+                instruction: Some((0xffff_ffff, 0xffff)),
+                ..Header::default()
+            }
+            .words(),
+        ];
+        for header in &headers {
+            let start = state.words.len();
+            state.relocations.push(start);
+            state.closure_relocations.push(start + 6);
+            state.words.extend(header);
+        }
+        state.freeze_data();
+        assert_eq!(state.recipes.base, 21);
+        assert_eq!(state.recipes.count, 3);
+        for (index, original) in headers.iter().enumerate() {
+            assert_eq!(&state.words[index * 7..index * 7 + 6], &original[..6]);
+        }
+        // Exact lexical list order puts the two-marker closure before the
+        // three-marker closure, independently of their original interned IDs.
+        assert_eq!(state.words[6] as u64, (3u64 << 32) | 34);
+        assert_eq!(state.words[13] as u64, (2u64 << 32) | 33);
+        assert_eq!(state.words[20], state.words[6]);
+        assert_eq!(&state.words[33..], &[(2i64 << 32) | 1, (2i64 << 32) | 1, 3]);
+        assert_eq!(state.words.len(), 36);
+    }
+
+    #[test]
+    fn separate_descriptor_closures_keep_distinct_ref_ids_when_a_color_is_reused() {
+        use crate::cpu::core::region::values::{ValueType, executable::ExecValueId};
+        use program::{Color, SourceOp, ValueKey};
+        use std::panic::{AssertUnwindSafe, catch_unwind};
+
+        let mut state = State::new(
+            8,
+            Locals {
+                base: 300,
+                colors: 1,
+                expression_base: 180,
+            },
+        );
+        let color = Color {
+            local: 180,
+            ty: ValueType::I32,
+        };
+        let old = state
+            .program
+            .reference(
+                ValueKey::Executable(ExecValueId(0)),
+                color,
+                SourceOp::Available,
+            )
+            .unwrap();
+        let fresh = state
+            .program
+            .reference(
+                ValueKey::Executable(ExecValueId(1)),
+                color,
+                SourceOp::PhysicalInput { local: 2 },
+            )
+            .unwrap();
+        let originals = state.program.refs().to_vec();
+        let old_closure = state.intern_closure(&[old]);
+        let fresh_closure = state.intern_closure(&[fresh]);
+        assert_ne!(old_closure.0, fresh_closure.0);
+        assert_eq!((old_closure.1, fresh_closure.1), (1, 1));
+        assert!(catch_unwind(AssertUnwindSafe(|| state.intern_closure(&[old, fresh]))).is_err());
+        assert_eq!(
+            state.closures.len(),
+            2,
+            "the invalid mixed closure cannot enter the immutable table"
+        );
+        for (closure, closure_count) in [old_closure, fresh_closure] {
+            let start = state.words.len();
+            state.words.extend(
+                Header {
+                    closure,
+                    closure_count,
+                    ..Header::default()
+                }
+                .words(),
+            );
+            state.relocations.push(start);
+            state.closure_relocations.push(start + 6);
+        }
+        state.freeze_data();
+        assert_eq!(state.program.refs(), originals);
+        assert_eq!((state.recipes.base, state.recipes.count), (14, 2));
+        assert_eq!(state.words[6] as u64, (1u64 << 32) | 22);
+        assert_eq!(state.words[13] as u64, (1u64 << 32) | 23);
+        assert_eq!(&state.words[22..], &[1, 2]);
+        assert_eq!(&state.words[14..22], &[0, 0, 0, 0, 1, 2, 0, 0]);
+    }
+
+    fn encoded_cost_fixture(
+        run_prefix: usize,
+        getter_body: usize,
+        data_length: usize,
+        common_suffix: usize,
+    ) -> (CandidateCost, Vec<u8>) {
+        use std::borrow::Cow;
+        use wasm_encoder::{
+            CodeSection, CustomSection, Encode, Function, FunctionSection, Module, TypeSection,
+            ValType,
+        };
+
+        assert!(run_prefix >= 1 && getter_body >= 4);
+        let mut run = Function::new([]);
+        for _ in 1..run_prefix {
+            run.instructions().nop();
+        }
+        let mut getter = Function::new([]);
+        for _ in 4..getter_body {
+            getter.instructions().nop();
+        }
+        getter.instructions().i64_const(0).end();
+        assert_eq!(run.byte_len(), run_prefix);
+        assert_eq!(getter.byte_len(), getter_body);
+        let mut getter_encoded = Vec::new();
+        getter.encode(&mut getter_encoded);
+        let payload = vec![0x5a; data_length];
+        let section = CustomSection {
+            name: Cow::Borrowed("ring3.recovery"),
+            data: Cow::Borrowed(&payload),
+        };
+        let mut data_encoded = Vec::new();
+        section.encode(&mut data_encoded);
+        let cost = CandidateCost {
+            run: run.byte_len(),
+            getter: getter_encoded.len(),
+            data: data_encoded.len(),
+        };
+        // The cost is measured before a common epilogue, exactly as in emit().
+        for _ in 0..common_suffix {
+            run.instructions().nop();
+        }
+        run.instructions().end();
+        let mut types = TypeSection::new();
+        types.ty().function([], []);
+        types.ty().function([], [ValType::I64]);
+        let mut functions = FunctionSection::new();
+        functions.function(0).function(1);
+        let mut code = CodeSection::new();
+        code.function(&run).function(&getter);
+        let mut module = Module::new();
+        module
+            .section(&types)
+            .section(&functions)
+            .section(&code)
+            .section(&section);
+        (cost, module.finish())
+    }
+
+    #[test]
+    fn candidate_cost_acceptance_decreases_final_modules_across_uleb_and_suffix_boundaries() {
+        // Getter growth is deliberately compensated by run shrink. The actual
+        // Function, CodeSection and CustomSection encoders supply every length
+        // prefix; no hand-computed byte count is used as the final-size oracle.
+        let cases = [
+            // CodeSection payloads 126/127/128 before adding a suffix.
+            (58, 64, 110),
+            (59, 64, 111),
+            (60, 64, 112),
+            // CodeSection payloads 16382/16383/16384.
+            (8188, 8188, 16366),
+            (8189, 8188, 16367),
+            (8190, 8188, 16368),
+            (118, 124, 110),
+            (119, 125, 111),
+            (126, 126, 112),
+            (127, 127, 113),
+            (128, 128, 114),
+            (16374, 16378, 16366),
+            (16375, 16379, 16367),
+            (16382, 16382, 16368),
+            (16383, 16383, 16369),
+            (16384, 16384, 16370),
+        ];
+        for (run, getter, data) in cases {
+            for suffix in [0, 1, 2, 5, 126, 127, 128, 16383] {
+                let (old_cost, old_module) = encoded_cost_fixture(run, getter, data, suffix);
+                let (new_cost, new_module) =
+                    encoded_cost_fixture(run - 8, getter + 4, data, suffix);
+                assert!(new_cost.getter > old_cost.getter);
+                assert!(
+                    new_cost.improves(old_cost),
+                    "run={run} getter={getter} data={data} suffix={suffix}"
+                );
+                assert!(
+                    new_module.len() < old_module.len(),
+                    "accepted candidate increased final module: run={run} getter={getter} data={data} suffix={suffix}"
+                );
+                let (data_cost, data_module) = encoded_cost_fixture(run, getter, data - 1, suffix);
+                assert!(data_cost.improves(old_cost));
+                assert!(
+                    data_module.len() < old_module.len(),
+                    "exact custom-section savings must survive final framing"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn equal_or_costlier_encoded_candidates_keep_the_legacy_module() {
+        for (run, getter, data) in [
+            (58, 64, 110),
+            (59, 64, 111),
+            (60, 64, 112),
+            (8188, 8188, 16366),
+            (8189, 8188, 16367),
+            (8190, 8188, 16368),
+            (126, 126, 111),
+            (127, 127, 112),
+            (128, 128, 113),
+            (16382, 16382, 16367),
+            (16383, 16383, 16368),
+            (16384, 16384, 16369),
+        ] {
+            for suffix in [0, 1, 126, 127, 128] {
+                let (old_cost, old_module) = encoded_cost_fixture(run, getter, data, suffix);
+                for (new_run, new_getter, new_data) in [
+                    (run, getter, data),
+                    (run + 1, getter, data),
+                    (run, getter + 1, data),
+                    (run, getter, data + 1),
+                ] {
+                    let (new_cost, new_module) =
+                        encoded_cost_fixture(new_run, new_getter, new_data, suffix);
+                    assert!(new_module.len() >= old_module.len());
+                    assert!(
+                        !new_cost.improves(old_cost),
+                        "equal or costlier candidate selected at run={run} getter={getter} data={data} suffix={suffix}"
+                    );
+                    let selected = if new_cost.improves(old_cost) {
+                        new_module
+                    } else {
+                        old_module.clone()
+                    };
+                    assert_eq!(selected, old_module);
+                }
+            }
+        }
     }
 }
