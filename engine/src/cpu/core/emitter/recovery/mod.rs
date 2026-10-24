@@ -5,6 +5,7 @@ pub(super) mod fp;
 mod leaves;
 mod legacy;
 mod lists;
+pub(crate) mod packet;
 pub(super) mod program;
 mod recipe_vm;
 mod recipes;

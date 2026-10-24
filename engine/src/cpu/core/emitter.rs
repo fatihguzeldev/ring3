@@ -7,6 +7,7 @@ mod integer;
 pub(super) mod link;
 mod numeric;
 mod recovery;
+pub(crate) use recovery::packet as recovery_packet;
 mod region;
 mod scalar;
 mod strings;
