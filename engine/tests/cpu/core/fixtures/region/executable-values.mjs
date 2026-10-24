@@ -20,8 +20,7 @@ function scalarStructure(bytes) {
   const {ops}=module.functions[index-module.imports.length];
   const at=(index,op,local)=>ops[index]?.op===op&&(local===undefined||ops[index].local===local);
   const additions=ops.flatMap((node,i)=>node.op===0x6a?[i]:[]);
-  const dagAdditions=additions.filter(i=>at(i-2,0x20)&&ops[i-2].local>=177&&
-    at(i-1,0x20)&&ops[i-1].local>=177&&at(i+1,0x21)&&ops[i+1].local>=177);
+  const dagAdditions=additions.filter(i=>at(i+1,0x21)&&ops[i+1].local>=179);
   // The old LEA lowerer starts with the literal displacement, adds actual EAX,
   // and assigns the effective-address scratch. This is an operator pattern,
   // not a byte search or an inference from a function/descriptor name.

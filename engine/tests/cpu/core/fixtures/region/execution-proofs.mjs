@@ -43,7 +43,10 @@ export function runExecutionProofCases(fixture) {
     assert.equal(witness.fp_multiply_ops,1,'the actual Wasm performs the one guest multiplication');
     assert.equal(witness.fp_value_precision_admissions,0,
       'the same-value Native24 producer proofs remove both heavy raw-precision admissions in the next block');
-    assert.equal(witness.fp_environment_queries,1,
+    if(typeof t.api.core_continuation_format==='function') {
+      assert.equal(witness.fp_environment_queries,0,'typed block arguments need no generic environment-token queries');
+      assert.equal(witness.control_admissions,1,'one actual control admission covers all three typed blocks');
+    } else assert.equal(witness.fp_environment_queries,1,
       'the dominating imported environment token survives both actual internal CFG edges');
     if(typeof t.api.core_precise==='function')assert.equal(run.preciseCalls,0,
       'a fully admitted producer/consumer CFG never enters the exact-prefix adapter');

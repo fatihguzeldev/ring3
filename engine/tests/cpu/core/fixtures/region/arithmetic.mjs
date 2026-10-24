@@ -4,6 +4,7 @@ import {Engine,KEY,record,view} from '../../../../../../sdk/runtime/engine.js';
 import {CodeCache as CurrentCodeCache} from '../../../../../../sdk/runtime/cache.js';
 import {readGeneratedModule} from './structure.mjs';
 import {instrumentWitnessModule,readWitness,setWitnessBank,witnessCounters} from './witness.mjs';
+import {cacheCallbacks,cacheResolver,resolverExport} from '../link.mjs';
 
 const ONE='0000000000000080ff3f',HALF='0000000080000080ff3f';
 const THREE_HALVES='0000000080010080ff3f',TWO_ULPS='0000000000020080ff3f',WIDE='00000000000000807f40';
@@ -19,7 +20,7 @@ function packingProof(source) {
     nodes[i+1].value===40n&&nodes[i+2]?.op===0x88&&nodes[i+3]?.op===0x21&&nodes[i+3].local===47;
   const guards=ops.flatMap((node,i)=>{
     const p=ops.slice(i-4,i);
-    if(node.op!==4||node.frame.otherwise===undefined||p.length!==4||p[0].op!==0x20||p[0].local!==87||
+    if(node.op!==4||node.frame.otherwise===undefined||p.length!==4||p[0].op!==0x20||!(p[0].local===87||p[0].local>=179)||
       p[1].op!==0x41||p[1].value!==0x300||p[2].op!==0x71||p[3].op!==0x45)return[];
     const native=ops.slice(i+1,node.frame.otherwise),packed=ops.slice(node.frame.otherwise+1,node.frame.end);
     return[{offset:node.offset,end:node.frame.end,
@@ -68,6 +69,16 @@ export function runArithmeticCases(fixture) {
         fp:t.fp({status:single?0x20:0x220,opcode:0x15b,fip:blocks?0x1026:0x100b,fdp:0x3008,
           registers:{7:single?ONE:THREE_HALVES}})}, {packs:single?0:1},checks);
     });
+
+  for(const single of[true,false])fixture(`arithmetic-mode-correlation-${single?'pc24':'pc53'}-wait-preserves-unpublished-values`,{
+    segments:[[0x1000,'d903 d84304 d84304 d84304 9b d95b08 ffe6']],
+    registers:regs,control:single?0x7f:0x27f,data,stateWitness:true,
+  },t=>{
+    t.writeExpected(0x3008,single?'0000803f':'0200803f');
+    observe(t,{pc:0x1800,retired:7,budget:7,
+      fp:t.fp({status:single?0x20:0x220,opcode:0x15b,fip:0x100c,fdp:0x3008,
+        registers:{7:single?ONE:THREE_HALVES}})}, {packs:single?0:1},checks);
+  });
 
   for(const single of[true,false])fixture(`arithmetic-mode-correlation-${single?'pc24-rejects':'pc53-retains'}-contradictory-secondary-input`,{
     segments:cfg,registers:regs,control:single?0x7f:0x27f,data,stateWitness:true,
@@ -150,14 +161,15 @@ export function runArithmeticOwnerCases(artifact,report) {
       result.controls.push({name,wanted,actual});assert.equal(actual,wanted,`${result.name}: ${name}`);};
     const api={...raw,core_prepare:(...args)=>{prepares++;return raw.core_prepare(...args);},
       core_numeric:(...args)=>{helpers++;return raw.core_numeric(...args);},
+      ...(typeof raw.core_numeric_owned==='function'?{core_numeric_owned:(...args)=>{helpers++;return raw.core_numeric_owned(...args);}}:{}),
       core_chain_cold:()=>assert.fail('both immutable compiled owners are already retained'),
-      [typeof raw.core_chain_select==='function'?'core_chain_select':'core_chain_probe']:(context,pc,selectionRetired)=>{
+      [resolverExport(raw)]:(context,pc,selectionRetired)=>{
         assert.equal(context,cache.context);assert.equal(pc,0x1040);assert.equal(result.probes.length,0);
         const bank=word(context,92),physical7=bank+640+7*32;
         result.probes.push({pc,bankHex:Buffer.from(bytes(bank,100)).toString('hex'),
           value:new DataView(memory.buffer).getFloat64(physical7,true),
           valid:word(physical7,20),proofs:word(physical7,24),cw:word(physical7,28)});
-        const slot=(raw.core_chain_select??raw.core_chain_probe)(context,pc,selectionRetired)>>>0;assert.equal(slot,units.get(pc).slot);return slot;
+        const slot=raw[resolverExport(raw)](context,pc,selectionRetired)>>>0;assert.equal(slot,units.get(pc).slot);return slot;
       }};
     try{
       engine=new Engine(api,memory,artifact.sha256);status('open',0,12,...KEY);opened=true;engine.base=raw.arena_ptr()>>>0;
@@ -189,12 +201,16 @@ export function runArithmeticOwnerCases(artifact,report) {
       const dispatchSource=bytes(raw.core_dispatch_code_ptr()>>>0,raw.core_dispatch_code_len()>>>0);
       const shared=instrumentWitnessModule(dispatchSource,readGeneratedModule(dispatchSource),true);
       const support=new WebAssembly.Instance(new WebAssembly.Module(shared.bytes),{ring3:{memory,
-        functions:cache.table,publishers:cache.publishers,probe:api.core_chain_select??api.core_chain_probe,cold:api.core_chain_cold}}).exports;
+        functions:cache.table,publishers:cache.publishers,probe:cacheResolver(cache),cold:api.core_chain_cold}}).exports;
+      // This control deliberately requests the real native miss path so its
+      // read-only callback can inspect the producer record BEFORE ownerB uses
+      // it. Ordinary warm zero-resolver routing is proved in continuations.
+      if(cache.continuationCore){support['link.continuation'].value=0;result.forcedNativeInspection=true;}
       cache.dispatch=support;diagnostics.push(support);
       for(const module of result.modules){
         const diagnostic=instrumentWitnessModule(module.source,readGeneratedModule(module.source));
         const generated=new WebAssembly.Instance(new WebAssembly.Module(diagnostic.bytes),{ring3:{memory,
-          read:api.core_read,write:api.core_write,numeric:api.core_numeric,precise:api.core_precise,
+          read:api.core_read,write:api.core_write,...cacheCallbacks(cache),
           ...support,'support.abi':support.supportAbi}}).exports;
         const unit=units.get(module.pc);Object.assign(unit,{run:generated.run,link:generated.link,publish:generated.publish});
         cache.table.set(unit.slot,unit.link);cache.publishers.set(unit.slot,unit.publish);diagnostics.push(generated);
@@ -225,7 +241,7 @@ export function runArithmeticOwnerCases(artifact,report) {
       for(const module of result.modules){status('core_lookup',0,module.pc);assert.equal(hash(bytes(raw.core_code_ptr()>>>0,raw.core_code_len()>>>0)),module.sha256);}
       const counters=Object.fromEntries(witnessCounters.map(name=>[name,diagnostics.reduce((total,item)=>
         name.endsWith('_mask')?total|readWitness(item)[name]:total+readWitness(item)[name],0)]));
-      result.arithmeticWitness=counters;result.semanticComplete=true;
+      result.arithmeticWitness=counters;result.ownerWitnesses=diagnostics.map(item=>readWitness(item));result.semanticComplete=true;
       checks.push(()=>{
         assert.equal(counters.fp_generic_f32_packs,single?0:1,'actual ownerB packs only the PC53 value generically');
         assert.equal(counters.fp_single_precision_queries,0,'mode-correlated arithmetic survives the compiled owner boundary');

@@ -9,7 +9,7 @@ export const witnessCounters=['normalizer_calls','materializer_calls','raw80_sto
   'entry_filter_queries','entry_index_compares','entry_table_selections','entry_pending_queries','prefix_quota_queries',
   'canonical_calls','canonical_reads','canonical_writes','fp_generic_f32_packs','fp_single_precision_queries',
   'fp_value_precision_admissions','fp_operand_bounds',
-  'executable_context_reads','private_context_reads','executable_authority_reads','private_authority_reads'];
+  'executable_context_reads','private_context_reads','executable_authority_reads','private_authority_reads','scalar_eax_input_reads','canonical_publish_calls','fp_valid_writes','fp_loaded_writes','fp_token_writes','fp_add_ops','fp_single_rounds'];
 const u=value=>{const out=[];do{const b=value&127;value>>>=7;out.push(b|(value?128:0));}while(value);return Uint8Array.from(out);};
 const concat=parts=>Uint8Array.from(Buffer.concat(parts.map(value=>Buffer.from(value))));
 const section=(id,data)=>concat([Uint8Array.of(id),u(data.length),data]);
@@ -108,6 +108,7 @@ export function instrumentWitnessModule(source,parsed,isSupport=false) {
     const at=new Reader(raw);const groups=at.unsigned(),declarations=raw.subarray(at.at,fn.localsEnd);
     const chunks=[u(groups+5),declarations,Uint8Array.of(2,0x7f,1,0x7e,1,0x7d,1,0x7c,1,0x7b)];
     if(counter)chunks.push(increment(counter));
+    if(name==='guest.publish_link')chunks.push(increment('canonical_publish_calls'));
     // Count entry to the actual typed function in either module, independently
     // of its name. Selective memory writes cannot hide a 40-value call snapshot.
     if(params>=40){
@@ -130,6 +131,11 @@ export function instrumentWitnessModule(source,parsed,isSupport=false) {
       if(!isSupport&&node.op===0x20&&node.local===87&&fn.ops[i+1]?.op===0x41&&
         fn.ops[i+1].value===0xf3f&&fn.ops[i+2]?.op===0x71)before.push(increment('control_admissions'));
       if(name==='guest.run'){
+        if([0x21,0x22].includes(node.op)&&[85,153,177].includes(node.local))
+          before.push(increment(node.local===85?'fp_valid_writes':node.local===153?'fp_loaded_writes':'fp_token_writes'));
+        if(node.op===0xa0)before.push(increment('fp_add_ops'));
+        if(node.op===0xb6)before.push(increment('fp_single_rounds'));
+        if(node.op===0x20&&node.local===2)before.push(increment('scalar_eax_input_reads'));
         const following=fn.ops.slice(i+1,i+5);
         if(node.op===16&&node.call===canonicalImport)before.push(increment('canonical_calls'));
         if(node.op===16&&node.call===readImport)before.push(increment('canonical_reads'));
@@ -179,7 +185,8 @@ export function instrumentWitnessModule(source,parsed,isSupport=false) {
         if(node.op===0x20&&node.local===151&&following[0]?.op===0x45&&following[1]?.op===4)
           before.push(increment('prefix_quota_queries'));
         if(node.op===0xa2)before.push(increment('fp_multiply_ops'));
-        if(node.op===0x20&&!transported.has(i)&&[20,25].includes(node.local))
+        if(node.op===0x20&&!transported.has(i)&&[20,25].includes(node.local)&&
+          !(following[0]?.op===0x21&&following[0].local>=179))
           before.push(increment(node.local===20?'flag_kind_queries':'flag_width_queries'));
         if(node.op===0x20&&node.local===84&&following[0]?.op===0x45&&following[1]?.op===4)
           before.push(increment('fp_environment_queries'));

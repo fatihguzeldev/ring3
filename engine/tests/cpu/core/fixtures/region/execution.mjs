@@ -127,8 +127,14 @@ export function runExecutionGuardCases(fixture) {
     const{before,witness}=retained(t,{pc:0x1100,retired:6,budget:6,flags:0x46,regs:{0:0},simd,
       fp:t.fp({tag:0xfff0,opcode:0xc1,fip:0x100a,registers:{0:'00000000000000900240',1:TWO}})});
     assert.equal(t.version(),before);t.result.executionWitness=witness;
-    assert.equal(witness.fp_environment_queries,1,'only the first actual x87 use queries/imports its environment');
-    assert(witness.fp_input_load_queries>0&&witness.fp_input_load_queries<=2,'the two unchanged physical inputs are queried once');
+    if(typeof t.api.core_continuation_format==='function') {
+      assert.equal(witness.fp_environment_queries,0,'typed inputs require no generic environment-token query');
+      assert.equal(witness.control_admissions,1,'one actual control admission covers the entire typed chain');
+      assert.equal(witness.fp_input_load_queries,0,'typed operands never query the generic load mask');
+    } else {
+      assert.equal(witness.fp_environment_queries,1,'only the first actual x87 use queries/imports its environment');
+      assert(witness.fp_input_load_queries>0&&witness.fp_input_load_queries<=2,'the two unchanged physical inputs are queried once');
+    }
     assert(witness.fp_input_admission_queries<=2,'unchanged inputs reuse their dominating representation admission');
     assert(witness.fp_control_queries<=1,'one actual arithmetic-control query covers the complete admitted region');
     assert(witness.fp_occupancy_queries<=2,'unchanged occupied inputs do not repeat tag admission');
