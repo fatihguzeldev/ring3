@@ -39,6 +39,31 @@ fn memory() -> AddressSpace {
     memory
 }
 
+#[test]
+fn shared_cpu_resources_consume_the_same_global_residency_budget() {
+    let mut cache = CoreCache32::default();
+    let empty = cache.resident_charge();
+    let shared = crate::cpu::core::cold::DECODED_RESERVATION
+        + crate::cpu::core::recovery_workspace::RecoveryWorkspace::RESERVATION;
+    cache.reserve_shared_resources(shared).unwrap();
+    assert_eq!(cache.resident_charge(), empty + shared);
+    assert_eq!(cache.snapshot()[8], (empty + shared) as u64);
+    let before = cache.snapshot();
+    assert!(cache.reserve_shared_resources(1).is_err());
+    assert_eq!(cache.snapshot(), before);
+
+    let mut full = CoreCache32::default();
+    full.reserve_shared_resources(MAX_CODE_BYTES - full.resident_charge())
+        .unwrap();
+    let before = full.snapshot();
+    let memory = memory();
+    assert!(full.admit(&memory, compiled(&memory, 0x1000)).is_err());
+    assert_eq!(full.snapshot(), before);
+    assert_eq!(full.resident_charge(), MAX_CODE_BYTES);
+    assert!(full.regions.iter().all(Option::is_none));
+    assert_eq!(full.free.len(), full.regions.len());
+}
+
 fn compiled(memory: &AddressSpace, pc: u32) -> CompiledCode {
     compile(
         memory,

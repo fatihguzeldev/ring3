@@ -3,14 +3,15 @@ use crate::{
     cpu::x86::{
         SegmentContext, State32,
         decode::{
-            BoundDecode, CapturedFetchFaultKind32, CodeFetchContext, DecodeAuthority, DecodeError,
-            DecodePolicy, DecodeScratch,
+            BoundDecode, CapturedFetchFaultKind32, CodeFetchContext, DecodeError, DecodeScratch,
         },
     },
     memory::{AddressSpace, GuestAddress},
 };
 
 mod control;
+mod decoded;
+pub(crate) use decoded::RESERVATION as DECODED_RESERVATION;
 #[cfg(any(test, feature = "observability"))]
 mod diagnostics;
 mod integer;
@@ -29,6 +30,14 @@ pub(crate) trait ColdObserver {
     }
     fn tracks_heat(&self, _memory: &AddressSpace, _pc: u32) -> bool {
         true
+    }
+    fn qualify_step(
+        &mut self,
+        _memory: &AddressSpace,
+        _pc: u32,
+        _progress: ColdProgress,
+    ) -> Option<ColdStepQualification> {
+        None
     }
     fn begin_instruction(
         &mut self,
@@ -63,6 +72,12 @@ pub(crate) struct ColdProgress {
     pub remaining: u32,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct ColdStepQualification {
+    pub frontier: bool,
+    pub track_heat: bool,
+}
+
 #[derive(Clone, Copy, Default)]
 struct HeatRow {
     pc: u32,
@@ -83,6 +98,7 @@ struct ColdHeat {
 pub(crate) struct ColdState {
     heat: ColdHeat,
     decode: DecodeScratch,
+    decoded: decoded::DecodedBook,
 }
 
 impl ColdState {
@@ -108,6 +124,7 @@ impl ColdState {
         Self {
             heat: ColdHeat::new(threshold),
             decode: DecodeScratch::default(),
+            decoded: decoded::DecodedBook::default(),
         }
     }
 }
@@ -297,7 +314,11 @@ pub(crate) fn run_observed_progress(
     let Some(fetch) = CodeFetchContext::from_segments(segments) else {
         return ColdOutcome::Stop(StopReason::Infrastructure);
     };
-    let ColdState { heat, decode } = cold;
+    let ColdState {
+        heat,
+        decode,
+        decoded,
+    } = cold;
     let mut state = context.state();
     let mut retired = context.retired();
     let mut remaining = context.remaining();
@@ -320,16 +341,15 @@ pub(crate) fn run_observed_progress(
                 return finish(context, state, retired, remaining, reason);
             }
         }
-        if frontier(memory, pc, ColdProgress { retired, remaining }) {
+        let qualification = observer.qualify_step(memory, pc, ColdProgress { retired, remaining });
+        let at_frontier = qualification.map_or_else(
+            || frontier(memory, pc, ColdProgress { retired, remaining }),
+            |step| step.frontier,
+        );
+        if at_frontier {
             return finish(context, state, retired, remaining, StopReason::NeedCode);
         }
-        let decoded = match decode.decode(
-            memory,
-            GuestAddress(pc),
-            DecodePolicy::Execution,
-            Some(fetch),
-            DecodeAuthority::default(),
-        ) {
+        let decoded = match decoded.decode(decode, memory, GuestAddress(pc), fetch) {
             Ok(BoundDecode::Instruction(decoded)) => decoded,
             Ok(BoundDecode::CodeFault(fault)) => {
                 let error = match fault.kind {
@@ -409,7 +429,8 @@ pub(crate) fn run_observed_progress(
             next,
             operation,
         };
-        let track_heat = observer.tracks_heat(memory, pc);
+        let track_heat =
+            qualification.map_or_else(|| observer.tracks_heat(memory, pc), |step| step.track_heat);
         let hot = track_heat && heat.hot(memory, pc);
         if hot {
             heat.requested(pc);
@@ -587,3 +608,7 @@ mod tests;
 #[cfg(test)]
 #[path = "cold/observation_tests.rs"]
 mod observation_tests;
+
+#[cfg(test)]
+#[path = "cold/decoded_tests.rs"]
+mod decoded_tests;

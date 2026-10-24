@@ -64,6 +64,36 @@ impl CoreCache32 {
         None
     }
 
+    // one immutable lookup separates source-owned hot capability from the
+    // actual bypass/quota frontier. neither result survives the current step.
+    pub(in crate::process) fn qualify_cold_step(
+        &self,
+        memory: &AddressSpace,
+        pc: u32,
+        remaining: u32,
+        bypass: u64,
+    ) -> (bool, bool) {
+        let mut owned = false;
+        for key in self.hot_keys(pc).into_iter().flatten() {
+            let Some(entry) = self.region(key) else {
+                continue;
+            };
+            if !entry.code.is_current(memory)
+                || entry.slot != 0 && !self.reciprocal_slot(key, entry)
+            {
+                continue;
+            }
+            let Some(span) = entry.code.hot_span(pc) else {
+                continue;
+            };
+            owned = true;
+            if key.identity != bypass {
+                return (owned, span.instructions <= remaining);
+            }
+        }
+        (owned, false)
+    }
+
     pub(in crate::process) fn executable_frontier_contains(
         &self,
         memory: &AddressSpace,

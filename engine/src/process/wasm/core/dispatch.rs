@@ -6,6 +6,13 @@ use super::{REGISTRY, Registry};
 
 static DISPATCH_CODE: OnceLock<Vec<u8>> = OnceLock::new();
 
+pub(super) fn shared_capacity() -> usize {
+    DISPATCH_CODE
+        .get_or_init(crate::cpu::core::emit_dispatch)
+        .capacity()
+        + std::mem::size_of::<Vec<u8>>()
+}
+
 fn dispatch_code() -> Option<&'static [u8]> {
     let allowed = REGISTRY.with(|registry| {
         registry.try_borrow().is_ok_and(|registry| {

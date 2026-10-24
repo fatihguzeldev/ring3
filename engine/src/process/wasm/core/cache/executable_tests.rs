@@ -398,3 +398,45 @@ fn bypass_excludes_executable_and_private_geometry_fallbacks_without_retiring_ow
     }
     assert_eq!(cache.link_owners[8], cut.identity());
 }
+
+#[test]
+fn one_cold_step_keeps_ownership_separate_from_quota_bypass_and_reciprocal_authority() {
+    let mut memory = memory();
+    let (mut cache, original) = fixture(&memory);
+    let cut = add_cut(&memory, &mut cache);
+    cache.install_link(&cut, 8).unwrap();
+    for pc in [ROOT, CUT, CUT + 1, 0x2000] {
+        for remaining in [0, 1, 2, 3, 4, 8] {
+            for bypass in [0, original.identity(), cut.identity(), u64::MAX] {
+                assert_eq!(
+                    cache.qualify_cold_step(&memory, pc, remaining, bypass),
+                    (
+                        cache.current_hot_port(&memory, pc).is_some(),
+                        cache.executable_frontier_contains(&memory, pc, remaining, bypass),
+                    )
+                );
+            }
+        }
+    }
+    assert_eq!(cache.qualify_cold_step(&memory, CUT, 2, 0), (true, false));
+    assert_eq!(cache.qualify_cold_step(&memory, CUT, 3, 0), (true, true));
+    assert_eq!(
+        cache.qualify_cold_step(&memory, CUT, 8, cut.identity()),
+        (true, false)
+    );
+    let generation = cache.slot_generations[8];
+    cache.slot_generations[8] = generation.wrapping_add(1);
+    assert_eq!(cache.qualify_cold_step(&memory, CUT, 8, 0), (true, true));
+    assert!(cache.current_hot_port(&memory, CUT).is_some());
+    assert!(cache.executable_frontier_contains(&memory, CUT, 8, 0));
+    // generation belongs to the live ticket check; source capability retains
+    // the original reciprocal identity/region contract until that pair changes.
+    cache.slot_generations[8] = generation;
+    cache.link_owners[8] = original.identity();
+    assert_eq!(cache.qualify_cold_step(&memory, CUT, 8, 0), (false, false));
+    assert!(cache.current_hot_port(&memory, CUT).is_none());
+    assert!(!cache.executable_frontier_contains(&memory, CUT, 8, 0));
+    assert_eq!(cache.qualify_cold_step(&memory, ROOT, 8, 0), (true, true));
+    memory.write(GuestAddress(ROOT), &[0x90]).unwrap();
+    assert_eq!(cache.qualify_cold_step(&memory, ROOT, 8, 0), (false, false));
+}

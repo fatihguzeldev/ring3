@@ -139,6 +139,7 @@ pub(crate) fn core_cold_run(budget: u32) -> i32 {
         }
         session.context.set_word(112, 0);
         session.active = false;
+        session.recovery.disarm();
         session.cache.end_continuation();
         result
     })

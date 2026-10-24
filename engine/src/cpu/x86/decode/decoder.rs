@@ -44,6 +44,8 @@ pub(crate) struct DecodeScratch {
     info: iced_x86::InstructionInfoFactory,
     #[cfg(test)]
     info_storage: Option<[usize; 2]>,
+    #[cfg(test)]
+    decode_calls: u64,
 }
 
 impl Default for DecodeScratch {
@@ -52,6 +54,8 @@ impl Default for DecodeScratch {
             info: iced_x86::InstructionInfoFactory::new(),
             #[cfg(test)]
             info_storage: None,
+            #[cfg(test)]
+            decode_calls: 0,
         }
     }
 }
@@ -65,7 +69,15 @@ impl DecodeScratch {
         cs: Option<CodeFetchContext>,
         authority: DecodeAuthority,
     ) -> Result<BoundDecode, DecodeError> {
+        #[cfg(test)]
+        {
+            self.decode_calls = self.decode_calls.saturating_add(1);
+        }
         decode_core(memory, pc, policy, cs, authority, Some(self))
+    }
+    #[cfg(test)]
+    pub(crate) fn decode_calls(&self) -> u64 {
+        self.decode_calls
     }
 }
 

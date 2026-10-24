@@ -8,6 +8,7 @@ pub use address::{
     MemoryError, MemoryFault, PAGE_SIZE, PageRange, Permissions, WordWrite32,
 };
 pub use code::CodeSnapshot;
+pub(crate) use code::PageVersion;
 pub use space::AddressSpace;
 pub(crate) use space::CoreWriteOutcome;
 pub(crate) use space::{GuardPage32, PageInitialization, PrivatePageChange32, SharedPages};

@@ -136,17 +136,17 @@ pub(in crate::process) fn precise(
     }
     let initial_remaining = context.remaining();
     let segments = numeric.segment_context();
-    let bypass = observer.bypass_token();
+    let bypass = observer.bypass_token().unwrap_or((0, 0));
     context.bytes_mut()[120..128].fill(0);
     *selected = None;
-    let suppress_heat = cache
-        .current_hot_port(memory, context.state().eip)
-        .is_some();
     let mut precise_observer = PreciseObserver {
         observer,
         cache,
-        suppress_heat,
+        suppress_heat: false,
         force_precise: true,
+        source: Some(&source),
+        initial_remaining,
+        bypass,
     };
     let reason = run_observed_progress(
         instance,
@@ -154,19 +154,7 @@ pub(in crate::process) fn precise(
         numeric,
         &segments,
         &|modules, pc| modules.gate_at(pc).map(|gate| gate.id),
-        &|memory, pc, progress| {
-            progress.remaining < initial_remaining
-                && ((source.eligible_hot_span(pc, progress.remaining).is_some()
-                    && cache.precise_source_current(memory, &source))
-                    || cache.precise_frontier_contains(
-                        memory,
-                        pc,
-                        progress.remaining,
-                        bypass
-                            .filter(|(_, retired)| *retired == progress.retired)
-                            .map_or(0, |(identity, _)| identity),
-                    ))
-        },
+        &|_, _, _| false,
         heat,
         &mut precise_observer,
     );
@@ -196,11 +184,40 @@ struct PreciseObserver<'a, O> {
     cache: &'a CoreCache32,
     suppress_heat: bool,
     force_precise: bool,
+    source: Option<&'a RegionRef>,
+    initial_remaining: u32,
+    bypass: (u64, u32),
 }
 
 impl<O: ColdObserver> ColdObserver for PreciseObserver<'_, O> {
     fn exact_cold(&self) -> bool {
         self.force_precise || self.observer.exact_cold()
+    }
+    fn qualify_step(
+        &mut self,
+        memory: &AddressSpace,
+        pc: u32,
+        progress: cold::ColdProgress,
+    ) -> Option<cold::ColdStepQualification> {
+        let bypass = if progress.retired == self.bypass.1 {
+            self.bypass.0
+        } else {
+            0
+        };
+        let (owned, frontier) =
+            self.cache
+                .qualify_cold_step(memory, pc, progress.remaining, bypass);
+        self.suppress_heat |= owned;
+        let frontier = self.source.map_or(frontier, |source| {
+            progress.remaining < self.initial_remaining
+                && (source.eligible_hot_span(pc, progress.remaining).is_some()
+                    && self.cache.precise_source_current(memory, source)
+                    || frontier)
+        });
+        Some(cold::ColdStepQualification {
+            frontier,
+            track_heat: !self.suppress_heat && self.observer.tracks_heat(memory, pc),
+        })
     }
     fn tracks_heat(&self, memory: &AddressSpace, pc: u32) -> bool {
         !self.suppress_heat
@@ -213,11 +230,6 @@ impl<O: ColdObserver> ColdObserver for PreciseObserver<'_, O> {
         instruction: &crate::cpu::core::NativeInstruction,
         hot: bool,
     ) -> bool {
-        self.suppress_heat |= self
-            .cache
-            .current_hot_port(memory, instruction.pc)
-            .is_some();
-        let hot = hot && self.tracks_heat(memory, instruction.pc);
         self.observer.begin_instruction(memory, instruction, hot) || self.force_precise
     }
     fn complete_instruction(&mut self, memory: &AddressSpace, actual_post_pc: u32) {
@@ -413,16 +425,14 @@ pub(in crate::process) fn run_executable_observed(
     heat: &mut ColdState,
     observer: &mut impl ColdObserver,
 ) -> StopReason {
-    let suppress_heat = instance.memory.as_ref().is_some_and(|memory| {
-        cache
-            .current_hot_port(memory, context.state().eip)
-            .is_some()
-    });
     let mut observed = PreciseObserver {
         observer,
         cache,
-        suppress_heat,
+        suppress_heat: false,
         force_precise: false,
+        source: None,
+        initial_remaining: 0,
+        bypass,
     };
     run_observed_progress(
         instance,
@@ -430,18 +440,7 @@ pub(in crate::process) fn run_executable_observed(
         numeric,
         segments,
         gate_at,
-        &|memory, pc, progress| {
-            cache.executable_frontier_contains(
-                memory,
-                pc,
-                progress.remaining,
-                if progress.retired == bypass.1 {
-                    bypass.0
-                } else {
-                    0
-                },
-            )
-        },
+        &|_, _, _| false,
         heat,
         &mut observed,
     )

@@ -6,6 +6,7 @@ export_process_calls! {
     core_code_ptr();
     core_code_len();
     core_context_ptr();
+    core_recovery_scratch_ptr();
     core_begin();
     core_end();
     core_continuation_format();

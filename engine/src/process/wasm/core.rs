@@ -42,6 +42,7 @@ use crate::{
     cpu::{
         core::{
             CompileError, CompileOptions, Context32, cold::ColdState, compile_with_frontier_query,
+            recovery_workspace::RecoveryWorkspace,
         },
         x86::{SegmentContext, SegmentRegister},
     },
@@ -61,6 +62,7 @@ pub(super) struct CoreSession32 {
     exported_retired: u32,
     lease_retired: u32,
     context: Box<Context32>,
+    recovery: RecoveryWorkspace,
     active: bool,
     cold_state: ColdState,
     tracing: tracing::TraceController,
@@ -70,16 +72,47 @@ impl CoreSession32 {
     fn from_instance(instance: &EngineInstance) -> Result<Self, HostError> {
         let state = decode_state(&instance.arena()[STATE_OFFSET..STATE_OFFSET + STATE_SIZE])
             .map_err(|_| HostError::InvalidRequest)?;
+        Self::from_state_and_cache(instance, state, Self::new_cache()?)
+    }
+
+    fn new_cache() -> Result<CoreCache32, HostError> {
+        let mut cache = CoreCache32::default();
+        cache
+            .reserve_shared_resources(
+                crate::cpu::core::cold::DECODED_RESERVATION
+                    + RecoveryWorkspace::RESERVATION
+                    + dispatch::shared_capacity(),
+            )
+            .map_err(|_| HostError::InvalidRequest)?;
+        Ok(cache)
+    }
+
+    fn from_state_and_cache(
+        instance: &EngineInstance,
+        state: crate::cpu::x86::State32,
+        mut cache: CoreCache32,
+    ) -> Result<Self, HostError> {
+        let context = Box::new(Context32::new(state));
+        let recovery = RecoveryWorkspace::new(
+            (&*context as *const Context32) as usize as u32,
+            (cache.continuation_header_mut() as *mut _) as usize as u32,
+            instance
+                .memory
+                .as_ref()
+                .ok_or(HostError::InvalidRequest)?
+                .identity(),
+        );
         Ok(Self {
             code: None,
-            cache: CoreCache32::default(),
+            cache,
             cache_status: [0; 12],
             #[cfg(feature = "observability")]
             cold_status: [0; 13],
             numeric: Box::new(NumericBank::from_instance(instance)?),
             exported_retired: 0,
             lease_retired: 0,
-            context: Box::new(Context32::new(state)),
+            context,
+            recovery,
             active: false,
             cold_state: ColdState::default(),
             tracing: tracing::TraceController::default(),
@@ -105,6 +138,9 @@ impl CoreSession32 {
         compiled: bool,
         segments: SegmentContext,
     ) -> Result<(), u32> {
+        if !self.recovery.is_disarmed() {
+            return Err(7);
+        }
         let code = if compiled {
             Some(self.code.as_ref().ok_or(7_u32)?)
         } else {
@@ -126,6 +162,13 @@ impl CoreSession32 {
             selected.as_ref(),
             self.context.state().eip,
         ) {
+            return Err(7);
+        }
+        if !self
+            .recovery
+            .arm(self.cache.continuation_header_mut().nonce)
+        {
+            self.cache.end_continuation();
             return Err(7);
         }
         self.lease_retired = self.context.retired();
@@ -169,6 +212,7 @@ impl CoreSession32 {
     pub(super) fn finish_end(&mut self) {
         self.context.set_word(112, 0);
         self.active = false;
+        self.recovery.disarm();
         self.cache.end_continuation();
         self.tracing.end();
         self.refresh_trace_bypass(self.context.retired());
@@ -258,7 +302,14 @@ pub(crate) fn core_prepare(pc: u32, instructions: u32, blocks: u32) -> u32 {
         let selected = core
             .as_mut()
             .and_then(|session| session.cache.lookup(instance.memory.as_ref().unwrap(), pc));
-        let mut fresh_cache = core.is_none().then(CoreCache32::default);
+        let mut fresh_cache = if core.is_none() {
+            match CoreSession32::new_cache() {
+                Ok(cache) => Some(cache),
+                Err(error) => return status(error),
+            }
+        } else {
+            None
+        };
         let code = if let Some(code) = selected {
             code
         } else {
@@ -344,24 +395,13 @@ pub(crate) fn core_prepare(pc: u32, instructions: u32, blocks: u32) -> u32 {
                     Err(_) => return 7,
                 };
             state.eip = pc;
-            let numeric = match NumericBank::from_instance(instance) {
-                Ok(bank) => bank,
-                Err(error) => return status(error),
-            };
-            *core = Some(CoreSession32 {
-                code: Some(code),
-                cache: fresh_cache.unwrap(),
-                cache_status: [0; 12],
-                #[cfg(feature = "observability")]
-                cold_status: [0; 13],
-                numeric: Box::new(numeric),
-                exported_retired: 0,
-                lease_retired: 0,
-                context: Box::new(Context32::new(state)),
-                active: false,
-                cold_state: ColdState::default(),
-                tracing: tracing::TraceController::default(),
-            });
+            let mut session =
+                match CoreSession32::from_state_and_cache(instance, state, fresh_cache.unwrap()) {
+                    Ok(session) => session,
+                    Err(error) => return status(error),
+                };
+            session.code = Some(code);
+            *core = Some(session);
         }
         let session = core.as_mut().unwrap();
         if admitted {
@@ -508,6 +548,39 @@ pub(crate) fn core_context_ptr() -> u32 {
             return 0;
         };
         core.context_address() as u32
+    })
+}
+
+pub(crate) fn core_recovery_scratch_ptr() -> u32 {
+    REGISTRY.with(|registry| {
+        let Ok(mut registry) = registry.try_borrow_mut() else {
+            return 0;
+        };
+        let Registry { instance, core, .. } = &mut *registry;
+        if core.as_ref().is_some_and(CoreSession32::is_active) {
+            return 0;
+        }
+        if core.is_none() {
+            let Some(instance) = instance.as_mut() else {
+                return 0;
+            };
+            if instance
+                .enable_core_execution()
+                .and_then(|_| admission(instance))
+                .is_err()
+            {
+                return 0;
+            }
+            match CoreSession32::from_instance(instance) {
+                Ok(session) => *core = Some(session),
+                Err(_) => return 0,
+            }
+        }
+        let session = core.as_mut().unwrap();
+        if !session.recovery.is_disarmed() {
+            return 0;
+        }
+        session.recovery.pointer() as u32
     })
 }
 

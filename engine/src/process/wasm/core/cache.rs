@@ -56,6 +56,7 @@ pub(super) struct CoreCache32 {
     window_refusals: Vec<WindowRefusal>,
     bytes: usize,
     owner_charge: usize,
+    shared_charge: usize,
     policy: PolicyBook,
     contexts: ContextBook,
     protected_charge: usize,
@@ -313,6 +314,7 @@ impl Default for CoreCache32 {
             window_refusals: Vec::new(),
             bytes: 0,
             owner_charge: 0,
+            shared_charge: 0,
             policy: PolicyBook::default(),
             contexts: ContextBook::default(),
             protected_charge: 0,
@@ -385,6 +387,7 @@ impl CoreCache32 {
 
     fn directory_charge(&self) -> usize {
         size_of::<Self>()
+            + self.shared_charge
             + self.regions.capacity() * size_of::<Option<CachedRegion>>()
             + self.free.capacity() * size_of::<usize>()
             + self.link_owners.capacity() * size_of::<u64>()
@@ -405,6 +408,21 @@ impl CoreCache32 {
 
     fn resident_charge(&self) -> usize {
         self.owner_charge.saturating_add(self.directory_charge())
+    }
+
+    pub(super) fn reserve_shared_resources(&mut self, charge: usize) -> Result<(), CompileError> {
+        if charge == 0
+            || self.route_header.active != 0
+            || self.owner_charge != 0
+            || self.shared_charge != 0
+        {
+            return Err(CompileError::WasmLimit);
+        }
+        if self.resident_charge().saturating_add(charge) > MAX_CODE_BYTES {
+            return Err(CompileError::WasmLimit);
+        }
+        self.shared_charge = charge;
+        Ok(())
     }
 
     fn code_charge(code: &CompiledCode, entries_capacity: usize) -> usize {
@@ -454,6 +472,7 @@ impl CoreCache32 {
             }
         };
         let minimum_directory = size_of::<Self>()
+            + self.shared_charge
             + MAX_REGIONS
                 * (size_of::<Option<CachedRegion>>()
                     + size_of::<usize>()
