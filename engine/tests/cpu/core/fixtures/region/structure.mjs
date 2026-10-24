@@ -88,9 +88,9 @@ function readModule(bytes) {
       if(type===0)imports.push({module,name,type:section.unsigned()});
       else if(type===1){section.byte();const flags=section.unsigned();section.unsigned();if(flags&1)section.unsigned();assert(flags<4);}
       else if(type===2){const flags=section.unsigned();section.unsigned();if(flags&1)section.unsigned();assert(flags<4);}
-      else if(type===3){assert(module==='ring3'&&(name.startsWith('link.')||name==='trace.arena'||name==='support.abi'||name==='recovery.base'));
-        const valueType=section.byte(),mutable=section.byte();assert.equal(mutable,name==='support.abi'||name==='recovery.base'?0:1);
-        if(name==='trace.arena'||name==='recovery.base')assert.equal(valueType,0x7f,'the private capability is an i32 pointer');
+      else if(type===3){assert(module==='ring3'&&(name.startsWith('link.')||name==='trace.arena'||name==='support.abi'||name==='recovery.base'||name==='recovery.scratch'));
+        const valueType=section.byte(),mutable=section.byte();assert.equal(mutable,name==='support.abi'||name==='recovery.base'||name==='recovery.scratch'?0:1);
+        if(name==='trace.arena'||name==='recovery.base'||name==='recovery.scratch')assert.equal(valueType,0x7f,'the private capability is an i32 pointer');
         globalImports.push({module,name,valueType,mutable});}
       else assert.fail('only memory, function and typed-link imports in authored module');
     });
@@ -699,6 +699,86 @@ function inspectNormalizerKernel(module,support) {
   return summary;
 }
 
+function inspectRecoveryRejects(module,fn,body,contextGuard) {
+  const {ops}=fn,errors=[],entryReturns=[],protocolReturns=[];
+  const check=(okay,message)=>{if(!okay)errors.push(message);};
+  const global=name=>module.globalImports.findIndex(item=>item.module==='ring3'&&item.name===name);
+  const scratch=global('recovery.scratch'),continuation=global('link.continuation'),base=global('recovery.base');
+  if(scratch<0)return{errors,entryReturns,protocolReturns,entryEnd:contextGuard?.end};
+  const imported=module.imports.findIndex(item=>item.module==='ring3'&&item.name==='support.recover');
+  check(module.globalImports[scratch]?.mutable===0&&module.globalImports[scratch]?.valueType===0x7f&&
+    continuation>=0&&base>=0&&imported>=0&&JSON.stringify(signature(module,imported))===
+      JSON.stringify({parameters:[0x7f,0x7f,0x7f,0x7f],results:[0x7f]}),
+    'shared rejection guards require the actual immutable workspace and typed four-argument support.recover');
+  const immediate=node=>node?.local??node?.global??node?.call??node?.value??node?.memoryOffset;
+  const sequence=(from,wanted)=>wanted.every(([op,value],i)=>ops[from+i]?.op===op&&
+    (value===undefined||immediate(ops[from+i])===value));
+  const rejection=(at,parent)=>{
+    const frame=ops[at]?.frame;
+    return ops[at]?.op===4&&frame?.type===-64&&frame.otherwise===undefined&&
+      ops[at].frames.at(-1)===parent&&frame.end===at+3&&
+      sequence(at+1,[[0x41,8],[15],[11]])?frame:undefined;
+  };
+  let cursor=contextGuard?.end+1;
+  const entry=(condition,label)=>{
+    const guard=rejection(cursor+condition.length,body);
+    const okay=sequence(cursor,condition)&&guard;
+    check(okay,`the read-only pre-entry ${label} guard returns only Infrastructure`);
+    if(!okay)return false;
+    entryReturns.push(guard.open+2);cursor=guard.end+1;return true;
+  };
+  const pointerRange=(global,bytes)=>[[0x23,global],[0xad],[0x42,BigInt(bytes)],[0x7c],
+    [0x3f],[0xad],[0x42,16n],[0x86],[0x56]];
+  if(!entry(pointerRange(scratch,132096),'workspace bounds'))return{errors,entryReturns,protocolReturns};
+  for(const[offset,value]of[[0,0x5233504b],[4,1],[8,132096],[12,8192],[40,1024]])
+    if(!entry([[0x23,scratch],[0x28,offset],[0x41,value],[0x47]],`workspace field ${offset}`))
+      return{errors,entryReturns,protocolReturns};
+  const identity=ops[contextGuard?.open-3]?.value;
+  const conditions=[
+    [[[0x23,scratch],[0x28,16],[0x20,0],[0x47]],'context'],
+    [[[0x23,scratch],[0x28,20],[0x23,continuation],[0x47]],'continuation identity'],
+    [[[0x23,continuation],[0x45]],'nonzero continuation'],
+    [pointerRange(continuation,136),'continuation bounds'],
+    [[[0x23,continuation],[0x29,80],[0x42,identity],[0x52]],'held owner identity'],
+    [[[0x23,scratch],[0x29,32],[0x50]],'armed lease'],
+    [[[0x23,scratch],[0x29,32],[0x23,continuation],[0x29,104],[0x52]],'current lease nonce'],
+  ];
+  for(const[condition,label]of conditions)if(!entry(condition,label))return{errors,entryReturns,protocolReturns};
+  check(typeof identity==='bigint'&&entryReturns.length===13&&
+    sequence(cursor,[[0x23,global('link.mode')],[0x45],[4]]),
+    'all thirteen capability rejections precede canonical import and contain no call, store or local mutation');
+
+  const calls=ops.flatMap((node,i)=>node.op===16&&node.call===imported?[i]:[]),call=calls[0];
+  check(calls.length===1,'shared protocol rejections belong to one actual support.recover call');
+  if(calls.length!==1)return{errors,entryReturns,protocolReturns,entryEnd:cursor-1};
+  const request=ops[call-2]?.local,pointer=ops[call-1]?.local,status=ops[call+1]?.local;
+  const loop=ops[call].frames.at(-1),block=ops[call].frames.at(-2),active=ops[call].frames.at(-3),
+    requested=ops[call].frames.at(-4),rounds=ops[loop?.open+1]?.local;
+  check(sequence(call-4,[[0x20,0],[0x23,base],[0x20,request],[0x20,pointer]])&&
+    Number.isInteger(request)&&Number.isInteger(pointer)&&Number.isInteger(status)&&Number.isInteger(rounds)&&
+    loop?.kind===3&&block?.kind===2&&active?.kind===4&&requested?.kind===4&&
+    active.otherwise===undefined&&requested.otherwise===undefined&&
+    sequence(requested.open-1,[[0x20,request],[4],[0x20,request],[0x41,0],[0x4a],[0x20,84],[0x72],[4]])&&
+    active.open===requested.open+6&&sequence(active.open+1,[[0x23,scratch],[0x21,pointer]]),
+    'the cold protocol is nested only under the actual request and positive-request-or-active-FP guards');
+  const stateAt=active?.open+5,state=rejection(stateAt,active);
+  check(state&&sequence(active.open+3,[[0x20,pointer],[0x28,48]])&&
+    sequence(loop?.open-3,[[0x41,0],[0x21,rounds],[2],[3]]),
+    'the sole busy-workspace rejection reads STATE before capture and the bounded loop starts at zero');
+  const roundAt=loop?.open+7,round=rejection(roundAt,loop);
+  check(round&&sequence(loop.open+1,[[0x20,rounds],[0x41,1],[0x6a],[0x22,rounds],[0x41,3],[0x4b]])&&
+    ops.slice(loop.open+1,loop.end).filter(node=>[0x21,0x22].includes(node.op)&&node.local===rounds).length===1,
+    'the round rejection is exactly the monotone three-call limit, never a guest stop');
+  const statusAt=call+7,failed=rejection(statusAt,loop);
+  check(failed&&sequence(call+1,[[0x22,status],[0x45],[13],[0x20,status],[0x41,2],[0x4b]])&&
+    ops[call+3]?.frames.at(-1-ops[call+3].targets[0])===block&&
+    ops.slice(loop.open+1,loop.end).filter(node=>[0x21,0x22].includes(node.op)&&node.local===status).length===1,
+    'only Done leaves the loop; status above the two capture codes returns Infrastructure');
+  for(const frame of[state,round,failed])if(frame)protocolReturns.push(frame.open+2);
+  check(protocolReturns.length===3,'all three shared protocol failures are positively classified');
+  return{errors,entryReturns,protocolReturns,entryEnd:cursor-1,call};
+}
+
 function inspectExitEpilogue(module,name) {
   const named=wanted=>[...module.names].find(([,name])=>name===wanted)?.[0];
   const index=named(name),fn=module.functions[index-module.imports.length];
@@ -826,8 +906,6 @@ function inspectExitEpilogue(module,name) {
   summary.sharedExitBranches=exits.length;
   check(exits.length>1,'multiple authored guest exits share the one publication site');
   const bare=summary.explicitReturns.filter(index=>index<body.end),tailReturn=ops.length-2;
-  check(bare.length===1&&summary.explicitReturns.length===2&&summary.explicitReturns.at(-1)===tailReturn&&
-    ops[tailReturn].frames.length===1,'only the invalid-context guard bypasses the single shared epilogue return');
   const rejected=bare[0],guard=ops[rejected]?.frames.at(-1);
   const prefix=guard?ops.slice(body.open+1,guard.open):[];
   const guardPattern=[0x20,0x28,0x41,0x47,0x20,0x29,0x42,0x52,0x72];
@@ -836,11 +914,26 @@ function inspectExitEpilogue(module,name) {
     prefix.length===guardPattern.length&&prefix.every((node,i)=>node.op===guardPattern[i])&&
     prefix[0]?.local===0&&prefix[4]?.local===0&&prefix[1]?.memoryOffset===112&&
     prefix[2]?.value===1&&prefix[5]?.memoryOffset===120,
-    'the sole bare return is the untouched active-context/identity guard returning Infrastructure');
+    'the initial bare return is the untouched active-context/identity guard returning Infrastructure');
+  const recoveryRejects=inspectRecoveryRejects(module,fn,body,guard);
+  summary.errors.push(...recoveryRejects.errors);summary.recoveryRejects=recoveryRejects;
+  const privateReturns=new Set([...recoveryRejects.entryReturns,...recoveryRejects.protocolReturns]);
+  check(bare.length===1+privateReturns.size&&bare.every(index=>index===rejected||privateReturns.has(index))&&
+    summary.explicitReturns.length===bare.length+1&&summary.explicitReturns.at(-1)===tailReturn&&
+    ops[tailReturn].frames.length===1,'only positively verified private Infrastructure rejections bypass the terminal epilogue');
+  if(recoveryRejects.entryReturns.length){
+    const mutate=(at,change)=>({...fn,ops:ops.map((node,i)=>i===at?{...node,...change}:node)});
+    check(inspectRecoveryRejects(module,mutate(recoveryRejects.entryReturns[0]-1,{value:2}),body,guard).errors.length>0,
+      'the guard proof rejects a capability branch that returns a normal guest stop');
+    check(inspectRecoveryRejects(module,mutate(recoveryRejects.call,{call:publication}),body,guard).errors.length>0,
+      'the guard proof rejects substitution of the real recovery helper');
+    check(inspectRecoveryRejects(module,mutate(recoveryRejects.protocolReturns[1]-4,{value:4}),body,guard).errors.length>0,
+      'the guard proof rejects a changed helper-round bound');
+  }
   // Cut the real publisher node from the decoded CFG. Every valid-context path to a normal
   // return or implicit function end must disappear; otherwise publication can be bypassed.
   const reached=new Set(),pending=guard?[guard.end+1]:[];
-  while(pending.length){const node=pending.pop();if(node===publish||reached.has(node))continue;
+  while(pending.length){const node=pending.pop();if(node===publish||privateReturns.has(node)||reached.has(node))continue;
     reached.add(node);pending.push(...edges[node]);}
   check(![...reached].some(index=>ops[index].op===15||ops[index].op===11&&ops[index].frame.kind===0xff),
     'the sole publisher dominates all valid-context normal returns');

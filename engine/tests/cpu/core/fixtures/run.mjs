@@ -1,4 +1,5 @@
-import {instantiateCore,coreImports,coreSupportSource,instantiateSupport,registerStandaloneRecovery} from './link.mjs';
+import {instantiateCore,coreImports,coreSupportSource,instantiateSupport,registerStandaloneRecovery,
+  beginStandaloneRecovery,endStandaloneRecovery} from './link.mjs';
 import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
 import {readFileSync, writeFileSync} from 'node:fs';
@@ -19,7 +20,7 @@ const PRIVATE = 0x530100;
 const NUMERIC = 0x540000;
 const RAW80 = Buffer.from('7856341200000080ff3f', 'hex');
 const memory = new WebAssembly.Memory({initial: 96});
-registerStandaloneRecovery(memory,16*1024*1024);
+registerStandaloneRecovery(memory,16*1024*1024,{transientCpu:true});
 const bytes = new Uint8Array(memory.buffer), view = new DataView(memory.buffer);
 const get = offset => view.getUint32(offset, true);
 const put = (offset, value) => view.setUint32(offset, value >>> 0, true);
@@ -225,7 +226,9 @@ function check(name, label, budget, options, outcome) {
   for (const [index, selected] of (options?.sequence ?? [name]).entries()) {
     const program = programs.get(selected); assert(program, `declared generated module ${selected}`);
     if (index > 0) view.setBigUint64(CTX + 120, program.identity, true);
-    reason = program.run(CTX, remainingBudget) >>> 0;
+    beginStandaloneRecovery(memory,CTX,program.identity);
+    try {reason = program.run(CTX, remainingBudget) >>> 0;}
+    finally {endStandaloneRecovery(memory);}
     moduleSequence.push({name: selected, reason, budget: remainingBudget,
       context: Buffer.from(bytes.subarray(CTX, CTX + 128)).toString('hex')});
     remainingBudget = get(CTX + 44);

@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
 import {Engine,KEY,record,view} from '../../../../../../sdk/runtime/engine.js';
 import {CodeCache as CurrentCodeCache} from '../../../../../../sdk/runtime/cache.js';
-import {cacheCallbacks,cacheResolver,resolverExport,forceNativeInspection,sourceInspectionApi} from '../link.mjs';
+import {cacheCallbacks,cacheResolver,resolverExport,forceNativeInspection,sourceInspectionApi,recoveryBindings} from '../link.mjs';
 import {readGeneratedModule} from './structure.mjs';
 import {instrumentWitnessModule,readWitness,setWitnessBank,resetWitnessMasks,witnessCounters} from './witness.mjs';
 
@@ -103,9 +103,10 @@ function runLinkedPoolCase(artifact,report,iterations) {
     for(const module of result.modules){
       const unit=units.get(module.pc);
       const diagnostic=instrumentWitnessModule(module.source,readGeneratedModule(module.source));
+      const generatedModule=new WebAssembly.Module(diagnostic.bytes);
       const bindings={memory,read:api.core_read,write:api.core_write,...cacheCallbacks(cache),
-        ...support,'support.abi':support.supportAbi,'recovery.base':unit.recoveryBase};
-      const generated=new WebAssembly.Instance(new WebAssembly.Module(diagnostic.bytes),{ring3:bindings}).exports;
+        ...support,'support.abi':support.supportAbi,...recoveryBindings(generatedModule,memory,unit.recoveryBase)};
+      const generated=new WebAssembly.Instance(generatedModule,{ring3:bindings}).exports;
       Object.assign(unit,{run:generated.run,link:generated.link,publish:generated.publish});
       cache.table.set(unit.slot,unit.link);cache.publishers.set(unit.slot,unit.publish);diagnostics.push(generated);
       module.instrumentedSha256=hash(diagnostic.bytes);module.proof=diagnostic.proof;delete module.source;

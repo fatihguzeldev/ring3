@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
 import {coldFixture,coldLiteral} from '../../../../support/core_wasm/cold_observed.mjs';
-import {cacheCallbacks} from '../link.mjs';
+import {cacheCallbacks,recoveryBindings} from '../link.mjs';
 import {readGeneratedModule} from './structure.mjs';
 import {instrumentWitnessModule,readWitness,setWitnessBank} from './witness.mjs';
 
@@ -50,10 +50,11 @@ function ports(source) {
 function instrument(world,unit) {
   const source=world.moduleRecords.get(unit.id).source;
   const diagnostic=instrumentWitnessModule(source,readGeneratedModule(source));
-  const exports=new WebAssembly.Instance(new WebAssembly.Module(diagnostic.bytes),{ring3:{
+  const module=new WebAssembly.Module(diagnostic.bytes);
+  const exports=new WebAssembly.Instance(module,{ring3:{
     memory:world.memory,read:world.api.core_read,write:world.api.core_write,
     ...cacheCallbacks(world.cache),...world.cache.dispatch,'support.abi':world.cache.dispatch.supportAbi,
-    'recovery.base':unit.recoveryBase,
+    ...recoveryBindings(module,world.memory,unit.recoveryBase),
   }}).exports;
   Object.assign(unit,{run:exports.run,link:exports.link,publish:exports.publish});
   world.cache.table.set(unit.slot,unit.link);world.cache.publishers.set(unit.slot,unit.publish);

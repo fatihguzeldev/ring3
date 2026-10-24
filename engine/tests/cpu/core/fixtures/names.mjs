@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import {supportNames} from './link.mjs';
+import {coreImports,supportNames} from './link.mjs';
 
 function readNames(module) {
   const sections = WebAssembly.Module.customSections(module, 'name');
@@ -45,11 +45,13 @@ export function assertCoreNames(module, ownerEntry, identity) {
   assert(moduleName.startsWith(prefix), 'profiler module identifies the immutable owner entry');
   assert.match(moduleName.slice(prefix.length), /^[1-9][0-9]*$/, 'profiler module identifies its compilation');
   if (identity !== undefined) assert.equal(moduleName, prefix + identity);
+  coreImports(module);
+  const actualSupport=WebAssembly.Module.imports(module).filter(item=>item.kind==='function'&&item.name.startsWith('support.')).map(item=>item.name);
   const numeric = WebAssembly.Module.imports(module).some(item => item.name === 'numeric');
   const precise = WebAssembly.Module.imports(module).some(item => item.name === 'precise');
   const names = ['guest.read_slow', 'guest.write_slow', ...(numeric ? ['guest.numeric'] : []),
     ...(precise ? ['guest.precise'] : []),
-    ...supportNames,'guest.run', 'guest.lookup', 'guest.publish', 'guest.commit_frame_cold','guest.select_frame'];
+    ...actualSupport,'guest.run', 'guest.lookup', 'guest.publish', 'guest.commit_frame_cold','guest.select_frame'];
   const wrappers = ['guest.entry', 'guest.link', 'guest.publish_link'];
   names.push(...wrappers);
   if(precise)names.push('guest.hot_entry');
@@ -70,8 +72,9 @@ export function assertCoreNames(module, ownerEntry, identity) {
 }
 
 export function assertDispatchNames(module) {
+  const actualSupport=WebAssembly.Module.exports(module).some(item=>item.name==='support.recover')?supportNames:supportNames.slice(0,-1);
   assert.deepEqual(readNames(module), {moduleName: 'ring3.dispatch',
-    functions: ['guest.probe','guest.cold','guest.chain',...(WebAssembly.Module.exports(module).some(item=>item.name==='link.continuation')?['guest.continuation']:[]),...supportNames].map((name,index)=>[index,name])});
+    functions: ['guest.probe','guest.cold','guest.chain',...(WebAssembly.Module.exports(module).some(item=>item.name==='link.continuation')?['guest.continuation']:[]),...actualSupport].map((name,index)=>[index,name])});
 }
 
 export function coreFunctionNames(module) {

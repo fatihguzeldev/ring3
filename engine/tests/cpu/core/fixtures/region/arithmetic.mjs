@@ -4,7 +4,7 @@ import {Engine,KEY,record,view} from '../../../../../../sdk/runtime/engine.js';
 import {CodeCache as CurrentCodeCache} from '../../../../../../sdk/runtime/cache.js';
 import {readGeneratedModule} from './structure.mjs';
 import {instrumentWitnessModule,readWitness,setWitnessBank,witnessCounters} from './witness.mjs';
-import {cacheCallbacks,cacheResolver,resolverExport,sourceInspectionApi} from '../link.mjs';
+import {cacheCallbacks,cacheResolver,resolverExport,sourceInspectionApi,recoveryBindings,forceNativeInspection} from '../link.mjs';
 
 const ONE='0000000000000080ff3f',HALF='0000000080000080ff3f';
 const THREE_HALVES='0000000080010080ff3f',TWO_ULPS='0000000000020080ff3f',WIDE='00000000000000807f40';
@@ -205,14 +205,14 @@ export function runArithmeticOwnerCases(artifact,report) {
       // This control deliberately requests the real native miss path so its
       // read-only callback can inspect the producer record BEFORE ownerB uses
       // it. Ordinary warm zero-resolver routing is proved in continuations.
-      if(cache.continuationCore){support['link.continuation'].value=0;result.forcedNativeInspection=true;}
-      cache.dispatch=support;diagnostics.push(support);
+       cache.dispatch=support;forceNativeInspection(cache,result);diagnostics.push(support);
       for(const module of result.modules){
         const unit=units.get(module.pc);
         const diagnostic=instrumentWitnessModule(module.source,readGeneratedModule(module.source));
-        const generated=new WebAssembly.Instance(new WebAssembly.Module(diagnostic.bytes),{ring3:{memory,
+        const generatedModule=new WebAssembly.Module(diagnostic.bytes);
+        const generated=new WebAssembly.Instance(generatedModule,{ring3:{memory,
           read:api.core_read,write:api.core_write,...cacheCallbacks(cache),
-          ...support,'support.abi':support.supportAbi,'recovery.base':unit.recoveryBase}}).exports;
+          ...support,'support.abi':support.supportAbi,...recoveryBindings(generatedModule,memory,unit.recoveryBase)}}).exports;
         Object.assign(unit,{run:generated.run,link:generated.link,publish:generated.publish});
         cache.table.set(unit.slot,unit.link);cache.publishers.set(unit.slot,unit.publish);diagnostics.push(generated);
         module.packing=packingProof(module.source);module.instrumentedSha256=hash(diagnostic.bytes);delete module.source;

@@ -3,7 +3,7 @@ import {createHash} from 'node:crypto';
 import {coldFixture,coldLiteral} from '../../../../support/core_wasm/cold_observed.mjs';
 import {readGeneratedModule} from './structure.mjs';
 import {instrumentWitnessModule,readWitness,setWitnessBank,resetWitnessMasks,witnessCounters} from './witness.mjs';
-import {cacheCallbacks,cacheResolver,bindCacheContinuation} from '../link.mjs';
+import {cacheCallbacks,cacheResolver,bindCacheContinuation,recoveryBindings} from '../link.mjs';
 
 const A=0x1000,B=0x1040,C=0x1080;
 const ODD='0008000000000080ff3f',UP='0010000000000080ff3f';
@@ -74,9 +74,10 @@ function instrument(world,units,probes) {
   for(const unit of units.values()) {
     const record=world.moduleRecords.get(unit.id);assert(record?.source);
     const measured=instrumentWitnessModule(record.source,readGeneratedModule(record.source));
-    const generated=new WebAssembly.Instance(new WebAssembly.Module(measured.bytes),{ring3:{memory:world.memory,
+    const module=new WebAssembly.Module(measured.bytes);
+    const generated=new WebAssembly.Instance(module,{ring3:{memory:world.memory,
       read:world.api.core_read,write:world.api.core_write,...cacheCallbacks(world.cache),
-      ...support,'support.abi':support.supportAbi,'recovery.base':unit.recoveryBase}}).exports;
+      ...support,'support.abi':support.supportAbi,...recoveryBindings(module,world.memory,unit.recoveryBase)}}).exports;
     Object.assign(unit,{run:generated.run,link:generated.link,publish:generated.publish});
     world.cache.table.set(unit.slot,unit.link);world.cache.publishers.set(unit.slot,unit.publish);
     unit.retained={...record,slot:unit.slot,run:unit.run,link:unit.link,publish:unit.publish};

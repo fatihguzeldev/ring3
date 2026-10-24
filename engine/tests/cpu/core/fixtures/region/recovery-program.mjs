@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
 import {readGeneratedModule,inspectSharedCallbackSpine} from './structure.mjs';
 import {inspectCompletedHandoffs} from './completed-structure.mjs';
+import {inspectSharedRecovery} from './recovery-compact.mjs';
 
 const ROOT=0x1000,TARGET=0x1800,FLAGS=0x403;
 const registers=[0x13579bdf,2,0x2468ace0,0x3000,0x4800,0x89abcdef,TARGET,0x76543210];
@@ -26,6 +27,8 @@ function format(bytes) {
   const module=readGeneratedModule(bytes),runIndex=[...module.names].find(([,name])=>name==='guest.run')?.[0];
   assert(Number.isInteger(runIndex)&&runIndex>=module.imports.length,'actual guest.run is defined');
   const run=module.functions[runIndex-module.imports.length];
+  let sharedAdapter,sharedError;
+  try{sharedAdapter=inspectSharedRecovery(bytes);}catch(error){sharedError=String(error?.message??error);}
   const dataFunctions=[...module.names].filter(([,name])=>name==='guest.recovery_data'||/^guest\.recovery_data\.\d+$/.test(name));
   const main=dataFunctions.filter(([,name])=>name==='guest.recovery_data');
   const dataIndices=new Set(dataFunctions.map(([index])=>index));
@@ -92,7 +95,7 @@ function format(bytes) {
       exported:[...module.exports.values()].includes(index)};
   });
   return{bytes:bytes.length,bodyBytes:run.raw.length,operators:run.ops.length,
-    mainGetters:main.length,projectionStarts,resetOrigins,getterCalls,functions,callbackSpine,completedHandoffs,
+    mainGetters:main.length,projectionStarts,resetOrigins,getterCalls,functions,callbackSpine,completedHandoffs,sharedAdapter,sharedError,
     metadataSections:sections.length,metadata,bases};
 }
 
@@ -168,7 +171,12 @@ export function runRecoveryProgramCases(fixture) {
           assert.deepEqual(fn.baseReads,Array(metadata.mode===0?3:5).fill(26));
           assert.equal(fn.exported,false,'metadata is private to the guarded body');
         }
-        assert.equal(proof.resetOrigins.shared.length,1,'one actual descriptor-driven FP projection executor');
+        assert.equal(proof.sharedError,undefined,'shared recovery representation is positively authenticated');
+        if(proof.sharedAdapter){
+          assert.equal(proof.resetOrigins.shared.length,0,'the shared form removes the old owner-local projection executor');
+          assert.equal(proof.sharedAdapter.outputs.filter(output=>output.local===85).length,1,
+            'one actual written-mask role applies the shared VALID projection after both selected capture phases');
+        }else assert.equal(proof.resetOrigins.shared.length,1,'one actual descriptor-driven owner-local FP projection executor');
         assert.equal(proof.resetOrigins.blockEntry.length,1,'one unchanged block-entry view reset');
         assert.equal(proof.resetOrigins.inlineCommit.length,1,
           'the one selective pool commit clears its view after writing the pending-result header');
@@ -210,8 +218,9 @@ export function runRecoveryProgramCases(fixture) {
   for(const check of checks)check();
   for(const single of[true,false]){
     const rows=proofs.filter(row=>row.single===single);
-    assert(rows.every(row=>JSON.stringify(Object.fromEntries(Object.entries(row.proof.resetOrigins).map(([key,value])=>[key,value.length])))===
-      JSON.stringify(Object.fromEntries(Object.entries(rows[0].proof.resetOrigins).map(([key,value])=>[key,value.length])))),
+    const purposes=proof=>Object.fromEntries(Object.entries(proof.resetOrigins).map(([key,value])=>
+      [key,value.length+(key==='shared'?Number(!!proof.sharedAdapter):0)]));
+    assert(rows.every(row=>JSON.stringify(purposes(row.proof))===JSON.stringify(purposes(rows[0].proof))),
       'increasing distinct recovery prefixes does not duplicate the projection executor');
   }
 }

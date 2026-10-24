@@ -5,7 +5,7 @@ import {CodeCache as CurrentCodeCache} from '../../../../../../sdk/runtime/cache
 import {readGeneratedModule} from './structure.mjs';
 import {instrumentWitnessModule,readWitness,setWitnessBank,witnessCounters} from './witness.mjs';
 import {instrumentObservedModule,readObservedWitness} from './observed-witness.mjs';
-import {cacheCallbacks,cacheResolver,bindCacheContinuation} from '../link.mjs';
+import {cacheCallbacks,cacheResolver,bindCacheContinuation,recoveryBindings} from '../link.mjs';
 
 const FP=4236,SIMD=4364,YMM=4612,ROOT=0x1000,CALLEE=0x1100;
 const THREE='00000000000000c00040',TWO='00000000000000800040';
@@ -152,9 +152,10 @@ function fixture(artifact,report,name,options,body) {
       }
       for(const{unit,module}of units.values())if(!module.instrumentedSha256){
         const diagnostic=instrumentObservedModule(module.source);
+        const generatedModule=new WebAssembly.Module(diagnostic.bytes);
         const bindings={memory,read:api.core_read,write:api.core_write,...cacheCallbacks(cache),
-          ...cache.dispatch,'support.abi':cache.dispatch.supportAbi,'recovery.base':unit.recoveryBase};
-        const generated=new WebAssembly.Instance(new WebAssembly.Module(diagnostic.bytes),{ring3:bindings}).exports;
+          ...cache.dispatch,'support.abi':cache.dispatch.supportAbi,...recoveryBindings(generatedModule,memory,unit.recoveryBase)};
+        const generated=new WebAssembly.Instance(generatedModule,{ring3:bindings}).exports;
         Object.assign(unit,{run:generated.run,link:generated.link,publish:generated.publish});
         cache.table.set(unit.slot,unit.link);cache.publishers.set(unit.slot,unit.publish);
         diagnostics.push(generated);owners.push(generated);setWitnessBank(generated,bank);

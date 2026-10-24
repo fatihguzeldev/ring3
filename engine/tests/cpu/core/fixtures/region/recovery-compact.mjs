@@ -154,6 +154,113 @@ function recipeTable(words,base,sites) {
     maxClosure:Math.max(...closures.map(c=>c.count)),records};
 }
 
+
+// The shared form is identified by its actual scratch transport, held ticket,
+// bounded helper call loop, selected closure capture and every finite output.
+// Importing the complete support ABI alone never identifies this form.
+export function inspectSharedRecovery(source) {
+  const module=readGeneratedModule(source),scratch=module.globalImports.flatMap((item,index)=>
+    item.module==='ring3'&&item.name==='recovery.scratch'?[{...item,index}]:[]),
+    imported=module.imports.findIndex(item=>item.module==='ring3'&&item.name==='support.recover'),
+    runIndex=[...module.names].find(([,name])=>name==='guest.run')?.[0],
+    getter=[...module.names].find(([,name])=>name==='guest.recovery_data')?.[0];
+  const run=module.functions[runIndex-module.imports.length],ops=run?.ops??[],
+    helperCalls=ops.filter(node=>node.op===16&&node.call===imported);
+  if(!scratch.length){assert.equal(helperCalls.length,0,'a legacy encoding does not call the shared recovery helper');return null;}
+  assert.deepEqual(scratch,[{module:'ring3',name:'recovery.scratch',valueType:0x7f,mutable:0,index:27}]);
+  assert(imported>=0&&Number.isInteger(getter)&&getter>=module.imports.length);
+  assert.deepEqual(module.types[module.imports[imported].type],{parameters:[0x7f,0x7f,0x7f,0x7f],results:[0x7f]});
+  assert.equal(helperCalls.length,1,'one actual shared recovery callsite');
+  const eq=(n,op,local)=>n?.op===op&&(local===undefined||n.local===local),
+    get=(n,local)=>eq(n,0x20,local),set=(n,local)=>eq(n,0x21,local),
+    find=(from,to,predicate)=>ops.slice(from,to).findIndex((_,j)=>predicate(ops.slice(from+j))),
+    global=(n,index)=>n?.op===0x23&&n.global===index;
+  const wrappers=[];
+  for(let i=0;i+10<ops.length;i++){
+    const q=ops.slice(i,i+10),request=q[0]?.local;
+    if(!get(q[0],request)||!eq(q[1],4)||!get(q[2],request)||!constant(q[3],0)||!eq(q[4],0x4a)||
+      !get(q[5],84)||!eq(q[6],0x72)||!eq(q[7],4)||!global(q[8],27)||!localSet(q[9]))continue;
+    const outer=q[1].frame,guard=q[7].frame,packet=q[9].local,body=ops.slice(guard.open+1,guard.end),
+      call=helperCalls[0],callIndex=ops.indexOf(call);
+    if(!call.frames.includes(guard))continue;
+    const store32=(offset)=>body.flatMap((n,j)=>n.op===0x36&&n.memoryOffset===offset&&
+      get(body[j-2],packet)&&constant(body[j-1])&&n.frames.at(-1)===guard?[{value:body[j-1].value,offset:n.offset}]:[]),
+      fixed=offset=>{const rows=store32(offset);assert.equal(rows.length,1,`one immutable packet field at${offset}`);return rows[0].value;};
+    const colors=fixed(68),base=fixed(96),count=fixed(100),siteWords=fixed(104),expressionBase=fixed(108);
+    assert(colors>0&&colors<=8192&&base>=siteWords&&count>0&&siteWords>0&&siteWords%7===0&&expressionBase>=179);
+    const ownerStores=body.filter((n,j)=>n.op===0x37&&n.memoryOffset===56&&get(body[j-2],packet)&&
+      body[j-1]?.op===0x42&&n.frames.at(-1)===guard);
+    assert.equal(ownerStores.length,1);const owner=body[body.indexOf(ownerStores[0])-1].value;
+    for(const[offset,header,wide]of[[64,76,false],[72,88,true],[80,104,true]])assert(find(guard.open+1,callIndex,q=>
+      get(q[0],packet)&&global(q[1],23)&&eq(q[2],wide?0x29:0x28)&&q[2].memoryOffset===header&&
+      eq(q[3],wide?0x37:0x36)&&q[3].memoryOffset===offset&&q[3].frames.at(-1)===guard)>=0,
+      `packet${offset} copies actual held header field${header}`);
+    assert(find(guard.open+1,callIndex,q=>get(q[0],packet)&&global(q[1],26)&&eq(q[2],0x36)&&q[2].memoryOffset===88&&
+      q[2].frames.at(-1)===guard)>=0);
+    assert(find(guard.open+1,callIndex,q=>get(q[0],packet)&&get(q[1],request)&&eq(q[2],0x36)&&q[2].memoryOffset===92&&
+      q[2].frames.at(-1)===guard)>=0);
+    for(const[offset,local]of[[112,84],[116,86],[120,109],[124,126],[128,96],[132,152],[136,131],[140,12],[144,13],[148,10]])
+      assert(find(guard.open+1,callIndex,q=>get(q[0],packet)&&get(q[1],local)&&eq(q[2],0x36)&&
+        q[2].memoryOffset===offset&&q[2].frames.at(-1)===guard)>=0,`actual caller state field${offset}`);
+    const args=ops.slice(callIndex-4,callIndex);
+    assert(get(args[0],0)&&global(args[1],26)&&get(args[2],request)&&get(args[3],packet),'actual helper consumes ctx/blob/signedsite/descriptor');
+    const result=ops.slice(callIndex+1,callIndex+8),status=result[0]?.local;
+    assert(eq(result[0],0x22)&&eq(result[1],0x45)&&eq(result[2],13)&&result[2].targets[0]===1&&
+      get(result[3],status)&&constant(result[4],2)&&eq(result[5],0x4b)&&eq(result[6],4),'DONE exits and all unknown helper statuses reject');
+    const loop=call.frames.findLast(frame=>frame.kind===3);assert(loop);
+    const protocolRejectReturns=[],reject=frame=>{const body=ops.slice(frame.open+1,frame.end);
+      assert(frame.otherwise===undefined&&body.length===2&&constant(body[0],8)&&eq(body[1],15),
+        'protocol rejection returns exact Infrastructure before any architectural output');
+      protocolRejectReturns.push(body[1].offset);};
+    const idle=find(guard.open+1,loop.open,q=>get(q[0],packet)&&eq(q[1],0x28)&&q[1].memoryOffset===48&&eq(q[2],4));
+    assert(idle>=0,'packet must be idle before entering helper');reject(ops[guard.open+1+idle+2].frame);
+    reject(result[6].frame);
+    const counter=find(loop.open+1,callIndex,q=>get(q[0])&&constant(q[1],1)&&eq(q[2],0x6a)&&eq(q[3],0x22,q[0].local)&&
+      constant(q[4],3)&&eq(q[5],0x4b)&&eq(q[6],4));assert(counter>=0,'at most three calls encode exactly two capture rounds');
+    reject(ops[loop.open+1+counter+6].frame);
+    const capture=find(callIndex+1,loop.end,q=>get(q[0],request)&&get(q[1],request)&&constant(q[2],-1)&&eq(q[3],0x6c)&&
+      get(q[4],request)&&constant(q[5],0)&&eq(q[6],0x4a)&&eq(q[7],0x1b)&&constant(q[8],5)&&eq(q[9],0x6a)&&
+      eq(q[10],16)&&q[10].call===getter);assert(capture>=0,'capture reads exact absolute-site Header6 closure');
+    const captureOps=ops.slice(callIndex+1,loop.end),packetStores=captureOps.filter(n=>n.op===0x37||n.op===0x36);
+    assert(packetStores.some(n=>n.op===0x37&&n.memoryOffset===0)&&packetStores.some(n=>n.op===0x36&&n.memoryOffset===8),
+      'capture writes raw64 bits and exact signed RefId marker');
+    assert(captureOps.some(n=>n.op===0x28&&n.memoryOffset===12)&&captureOps.some(n=>n.op===0x28&&n.memoryOffset===52),
+      'capture gates actual cell/request epochs');
+    assert(captureOps.some((n,j)=>constant(n,base)&&eq(captureOps[j-1],0x74)&&eq(captureOps[j+1],0x6a)),
+      'the capture decoder consumes this owner recipe base');
+    const targets=[2,3,4,5,6,7,8,9,11,20,25,21,22,23,24,87,88,90,91,92,93,94,95,100,101,102,103,
+      76,77,78,79,80,81,82,83,110,111,112,113,114,115,116,117,118,119,120,121,122,123,124,125,85,109,158,177,10,13,12,131];
+    const outputs=[];
+    targets.forEach((local,role)=>{
+      const start=find(loop.end+1,guard.end,q=>get(q[0],packet)&&eq(q[1],0x29)&&q[1].memoryOffset===152&&
+        eq(q[2],0x42)&&q[2].value===(1n<<BigInt(role))&&eq(q[3],0x83)&&eq(q[4],0x50)&&eq(q[5],0x45)&&eq(q[6],4)&&
+        get(q[7],packet)&&eq(q[8],0x29)&&q[8].memoryOffset===160+8*role);
+      assert(start>=0,`fixed output role${role} is controlled by its actual written-mask bit`);
+      const at=loop.end+1+start,frame=ops[at+6].frame,body=ops.slice(frame.open+1,frame.end),
+        type=local>=76&&local<84||local>=101&&local<104?2:local>=110&&local<118||local===177?1:0,
+        wanted=type===0?[0x20,0x29,0xa7,0x21]:type===1?[0x20,0x29,0x21]:[0x20,0x29,0xbf,0x21];
+      assert.deepEqual(body.map(n=>n.op),wanted);assert.equal(body.at(-1).local,local);
+      assert(frame.open>loop.end&&ops[frame.open].frames.at(-1)===guard,'all selected sources finish before any finite local output');
+      outputs.push({role,local,type,offset:ops[frame.open].offset,setOffset:body.at(-1).offset});
+    });
+    assert(find(loop.end+1,guard.end,q=>get(q[0],packet)&&constant(q[1],0)&&eq(q[2],0x36)&&q[2].memoryOffset===48&&
+      get(q[3],packet)&&eq(q[4],0x42)&&q[4].value===0n&&eq(q[5],0x37)&&q[5].memoryOffset===152)>=0,
+      'output adapter releases state/mask before any existing service continuation');
+    const sites=[...new Set(ops.flatMap((node,j)=>set(node,request)&&constant(ops[j-1])&&ops[j-1].value!==0?
+      [Math.abs(ops[j-1].value)-1]:[]))].sort((a,b)=>a-b);
+    assert.equal(siteWords,7*sites.length);sites.forEach((site,j)=>assert.equal(site,7*j));
+    const {metadata,words}=wordsOf(source),table=recipeTable(words,base,sites);
+    assert.equal(owner,metadata.identity);assert.equal(table.count,count);
+    assert(table.records.every(record=>record.color<colors),'every serialized reference fits the bounded typed color transport');
+    wrappers.push({requestLocal:request,packetLocal:packet,scratchGlobal:27,baseGlobal:26,helper:imported,
+      callOffset:call.offset,guardOffset:ops[guard.open].offset,endOffset:ops[guard.end].offset,
+      recipeBase:base,recipeCount:count,colors,siteWords,sites:sites.length,recipeKinds:table.kinds,
+      maxClosure:table.maxClosure,outputs,protocolRejectReturns});
+  }
+  assert.equal(wrappers.length,1,'one positively authenticated shared capture/output adapter');
+  return wrappers[0];
+}
+
 // Authenticate the actual source-backed VM packet. Its loops walk Header6's
 // selected closure; unrelated color selectors or arbitrary loops cannot pass.
 function compactFormat(source) {
@@ -161,8 +268,8 @@ function compactFormat(source) {
     index=named('guest.run'),getter=named('guest.recovery_data');
   assert(Number.isInteger(index)&&index>=module.imports.length);
   assert(Number.isInteger(getter)&&getter>=module.imports.length);
-  const run=module.functions[index-module.imports.length],{metadata,words}=wordsOf(source),candidates=[];
-  for(let i=0;i+7<run.ops.length;i++){
+  const run=module.functions[index-module.imports.length],{metadata,words}=wordsOf(source),candidates=[],shared=inspectSharedRecovery(source);
+  for(let i=0;!shared&&i+7<run.ops.length;i++){
     const p=run.ops.slice(i,i+8);
     if(p[0].op!==0x22||!constant(p[1],1)||p[2].op!==0x6b||!constant(p[3],2)||p[4].op!==0x74||
       !constant(p[5])||p[5].value<0||p[6].op!==0x6a||!localSet(p[7]))continue;
@@ -210,8 +317,8 @@ function compactFormat(source) {
       kindCases:cases,recipeCount:table.count,sites:table.sites,maxClosure:table.maxClosure,
       closures:table.closures,recipeKinds:table.kinds});
   }
-  const legacy=candidates.length?null:legacyFormat(run,getter,words);
-  return{encodedBytes:source.length,bodyBytes:run.raw.length,operators:run.ops.length,legacy,
+  const legacy=candidates.length||shared?null:legacyFormat(run,getter,words);
+  return{encodedBytes:source.length,bodyBytes:run.raw.length,operators:run.ops.length,legacy,shared,
     metadata:{version:metadata.version,mode:metadata.mode,owner:String(metadata.identity),words:metadata.words,
       bytes:metadata.byteLength},vmCandidates:candidates,words};
 }
@@ -230,8 +337,8 @@ function retain(t,body,checks,kind) {
   checks.push(()=>{
     assert(proof,'current module and immutable recovery metadata decode completely');
     assert.equal(proof.metadata.owner,String(owner));assert.equal(proof.metadata.version,2);
-    assert.equal(proof.vmCandidates.length+Number(!!proof.legacy),1,'one positively authenticated selected recovery representation');
-    if(kind==='costly')assert.equal(proof.vmCandidates.length,1,
+    assert.equal(proof.vmCandidates.length+Number(!!proof.legacy)+Number(!!proof.shared),1,'one positively authenticated selected recovery representation');
+    if(kind==='costly')assert.equal(proof.vmCandidates.length+Number(!!proof.shared),1,
       'the costly CFG source class uses the smaller finite SourceOp VM, not repeated per-reference code');
     if(kind==='fp128')assert(source.length<115789,'the unchanged accepted128-add format cap remains115789 bytes');
     if(result)result();
