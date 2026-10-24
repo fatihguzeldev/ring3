@@ -1,4 +1,5 @@
 //! One cold, same-body projection program. Request sites retain only a selector.
+mod capture;
 mod data;
 mod executor;
 pub(super) mod fp;
@@ -85,6 +86,8 @@ impl Header {
 #[derive(Clone)]
 pub(super) struct State {
     compact: bool,
+    pub(super) shared: bool,
+    site_words: u32,
     pub program: Program,
     pub words: Vec<i64>,
     sites: BTreeMap<Vec<i64>, u32>,
@@ -129,6 +132,8 @@ impl State {
     pub fn new(limit: usize, locals: Locals) -> Self {
         Self {
             compact: true,
+            shared: false,
+            site_words: 0,
             program: Program::new(limit),
             words: Vec::new(),
             sites: BTreeMap::new(),
@@ -249,6 +254,7 @@ impl State {
             "recovery descriptors are finalized exactly once"
         );
         self.frozen = true;
+        self.site_words = u32::try_from(self.words.len()).expect("bounded recovery site directory");
         if self.words.is_empty() {
             return;
         }
@@ -446,6 +452,12 @@ pub(super) fn request_fp(out: &mut Output<'_>, fp: &FpRecovery) {
 pub(super) fn emit(out: &mut Output<'_>) {
     let locals = out.recovery.locals;
     let mut state = std::mem::replace(&mut out.recovery, State::new(0, locals));
+    if state.shared {
+        state.freeze_data();
+        capture::emit(out, &state, out.owner_identity);
+        out.recovery = state;
+        return;
+    }
     let mut legacy = state.clone();
     legacy.compact = false;
     legacy.freeze_data();
@@ -512,6 +524,10 @@ pub(super) fn shared_support(word: u32, continuation_global: u32) -> wasm_encode
 pub(super) fn shared_word() -> wasm_encoder::Function {
     shared::emit_word()
 }
+pub(super) fn shared_entry(out: &mut Output<'_>, identity: u64) {
+    capture::entry_guard(out, identity);
+}
+
 pub(super) fn metadata(words: &[i64], identity: u64) -> Vec<u8> {
     data::encode(words, identity)
 }

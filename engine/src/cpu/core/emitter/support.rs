@@ -4,8 +4,8 @@ use wasm_encoder::{
     GlobalType, ImportSection, NameMap, TypeSection, ValType,
 };
 
-pub(in crate::cpu::core) const ABI: i32 = 5;
-pub(in crate::cpu::core) const NAMES: [&str; 12] = [
+pub(in crate::cpu::core) const ABI: i32 = 6;
+pub(in crate::cpu::core) const NAMES: [&str; 13] = [
     "support.flags",
     "support.materialize_numeric",
     "support.resolve_status",
@@ -18,11 +18,12 @@ pub(in crate::cpu::core) const NAMES: [&str; 12] = [
     "support.commit_native",
     "support.commit_raw",
     "support.record_trace",
+    "support.recover",
 ];
 
 const COUNT: u32 = NAMES.len() as u32;
 
-pub(in crate::cpu::core) fn types(types: &mut TypeSection) -> [u32; 12] {
+pub(in crate::cpu::core) fn types(types: &mut TypeSection) -> [u32; 13] {
     let first = types.len();
     types.ty().function([ValType::I32; 8], [ValType::I32]);
     types.ty().function([ValType::I32], []);
@@ -61,6 +62,8 @@ pub(in crate::cpu::core) fn types(types: &mut TypeSection) -> [u32; 12] {
         [ValType::I32],
     );
     types.ty().function(super::trace::parameters(), []);
+    types.ty().function([ValType::I32; 4], [ValType::I32]);
+    types.ty().function([ValType::I32; 2], [ValType::I64]);
     [
         first,
         first + 1,
@@ -74,12 +77,13 @@ pub(in crate::cpu::core) fn types(types: &mut TypeSection) -> [u32; 12] {
         first + 7,
         first + 8,
         first + 9,
+        first + 10,
     ]
 }
 
 // All imports are direct functions of the same CPU's dispatcher instance. The
 // immutable ABI global negotiates this complete set independently of link ABI2.
-pub(super) fn imports(imports: &mut ImportSection, types: [u32; 12]) {
+pub(super) fn imports(imports: &mut ImportSection, types: [u32; 13]) {
     for (name, kind) in NAMES.into_iter().zip(types) {
         imports.import("ring3", name, EntityType::Function(kind));
     }
@@ -96,7 +100,7 @@ pub(super) fn imports(imports: &mut ImportSection, types: [u32; 12]) {
 
 pub(in crate::cpu::core) fn define(
     functions: &mut FunctionSection,
-    types: [u32; 12],
+    types: [u32; 13],
     globals: &mut GlobalSection,
     exports: &mut ExportSection,
     first: u32,
@@ -105,6 +109,8 @@ pub(in crate::cpu::core) fn define(
         functions.function(kind);
         exports.export(name, ExportKind::Func, first + offset as u32);
     }
+    // the final private decoder belongs only to this dispatcher instance.
+    functions.function(types[12] + 1);
     let abi_global = globals.len();
     globals.global(
         GlobalType {
@@ -130,6 +136,11 @@ pub(in crate::cpu::core) fn bodies(code: &mut CodeSection, first: u32) {
     code.function(&numeric::record::emit_native_writer());
     code.function(&numeric::record::emit_raw_writer());
     code.function(&super::trace::emit_recorder());
+    code.function(&super::recovery::shared_support(
+        first + COUNT,
+        4 + super::link::CONTINUATION,
+    ));
+    code.function(&super::recovery::shared_word());
 }
 
 pub(in crate::cpu::core) fn names(names: &mut NameMap, first: u32) {
@@ -172,4 +183,8 @@ pub(super) fn owner_store(width: u32, numeric: bool) -> u32 {
 
 pub(super) fn owner_kernel(numeric: bool) -> u32 {
     3 + u32::from(numeric) + 8
+}
+
+pub(super) fn owner_recover(numeric: bool) -> u32 {
+    3 + u32::from(numeric) + 12
 }

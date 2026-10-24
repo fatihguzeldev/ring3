@@ -221,7 +221,43 @@ fn emit_graph(
     family: bool,
     public_entries: Option<&[GuestAddress]>,
 ) -> Vec<u8> {
-    let plan = super::region::values::RegionPlan::analyze(&graph);
+    let legacy = emit_graph_form(
+        spans,
+        entry,
+        identity,
+        native,
+        &graph,
+        family,
+        public_entries,
+        false,
+    );
+    let shared = emit_graph_form(
+        spans,
+        entry,
+        identity,
+        native,
+        &graph,
+        family,
+        public_entries,
+        true,
+    );
+    match shared {
+        Some(shared) if shared.len() < legacy.as_ref().expect("legacy owner form").len() => shared,
+        _ => legacy.expect("legacy owner form"),
+    }
+}
+
+fn emit_graph_form(
+    spans: &[super::program::spans::ExecutableSpan],
+    entry: u32,
+    identity: u64,
+    native: &[NativeInstruction],
+    graph: &super::region::Region,
+    family: bool,
+    public_entries: Option<&[GuestAddress]>,
+    shared_recovery: bool,
+) -> Option<Vec<u8>> {
+    let plan = super::region::values::RegionPlan::analyze(graph);
     let numeric = !native.is_empty();
     let (body, recovery_data, numeric_kernels) = run(
         &graph,
@@ -231,7 +267,11 @@ fn emit_graph(
         family,
         spans,
         public_entries.is_some(),
-    );
+        shared_recovery,
+    )?;
+    if shared_recovery && recovery_data.is_empty() {
+        return None;
+    }
     let has_arithmetic = numeric_kernels
         .iter()
         .any(|kernel| matches!(kernel, PrivateKernel::Arithmetic(_)));
@@ -345,11 +385,22 @@ fn emit_graph(
     }
     imports.import("ring3", "precise", EntityType::Function(4));
     link::imports(&mut imports);
-    support::imports(&mut imports, [3, 6, 9, 10, 12, 7, 7, 7, 13, 14, 15, 17]);
+    support::imports(&mut imports, [3, 6, 9, 10, 12, 7, 7, 7, 13, 14, 15, 17, 2]);
     if !recovery_blob.is_empty() {
         imports.import(
             "ring3",
             "recovery.base",
+            EntityType::Global(GlobalType {
+                val_type: ValType::I32,
+                mutable: false,
+                shared: false,
+            }),
+        );
+    }
+    if shared_recovery && !recovery_blob.is_empty() {
+        imports.import(
+            "ring3",
+            "recovery.scratch",
             EntityType::Global(GlobalType {
                 val_type: ValType::I32,
                 mutable: false,
@@ -476,7 +527,7 @@ fn emit_graph(
             data: recovery_blob.into(),
         });
     }
-    module.finish()
+    Some(module.finish())
 }
 
 fn lookup(spans: &[super::program::spans::ExecutableSpan]) -> Function {
@@ -584,7 +635,8 @@ fn run(
     family: bool,
     spans: &[super::program::spans::ExecutableSpan],
     window_entries: bool,
-) -> (Vec<u8>, Vec<i64>, Vec<PrivateKernel>) {
+    shared_recovery: bool,
+) -> Option<(Vec<u8>, Vec<i64>, Vec<PrivateKernel>)> {
     let execution = super::region::values::ExecutionPlan::analyze(graph, plan);
     let expression_base = SCALAR_CACHE_BASE + execution.scalar.cache_count();
     let local_layout = executable::locals::Layout::build(
@@ -634,7 +686,17 @@ fn run(
         colors: local_layout.next - expression_base,
         expression_base,
     };
-    locals.push((32 + recovery_locals.colors, ValType::I32));
+    if shared_recovery && recovery_locals.colors > recovery::packet::MAX_CAPTURE_COLORS {
+        return None;
+    }
+    locals.push((
+        32 + if shared_recovery {
+            0
+        } else {
+            recovery_locals.colors
+        },
+        ValType::I32,
+    ));
     locals.push((8, ValType::I64));
     locals.push((1, ValType::F64));
     let points = graph
@@ -663,6 +725,7 @@ fn run(
         local_layout: &local_layout,
         fp_entry_marker,
         recovery: recovery::State::new(recovery_limit, recovery_locals),
+        owner_identity: identity,
         numeric_kernels: Vec::new(),
         available: std::collections::BTreeSet::new(),
         physical_gpr: None,
@@ -687,6 +750,7 @@ fn run(
         native,
         spans,
     };
+    out.recovery.shared = shared_recovery;
     out.c()
         .block(BlockType::Empty)
         .local_get(CTX)
@@ -702,6 +766,9 @@ fn run(
         .i32_const(StopReason::Infrastructure as i32)
         .return_()
         .end();
+    if shared_recovery {
+        recovery::shared_entry(&mut out, identity);
+    }
     out.return_target = Some(1);
     link::import_canonical(&mut out);
     link::has_state(out.c().raw());
@@ -818,7 +885,7 @@ fn run(
     assert_eq!(out.depth, 0, "the region exit wrapper is closed");
     let recovery_data = out.recovery.finish_data();
     let numeric_kernels = std::mem::take(&mut out.numeric_kernels);
-    (
+    Some((
         exits::finish(
             function,
             !native.is_empty(),
@@ -826,7 +893,7 @@ fn run(
         ),
         recovery_data,
         numeric_kernels,
-    )
+    ))
 }
 
 pub(super) struct Output<'a> {
@@ -844,6 +911,7 @@ pub(super) struct Output<'a> {
     local_layout: &'a executable::locals::Layout,
     fp_entry_marker: u32,
     recovery: recovery::State,
+    owner_identity: u64,
     numeric_kernels: Vec<PrivateKernel>,
     available: std::collections::BTreeSet<super::region::values::executable::ExecValueId>,
     physical_gpr: Option<[super::region::values::executable::ExecValueId; 8]>,
