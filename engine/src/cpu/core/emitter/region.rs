@@ -36,6 +36,8 @@ pub(super) fn emit(out: &mut Output<'_>, graph: &Region) {
     emitter.out.frame = None;
     emitter.out.before_frame = None;
     emitter.out.after_frame = None;
+    emitter.out.active_recovery = None;
+    emitter.out.active_fp_recovery = None;
     emitter.out.c().i32_const(0).local_set(109);
     emitter.out.exit(StopReason::NeedCode, None, 0);
     emitter.out.c().end().unreachable();
@@ -157,6 +159,8 @@ impl Emitter<'_, '_> {
             .if_(BlockType::Empty);
         // A completed internal edge already transferred the actual frame.
         // Fresh external state has no active local FP view to commit here.
+        let entry_fp = self.out.executable.block(id).entry.fp.clone();
+        super::numeric::executable::recover_ingress(self.out, &entry_fp, id);
         super::numeric::emit_frame(self.out, entry_frame);
         self.out
             .c()
@@ -308,7 +312,7 @@ impl Emitter<'_, '_> {
             self.out.exit(StopReason::NeedCode, Some(pc), 0);
             return;
         };
-        let edge = self
+        let _edge = self
             .out
             .plan
             .block(self.current)
@@ -317,7 +321,8 @@ impl Emitter<'_, '_> {
             .find(|edge| edge.target == id)
             .cloned()
             .expect("typed region edge has an analyzed state contract");
-        super::numeric::emit_edge(self.out, &edge);
+        let source_fp = self.out.executable.block(self.current).exit.fp.clone();
+        let target_fp = self.out.executable.block(id).entry.fp.clone();
         for (depth, label) in self.labels.iter().rev().enumerate() {
             let pending = match label {
                 Label::Forward(ids) if ids.contains(&id) => i32::from(ids.first() != Some(&id)),
@@ -325,6 +330,7 @@ impl Emitter<'_, '_> {
                 Label::Dispatch(ids) if ids.contains(&id) => 0,
                 _ => continue,
             };
+            super::numeric::executable::emit_edge(self.out, &source_fp, &target_fp, id);
             if pending != 0 || self.dispatched.contains(&id) {
                 self.out.c().i32_const(id.0 as i32).local_set(INDEX);
             }
@@ -335,6 +341,9 @@ impl Emitter<'_, '_> {
                 .br(depth as u32);
             return;
         }
+        // Restart publishes the source recovery before entering the target.
+        // Target SSA locals can reuse source colors, so assigning its arguments
+        // here would destroy values that this publication still needs.
         let pc = self.graph.blocks[id.0].entry;
         self.out
             .c()
@@ -354,6 +363,9 @@ impl Emitter<'_, '_> {
             .if_(BlockType::Empty);
         self.out.exit(StopReason::NeedCode, None, 0);
         self.out.c().end();
+        if let Some(recovery) = self.out.active_fp_recovery.clone() {
+            super::numeric::executable::recover(self.out, &recovery);
+        }
         if let Some(frame) = self.out.frame {
             super::numeric::emit_frame(self.out, frame);
         }

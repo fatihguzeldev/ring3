@@ -238,6 +238,7 @@ fn emit_graph(
         ],
         [],
     );
+    types.ty().function([ValType::I32; 3], [ValType::I32]);
     module.section(&types);
     let mut imports = ImportSection::new();
     imports.import(
@@ -254,7 +255,7 @@ fn emit_graph(
     imports.import("ring3", "read", EntityType::Function(1));
     imports.import("ring3", "write", EntityType::Function(2));
     if !native.is_empty() {
-        imports.import("ring3", "numeric", EntityType::Function(0));
+        imports.import("ring3", "numeric", EntityType::Function(18));
     }
     imports.import("ring3", "precise", EntityType::Function(4));
     link::imports(&mut imports);
@@ -438,25 +439,14 @@ fn run(
     spans: &[super::program::spans::ExecutableSpan],
 ) -> Vec<u8> {
     let execution = super::region::values::ExecutionPlan::analyze(graph, plan);
-    let expression_slots = graph
-        .blocks
-        .iter()
-        .enumerate()
-        .flat_map(|(index, _)| {
-            &execution
-                .executable
-                .block(super::region::BlockId(index))
-                .steps
-        })
-        .filter_map(|step| match step {
-            super::region::values::executable::ExecutableStep::Pure(run) => {
-                Some(execution.executable.live_expressions(run).len())
-            }
-            _ => None,
-        })
-        .max()
-        .unwrap_or(0);
-    let mut function = Function::new([
+    let expression_base = SCALAR_CACHE_BASE + execution.scalar.cache_count();
+    let local_layout = executable::locals::Layout::build(
+        &execution.executable,
+        graph.blocks.len(),
+        !native.is_empty(),
+        expression_base,
+    );
+    let mut locals = vec![
         (25, ValType::I32),
         (1, ValType::I64),
         (18, ValType::I32),
@@ -488,8 +478,11 @@ fn run(
         (1, ValType::I64),
         (1, ValType::I32),
         (execution.scalar.cache_count() as u32, ValType::I32),
-        (expression_slots as u32, ValType::I32),
-    ]);
+    ];
+    locals.extend(local_layout.declarations.iter().copied());
+    let fp_entry_marker = local_layout.next;
+    locals.push((1, ValType::I32));
+    let mut function = Function::new(locals);
     let mut out = Output {
         function: &mut function,
         depth: 0,
@@ -502,7 +495,15 @@ fn run(
         scalar_plan: &execution.scalar,
         fp_schedule: &execution.fp,
         executable: &execution.executable,
-        expression_base: SCALAR_CACHE_BASE + execution.scalar.cache_count(),
+        local_layout: &local_layout,
+        fp_entry_marker,
+        available: std::collections::BTreeSet::new(),
+        physical_gpr: None,
+        physical_flags: None,
+        active_recovery: None,
+        active_fp_recovery: None,
+        active_effect: None,
+        captured_effect: None,
         frame: None,
         before_frame: None,
         after_frame: None,
@@ -590,7 +591,25 @@ fn run(
     out.exit(StopReason::CodeInvalidated, None, 0);
     out.c().end().end();
     super::memory::load_view(out.c().raw());
+    out.c()
+        .global_get(link::PORT)
+        .if_(BlockType::Empty)
+        .global_get(link::PORT)
+        .i32_const(1)
+        .i32_sub()
+        .local_tee(INDEX)
+        .i32_const(BLOCK_BITS as i32)
+        .i32_shr_u()
+        .local_set(ENTRY_OFFSET)
+        .local_get(INDEX)
+        .i32_const((1 << BLOCK_BITS) - 1)
+        .i32_and()
+        .local_set(INDEX)
+        .i32_const(0)
+        .global_set(link::PORT)
+        .else_();
     out.lookup_port(EIP);
+    out.c().end();
     // Bootstrap runs once. Every exact prefix exits the inner block to the
     // single selective commit; computed targets and canonical helper requests
     // resume the retained body here without repeating register bootstrap.
@@ -636,7 +655,15 @@ pub(super) struct Output<'a> {
     scalar_plan: &'a super::region::values::scalar::ScalarPlan,
     fp_schedule: &'a super::region::values::Guards,
     executable: &'a super::region::values::executable::ExecutablePlan,
-    expression_base: u32,
+    local_layout: &'a executable::locals::Layout,
+    fp_entry_marker: u32,
+    available: std::collections::BTreeSet<super::region::values::executable::ExecValueId>,
+    physical_gpr: Option<[super::region::values::executable::ExecValueId; 8]>,
+    physical_flags: Option<super::region::values::executable::FlagsState>,
+    active_recovery: Option<super::region::values::executable::Recovery>,
+    active_fp_recovery: Option<super::region::values::executable::fp::FpRecovery>,
+    active_effect: Option<super::region::values::executable::ExecEffectId>,
+    captured_effect: Option<super::region::values::executable::ExecEffectId>,
     frame: Option<super::region::values::FrameStateId>,
     before_frame: Option<super::region::values::FrameStateId>,
     after_frame: Option<super::region::values::FrameStateId>,
@@ -670,20 +697,30 @@ impl Output<'_> {
         if self.grouped_accesses && self.plan.has_access_groups() {
             super::memory::groups::invalidate(self.c().raw());
         }
+        self.begin_executable_block(id);
+        let fp = self.executable.block(id).entry.fp.clone();
+        numeric::executable::emit_ingress(self, &fp);
         let mut counted = false;
         let steps = self.executable.block(id).steps.clone();
         for step in &steps {
             match step {
                 super::region::values::executable::ExecutableStep::Pure(run) => self.pure_run(run),
                 super::region::values::executable::ExecutableStep::Effect(effect) => {
+                    self.prepare_effect(effect);
                     counted |= self.block_instruction(
                         id,
                         block,
                         &block.instructions[effect.point.prefix as usize],
                     );
+                    self.finish_effect(effect);
                 }
             }
         }
+        let recovery = self.executable.block(id).exit.clone();
+        self.recover_scalar(&recovery, 0, false);
+        self.active_fp_recovery = Some(recovery.fp.clone());
+        self.active_recovery = None;
+        self.active_effect = None;
         if !counted {
             self.count(block.instructions.len() as u32);
         }
@@ -752,10 +789,28 @@ impl Output<'_> {
         } else {
             match instruction.operation {
                 None => self.exit(StopReason::Unsupported, Some(self.pc), prefix),
-                Some(operation) => self.instruction(operation, instruction.next),
+                Some(operation) => {
+                    let kind = self
+                        .active_effect
+                        .map(|id| self.executable.effect(id).kind.clone());
+                    match kind {
+                        Some(super::region::values::executable::EffectKind::PlainRead32 {
+                            address,
+                            result,
+                        }) => self.emit_plain_read(&address, result),
+                        Some(super::region::values::executable::EffectKind::Fp(effect)) => {
+                            numeric::executable::emit_effect(self, &effect)
+                        }
+                        _ => self.instruction(operation, instruction.next),
+                    }
+                }
             }
         }
         self.frame = self.after_frame;
+        if let Some(effect) = self.active_effect {
+            let effect = self.executable.effect(effect).clone();
+            self.capture_effect(&effect);
+        }
         if writes_memory && instruction.exits.after.is_some() {
             let completed = self.plan.frame(after_id);
             let completed_pc = completed.pc;
@@ -829,6 +884,33 @@ impl Output<'_> {
     }
 
     fn publish_exit(&mut self, pc: Option<u32>, retired: u32) {
+        let available = self.available.clone();
+        let physical_gpr = self.physical_gpr;
+        let physical_flags = self.physical_flags;
+        if let Some(mut recovery) = self.active_recovery.clone() {
+            let after = retired != 0 && retired == self.prefix + 1;
+            let mut kernel_gpr = 0;
+            let mut kernel_flags = false;
+            if let Some(id) = self.active_effect {
+                let effect = self.executable.effect(id).clone();
+                if after {
+                    recovery = effect.after;
+                } else if matches!(
+                    effect.contract.fault_recovery,
+                    super::region::values::executable::FaultRecovery::Kernel
+                ) {
+                    kernel_gpr = effect.contract.gpr_writes;
+                    kernel_flags = effect.contract.flags_write != 0;
+                }
+            }
+            self.recover_scalar(&recovery, kernel_gpr, kernel_flags);
+            let previous_frame = self.frame;
+            self.frame = Some(recovery.frame);
+            numeric::executable::recover(self, &recovery.fp);
+            self.frame = previous_frame;
+        } else if let Some(recovery) = self.active_fp_recovery.clone() {
+            numeric::executable::recover(self, &recovery);
+        }
         let frame = if retired != 0 && retired == self.prefix + 1 {
             self.after_frame
         } else {
@@ -841,6 +923,9 @@ impl Output<'_> {
             self.c().i32_const(pc as i32).local_set(EIP);
         }
         self.count(retired);
+        self.available = available;
+        self.physical_gpr = physical_gpr;
+        self.physical_flags = physical_flags;
     }
 
     fn publish_operands(&mut self) {

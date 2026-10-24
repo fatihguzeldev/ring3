@@ -1,5 +1,6 @@
 mod direct;
 mod double;
+pub(super) mod executable;
 mod frame;
 mod ieee;
 mod memory;

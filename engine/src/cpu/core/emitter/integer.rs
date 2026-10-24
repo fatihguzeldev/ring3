@@ -857,6 +857,23 @@ impl Output<'_> {
     pub(super) fn load_value(&mut self, source: Value32, width: u32, destination: u32) {
         self.operand(value(source), width, destination, false);
     }
+    pub(super) fn remember_executable_address(&mut self, address: EffectiveAddress) {
+        self.address_fact = self.before_frame.map(|id| {
+            let frame = self.plan.frame(id);
+            AddressFact {
+                address,
+                base: address.base.map(|r| frame.gpr[r.index()]),
+                index: address.index.map(|r| frame.gpr[r.index()]),
+                authority: frame.memory_effect,
+            }
+        });
+        self.c()
+            .local_get(ADDRESS)
+            .local_set(CACHED_ADDRESS)
+            .local_get(super::LOGICAL_ADDRESS)
+            .local_set(CACHED_LOGICAL_ADDRESS);
+    }
+
     pub(super) fn address(&mut self, address: EffectiveAddress) {
         self.stack_access = None;
         self.effective_address(address, true);

@@ -1162,6 +1162,16 @@ pub(in crate::cpu::core::emitter) fn emit_inline_commit(out: &mut Output<'_>) {
         .i32_wrap_i64()
         .i32_const(15)
         .i32_and()
+        .local_get(FP_PAYLOAD_TOKENS)
+        .local_get(INLINE_CELL)
+        .i32_const(super::pool::TOKEN_BITS as i32)
+        .i32_mul()
+        .i64_extend_i32_u()
+        .i64_shr_u()
+        .i32_wrap_i64()
+        .i32_const(15)
+        .i32_and()
+        .i32_or()
         .local_set(INLINE_PROOFS);
     inline_write_cell(c, native, raw);
     c.local_set(INLINE_VALUE_TAG)

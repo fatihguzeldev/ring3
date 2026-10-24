@@ -37,6 +37,12 @@ fn transfer(operation: crate::cpu::x86::ir::Operation) -> u32 {
 
 pub(super) fn request(out: &mut Output<'_>, next: u32, planned: bool) {
     out.address_fact = None;
+    if let Some(recovery) = out.active_recovery.clone() {
+        out.recover_scalar(&recovery, 0, false);
+        super::executable::recover(out, &recovery.fp);
+    }
+    let marker = out.fp_entry_marker;
+    out.c().i32_const(0).local_set(marker);
     if planned {
         let before = out
             .before_frame
@@ -174,6 +180,7 @@ pub(in crate::cpu::core::emitter) fn emit(out: &mut Output<'_>) {
     crate::cpu::core::memory::authority::flush(out.c().raw());
     out.c()
         .local_get(CTX)
+        .local_get(SERVICE_PC)
         .local_get(SERVICE_ORDINAL)
         .call(2)
         .local_set(WRITE_STATUS);

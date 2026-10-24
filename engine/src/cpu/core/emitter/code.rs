@@ -119,6 +119,7 @@ impl<'a> Sink<'a> {
     }
 
     forward! {
+        drop();
         call(f: u32);
         f32_demote_f64();
         f32_reinterpret_i32();
