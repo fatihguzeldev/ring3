@@ -71,6 +71,37 @@ impl WindowFingerprint {
             && self.sources == other.sources
     }
 
+    /// a replacement executor must contain the previous actual graph and its
+    /// exact source authority. this is a comparison, never a history union:
+    /// every node and edge in `self` still comes from the new captured cycles.
+    pub(crate) fn strictly_covers(&self, previous: &Self) -> bool {
+        self.memory_identity == previous.memory_identity
+            && self.options == previous.options
+            && previous
+                .sources
+                .iter()
+                .all(|source| self.sources.binary_search(source).is_ok())
+            && self.graph.preserves(&previous.graph)
+            && (self.graph.nodes.len() > previous.graph.nodes.len()
+                || self.graph.edges.iter().any(|edge| {
+                    previous.graph.edges.binary_search(edge).is_err()
+                        && self.graph.contains_node(edge.0)
+                        && self.graph.contains_node(edge.1)
+                }))
+    }
+
+    pub(crate) fn overlaps(&self, other: &Self) -> bool {
+        let (smaller, larger) = if self.graph.nodes.len() <= other.graph.nodes.len() {
+            (&self.graph, &other.graph)
+        } else {
+            (&other.graph, &self.graph)
+        };
+        smaller
+            .nodes
+            .iter()
+            .any(|(pc, _)| larger.contains_node(*pc))
+    }
+
     pub(crate) fn metadata_charge(&self) -> usize {
         self.sources.capacity() * std::mem::size_of::<SourceAuthority>()
             + self

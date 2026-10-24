@@ -88,7 +88,8 @@ pub(super) struct WindowAdmission {
     ownership_epoch: u64,
     anchor: u32,
     fingerprint: WindowFingerprint,
-    stale: Option<RegionKey>,
+    replace: Vec<RegionKey>,
+    stale: Vec<RegionKey>,
 }
 
 struct WindowRefusal {
@@ -188,6 +189,10 @@ impl TraceHeat {
     const MAX_INTERVAL: u32 = 1 << 20;
 
     fn visit(sites: &mut [Self; 4], pc: u32) -> bool {
+        Self::visit_weight(sites, pc, 1)
+    }
+
+    fn visit_weight(sites: &mut [Self; 4], pc: u32, weight: u32) -> bool {
         let index = sites
             .iter()
             .position(|site| site.interval != 0 && site.pc == pc)
@@ -208,11 +213,11 @@ impl TraceHeat {
                 interval: Self::INITIAL,
             };
         }
-        site.visits += 1;
+        site.visits = site.visits.saturating_add(weight);
         if site.visits < site.interval {
             return false;
         }
-        site.visits = 0;
+        site.visits -= site.interval;
         site.interval = (site.interval * 4).min(Self::MAX_INTERVAL);
         true
     }
@@ -927,28 +932,43 @@ impl CoreCache32 {
         {
             return None;
         }
-        let mut stale = None;
-        for (&root, &key) in &self.window_entries {
-            let entry = self.region(key)?;
-            if entry.code.is_current(memory) {
-                if root == plan.anchor()
-                    || entry
-                        .code
-                        .window_fingerprint()
-                        .is_some_and(|old| old.same_graph(plan.fingerprint()))
-                {
-                    return None;
-                }
-            } else if root == plan.anchor() {
-                stale = Some(key);
-            }
-        }
+        let (replace, stale) = self.window_replacements(memory, plan.fingerprint())?;
         Some(WindowAdmission {
             ownership_epoch: self.ownership_epoch,
             anchor: plan.anchor(),
             fingerprint: plan.fingerprint().clone(),
+            replace,
             stale,
         })
+    }
+
+    fn window_replacements(
+        &self,
+        memory: &AddressSpace,
+        fingerprint: &WindowFingerprint,
+    ) -> Option<(Vec<RegionKey>, Vec<RegionKey>)> {
+        let mut replace = Vec::new();
+        let mut stale = Vec::new();
+        for &key in self.window_entries.values() {
+            let entry = self.region(key)?;
+            let old = entry.code.window_fingerprint()?;
+            if entry.code.is_current(memory) {
+                if old.same_graph(fingerprint) {
+                    return None;
+                }
+                if fingerprint.overlaps(old) {
+                    if !fingerprint.strictly_covers(old) {
+                        return None;
+                    }
+                    replace.push(key);
+                }
+            } else if fingerprint.overlaps(old) {
+                stale.push(key);
+            }
+        }
+        replace.sort_unstable_by_key(|key| key.identity);
+        stale.sort_unstable_by_key(|key| key.identity);
+        Some((replace, stale))
     }
 
     pub(super) fn commit_window(
@@ -964,20 +984,26 @@ impl CoreCache32 {
             || code.entrypoints() != [GuestAddress(admission.anchor)]
             || !code.supports_entry(admission.anchor)
             || code.window_fingerprint() != Some(&admission.fingerprint)
-            || self.window_entries.get(&admission.anchor).copied() != admission.stale
         {
             return Err(CompileError::InvalidLimits);
         }
+        let Some((replace, stale)) = self.window_replacements(memory, &admission.fingerprint)
+        else {
+            return Err(CompileError::InvalidLimits);
+        };
+        if replace != admission.replace || stale != admission.stale {
+            return Err(CompileError::InvalidLimits);
+        }
         self.validate_candidate(&code, code.entrypoints().len())?;
-        if let Some(stale) = admission.stale {
-            if self
-                .region(stale)
-                .is_none_or(|entry| entry.code.is_current(memory))
-            {
-                return Err(CompileError::InvalidLimits);
-            }
+        // at most one current optimized window covers a pc. replacing that
+        // executor never retires baseline/family source owners or their ports.
+        // all graph/source/resource checks complete before any slot is revoked.
+        for stale in admission.stale {
             self.remove(stale);
             self.source_invalidations = self.source_invalidations.saturating_add(1);
+        }
+        for previous in admission.replace {
+            self.remove(previous);
         }
         let code = self.insert_owned(code)?;
         self.remember_window_refusal(admission.fingerprint);
@@ -1947,7 +1973,19 @@ impl CoreCache32 {
         let entry = self.regions[code.key.index].as_mut().unwrap();
         TraceHeat::visit(&mut entry.trace_heat, pc)
     }
+
+    pub(super) fn sample_candidate(&mut self, code: &RegionRef, pc: u32) -> bool {
+        if code.is_execution_window() || self.retained(code).is_none() || !code.supports_entry(pc) {
+            return false;
+        }
+        let entry = self.regions[code.key.index].as_mut().unwrap();
+        TraceHeat::visit_weight(&mut entry.trace_heat, pc, 1024)
+    }
 }
+
+#[cfg(test)]
+#[path = "cache/window_lifetime_tests.rs"]
+mod window_lifetime_tests;
 
 #[cfg(test)]
 #[path = "cache/tests.rs"]

@@ -39,7 +39,11 @@ fn completed(memory: &AddressSpace, pc: u32, post: u32) -> CompletedColdObservat
     .unwrap()
 }
 
-fn family(memory: &AddressSpace, path: &[(u32, u32)], parents: &[&CompiledCode]) -> CompiledCode {
+pub(super) fn family(
+    memory: &AddressSpace,
+    path: &[(u32, u32)],
+    parents: &[&CompiledCode],
+) -> CompiledCode {
     let cold: Vec<_> = path
         .iter()
         .map(|&(pc, post)| completed(memory, pc, post))
@@ -159,7 +163,7 @@ pub(super) fn install(
     cache.commit_window(memory, admission, code).unwrap()
 }
 
-fn resources(cache: &CoreCache32) {
+pub(super) fn resources(cache: &CoreCache32) {
     assert!(cache.resident_charge() <= MAX_CODE_BYTES);
     assert_eq!(cache.snapshot()[8], cache.resident_charge() as u64);
     assert_eq!(
