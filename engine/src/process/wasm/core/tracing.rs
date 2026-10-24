@@ -3,8 +3,8 @@ use crate::{
     cpu::core::{
         CompileError, CompileOptions, ObservedPlan,
         cold::ColdObserver,
-        compile_observed_with_growth, emit_observed_plan, prepare_cold_prefix_plan,
-        prepare_observed_plan,
+        compile_observed_with_growth, emit_hot_window, emit_observed_plan,
+        prepare_cold_prefix_plan, prepare_hot_window, prepare_observed_plan,
         trace::{self, CompletedColdObservation, PendingColdObservation, TraceArena, TraceEvent},
     },
     memory::{AddressSpace, GuestAddress},
@@ -354,18 +354,32 @@ pub(crate) fn core_trace_finish(root: u32, instructions: u32, blocks: u32) -> u3
                             .map(Option::flatten);
                         match accepted {
                             Ok(Some(code)) => Ok(Some(code)),
-                            Ok(None) => prepare_cold_prefix_plan(
-                                memory,
-                                options,
-                                &events,
-                                &core.tracing.cold,
-                                &|pc| core.cache.owned_frontier_contains(memory, pc),
-                            )
-                            .and_then(|plan| {
-                                plan.map(|plan| admit_plan(&mut core.cache, memory, plan))
-                                    .transpose()
-                                    .map(Option::flatten)
-                            }),
+                            Ok(None) => {
+                                match admit_hot_window(
+                                    &mut core.cache,
+                                    memory,
+                                    root,
+                                    options,
+                                    &events,
+                                    &owners,
+                                    &core.tracing.cold,
+                                ) {
+                                    Ok(Some(code)) => Ok(Some(code)),
+                                    Ok(None) => prepare_cold_prefix_plan(
+                                        memory,
+                                        options,
+                                        &events,
+                                        &core.tracing.cold,
+                                        &|pc| core.cache.owned_frontier_contains(memory, pc),
+                                    )
+                                    .and_then(|plan| {
+                                        plan.map(|plan| admit_plan(&mut core.cache, memory, plan))
+                                            .transpose()
+                                            .map(Option::flatten)
+                                    }),
+                                    Err(error) => Err(error),
+                                }
+                            }
                             Err(error) => Err(error),
                         }
                     }
@@ -417,6 +431,47 @@ fn admit_plan(
         Ok(Some(code)) => cache.commit_observed(memory, admission, code).map(Some),
         Ok(None) | Err(CompileError::WasmLimit) => {
             cache.reject_observed(admission);
+            Ok(None)
+        }
+        Err(error) => Err(error),
+    }
+}
+
+fn admit_hot_window(
+    cache: &mut super::cache::CoreCache32,
+    memory: &AddressSpace,
+    root: u32,
+    options: CompileOptions,
+    events: &[TraceEvent],
+    owners: &[&crate::cpu::core::CompiledCode],
+    cold: &[CompletedColdObservation],
+) -> Result<Option<RegionRef>, CompileError> {
+    if !cold.is_empty()
+        || events
+            .iter()
+            .any(|event| event.kind == trace::COLD_COMPLETE)
+    {
+        return Ok(None);
+    }
+    let Some(plan) = prepare_hot_window(
+        memory,
+        GuestAddress(root),
+        options,
+        events,
+        owners,
+        memory.code_source_version(),
+        cold,
+    )?
+    else {
+        return Ok(None);
+    };
+    let Some(admission) = cache.preflight_window(memory, &plan) else {
+        return Ok(None);
+    };
+    match emit_hot_window(memory, plan) {
+        Ok(Some(code)) => cache.commit_window(memory, admission, code).map(Some),
+        Ok(None) | Err(CompileError::WasmLimit) => {
+            cache.reject_window(admission);
             Ok(None)
         }
         Err(error) => Err(error),

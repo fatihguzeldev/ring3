@@ -1,6 +1,7 @@
 use crate::{
     cpu::core::{
         CompileError, CompileOptions, CompiledCode, ObservedPlan, ObservedPlanFingerprint,
+        WindowFingerprint, WindowPlan,
     },
     memory::{AddressSpace, GuestAddress},
 };
@@ -29,12 +30,15 @@ pub(super) struct CoreCache32 {
     entries_capacity: usize,
     trace_entries: HashMap<u32, RegionKey, RandomState>,
     trace_entries_capacity: usize,
+    window_entries: HashMap<u32, RegionKey, RandomState>,
+    window_entries_capacity: usize,
     trace_bypass_identity: u64,
     coverage: HashMap<u32, RegionKey, RandomState>,
     coverage_capacity: usize,
     entries_epoch: u64,
     ownership_epoch: u64,
     observed_refusals: Vec<ObservedRefusal>,
+    window_refusals: Vec<WindowRefusal>,
     bytes: usize,
     owner_charge: usize,
     binding_epoch: u64,
@@ -67,6 +71,25 @@ struct ObservedRefusal {
     ownership_epoch: u64,
     fingerprint: ObservedPlanFingerprint,
     charge: usize,
+}
+
+pub(super) struct WindowAdmission {
+    ownership_epoch: u64,
+    anchor: u32,
+    fingerprint: WindowFingerprint,
+    stale: Option<RegionKey>,
+}
+
+struct WindowRefusal {
+    fingerprint: WindowFingerprint,
+    charge: usize,
+}
+
+#[derive(Clone, Copy)]
+enum DirectoryKind {
+    Baseline,
+    Family,
+    Window,
 }
 
 #[derive(Clone)]
@@ -247,12 +270,15 @@ impl Default for CoreCache32 {
             entries_capacity: 0,
             trace_entries: HashMap::with_hasher(RandomState::default()),
             trace_entries_capacity: 0,
+            window_entries: HashMap::with_hasher(RandomState::default()),
+            window_entries_capacity: 0,
             trace_bypass_identity: 0,
             coverage: HashMap::with_hasher(RandomState::default()),
             coverage_capacity: 0,
             entries_epoch: 1,
             ownership_epoch: 1,
             observed_refusals: Vec::new(),
+            window_refusals: Vec::new(),
             bytes: 0,
             owner_charge: 0,
             binding_epoch: 1,
@@ -310,6 +336,12 @@ impl CoreCache32 {
                 .iter()
                 .map(|refusal| refusal.charge)
                 .sum::<usize>()
+            + self.window_refusals.capacity() * size_of::<WindowRefusal>()
+            + self
+                .window_refusals
+                .iter()
+                .map(|refusal| refusal.charge)
+                .sum::<usize>()
     }
 
     fn directory_charge(&self) -> usize {
@@ -320,6 +352,7 @@ impl CoreCache32 {
             + self.slot_regions.capacity() * size_of::<u32>()
             + Self::hash_charge::<u32, RegionKey>(self.entries_capacity)
             + Self::hash_charge::<u32, RegionKey>(self.trace_entries_capacity)
+            + Self::hash_charge::<u32, RegionKey>(self.window_entries_capacity)
             + Self::hash_charge::<u32, RegionKey>(self.coverage_capacity)
             + self.memo_charge()
     }
@@ -365,24 +398,53 @@ impl CoreCache32 {
         Ok(())
     }
 
+    #[cfg(test)]
     fn projected_directory(&self, entries: usize, instructions: usize, trace: bool) -> usize {
+        self.projected_directory_kind(
+            entries,
+            instructions,
+            if trace {
+                DirectoryKind::Family
+            } else {
+                DirectoryKind::Baseline
+            },
+        )
+    }
+
+    fn projected_directory_kind(
+        &self,
+        entries: usize,
+        instructions: usize,
+        kind: DirectoryKind,
+    ) -> usize {
         let extent = if self.free.is_empty() {
             self.regions.len().saturating_mul(2).min(MAX_REGION_EXTENT)
         } else {
             self.regions.len()
         };
-        let (entry_capacity, trace_capacity, coverage_capacity) = if trace {
-            (
+        let (entry_capacity, trace_capacity, coverage_capacity, window_capacity) = match kind {
+            DirectoryKind::Family => (
                 self.entries_capacity,
                 Self::reserved_capacity(&self.trace_entries, entries, self.trace_entries_capacity),
                 self.coverage_capacity,
-            )
-        } else {
-            (
+                self.window_entries_capacity,
+            ),
+            DirectoryKind::Window => (
+                self.entries_capacity,
+                self.trace_entries_capacity,
+                self.coverage_capacity,
+                Self::reserved_capacity(
+                    &self.window_entries,
+                    entries,
+                    self.window_entries_capacity,
+                ),
+            ),
+            DirectoryKind::Baseline => (
                 Self::reserved_capacity(&self.entries, entries, self.entries_capacity),
                 self.trace_entries_capacity,
                 Self::reserved_capacity(&self.coverage, instructions, self.coverage_capacity),
-            )
+                self.window_entries_capacity,
+            ),
         };
         size_of::<Self>()
             + self.regions.capacity().max(extent) * size_of::<Option<CachedRegion>>()
@@ -392,6 +454,7 @@ impl CoreCache32 {
             + Self::hash_charge::<u32, RegionKey>(entry_capacity)
             + Self::hash_charge::<u32, RegionKey>(trace_capacity)
             + Self::hash_charge::<u32, RegionKey>(coverage_capacity)
+            + Self::hash_charge::<u32, RegionKey>(window_capacity)
             + self.memo_charge()
     }
 
@@ -423,6 +486,7 @@ impl CoreCache32 {
         // fresh allocation permits crediting a smaller table to the ledger.
         self.entries_capacity = Self::rebuild_map(&mut self.entries);
         self.trace_entries_capacity = Self::rebuild_map(&mut self.trace_entries);
+        self.window_entries_capacity = Self::rebuild_map(&mut self.window_entries);
         self.coverage_capacity = Self::rebuild_map(&mut self.coverage);
         let used_region = self
             .regions
@@ -462,14 +526,37 @@ impl CoreCache32 {
         instructions: usize,
         trace: bool,
     ) {
+        self.make_resident_space_kind(
+            charge,
+            entries,
+            instructions,
+            if trace {
+                DirectoryKind::Family
+            } else {
+                DirectoryKind::Baseline
+            },
+        );
+    }
+
+    fn make_resident_space_kind(
+        &mut self,
+        charge: usize,
+        entries: usize,
+        instructions: usize,
+        kind: DirectoryKind,
+    ) {
         let mut compact_at = usize::MAX;
         while self
             .owner_charge
             .saturating_add(charge)
-            .saturating_add(self.projected_directory(entries, instructions, trace))
+            .saturating_add(self.projected_directory_kind(entries, instructions, kind))
             > MAX_CODE_BYTES
             || self.free.is_empty() && self.regions.len() == MAX_REGION_EXTENT
         {
+            if self.window_refusals.capacity() != 0 {
+                self.window_refusals = Vec::new();
+                continue;
+            }
             let count = self.regions.len() - self.free.len();
             if count <= compact_at {
                 self.compact_directories();
@@ -477,7 +564,7 @@ impl CoreCache32 {
                 if self
                     .owner_charge
                     .saturating_add(charge)
-                    .saturating_add(self.projected_directory(entries, instructions, trace))
+                    .saturating_add(self.projected_directory_kind(entries, instructions, kind))
                     <= MAX_CODE_BYTES
                     && (!self.free.is_empty() || self.regions.len() < MAX_REGION_EXTENT)
                 {
@@ -494,16 +581,25 @@ impl CoreCache32 {
         if self.free.is_empty() {
             self.grow_directories();
         }
-        if trace {
-            self.trace_entries.reserve(entries);
-            self.trace_entries_capacity = self
-                .trace_entries_capacity
-                .max(self.trace_entries.capacity());
-        } else {
-            self.entries.reserve(entries);
-            self.entries_capacity = self.entries_capacity.max(self.entries.capacity());
-            self.coverage.reserve(instructions);
-            self.coverage_capacity = self.coverage_capacity.max(self.coverage.capacity());
+        match kind {
+            DirectoryKind::Family => {
+                self.trace_entries.reserve(entries);
+                self.trace_entries_capacity = self
+                    .trace_entries_capacity
+                    .max(self.trace_entries.capacity());
+            }
+            DirectoryKind::Window => {
+                self.window_entries.reserve(entries);
+                self.window_entries_capacity = self
+                    .window_entries_capacity
+                    .max(self.window_entries.capacity());
+            }
+            DirectoryKind::Baseline => {
+                self.entries.reserve(entries);
+                self.entries_capacity = self.entries_capacity.max(self.entries.capacity());
+                self.coverage.reserve(instructions);
+                self.coverage_capacity = self.coverage_capacity.max(self.coverage.capacity());
+            }
         }
         assert!(self.resident_charge().saturating_add(charge) <= MAX_CODE_BYTES);
     }
@@ -702,6 +798,104 @@ impl CoreCache32 {
     pub(super) fn reject_observed(&mut self, admission: ObservedAdmission) {
         if admission.ownership_epoch == self.ownership_epoch {
             self.remember_observed_refusal(admission.fingerprint);
+        }
+    }
+
+    pub(super) fn preflight_window(
+        &self,
+        memory: &AddressSpace,
+        plan: &WindowPlan,
+    ) -> Option<WindowAdmission> {
+        if !plan.is_current(memory)
+            || !plan.has_executable_gain()
+            || plan.cross_owner_edge_count() == 0
+            || plan.entrypoints() != [GuestAddress(plan.anchor())]
+            || self
+                .window_refusals
+                .iter()
+                .any(|refusal| refusal.fingerprint.same_graph(plan.fingerprint()))
+        {
+            return None;
+        }
+        let mut stale = None;
+        for (&root, &key) in &self.window_entries {
+            let entry = self.region(key)?;
+            if entry.code.is_current(memory) {
+                if root == plan.anchor()
+                    || entry
+                        .code
+                        .window_fingerprint()
+                        .is_some_and(|old| old.same_graph(plan.fingerprint()))
+                {
+                    return None;
+                }
+            } else if root == plan.anchor() {
+                stale = Some(key);
+            }
+        }
+        Some(WindowAdmission {
+            ownership_epoch: self.ownership_epoch,
+            anchor: plan.anchor(),
+            fingerprint: plan.fingerprint().clone(),
+            stale,
+        })
+    }
+
+    pub(super) fn commit_window(
+        &mut self,
+        memory: &AddressSpace,
+        admission: WindowAdmission,
+        code: CompiledCode,
+    ) -> Result<RegionRef, CompileError> {
+        if admission.ownership_epoch != self.ownership_epoch
+            || !code.is_execution_window()
+            || !code.is_current(memory)
+            || code.trace_root() != Some(admission.anchor)
+            || code.entrypoints() != [GuestAddress(admission.anchor)]
+            || !code.supports_entry(admission.anchor)
+            || code.window_fingerprint() != Some(&admission.fingerprint)
+            || self.window_entries.get(&admission.anchor).copied() != admission.stale
+        {
+            return Err(CompileError::InvalidLimits);
+        }
+        self.validate_candidate(&code, code.entrypoints().len())?;
+        if let Some(stale) = admission.stale {
+            if self
+                .region(stale)
+                .is_none_or(|entry| entry.code.is_current(memory))
+            {
+                return Err(CompileError::InvalidLimits);
+            }
+            self.remove(stale);
+            self.source_invalidations = self.source_invalidations.saturating_add(1);
+        }
+        let code = self.insert_owned(code)?;
+        self.remember_window_refusal(admission.fingerprint);
+        Ok(code)
+    }
+
+    pub(super) fn reject_window(&mut self, admission: WindowAdmission) {
+        self.remember_window_refusal(admission.fingerprint);
+    }
+
+    fn remember_window_refusal(&mut self, fingerprint: WindowFingerprint) {
+        if self
+            .window_refusals
+            .iter()
+            .any(|refusal| refusal.fingerprint.same_graph(&fingerprint))
+        {
+            return;
+        }
+        if self.window_refusals.len() == MAX_OBSERVED_REFUSALS {
+            self.window_refusals.remove(0);
+        }
+        let charge = fingerprint.resident_charge();
+        self.window_refusals.push(WindowRefusal {
+            fingerprint,
+            charge,
+        });
+        if self.resident_charge() > MAX_CODE_BYTES {
+            self.window_refusals = Vec::new();
         }
     }
 
@@ -914,6 +1108,9 @@ impl CoreCache32 {
         code: CompiledCode,
     ) -> Result<RegionRef, CompileError> {
         self.validate_candidate(&code, code.entrypoints().len())?;
+        if code.is_execution_window() {
+            return Err(CompileError::InvalidLimits);
+        }
         if code.is_observed_family() {
             return self.admit_observed_family(memory, code);
         }
@@ -1064,6 +1261,25 @@ impl CoreCache32 {
 
     pub(super) fn lookup(&mut self, memory: &AddressSpace, pc: u32) -> Option<RegionRef> {
         if let Some(key) = self
+            .window_entries
+            .get(&pc)
+            .copied()
+            .filter(|key| key.identity != self.trace_bypass_identity)
+        {
+            if let Some(entry) = self.region(key) {
+                if entry.code.is_current(memory) {
+                    let code = RegionRef {
+                        key,
+                        code: Rc::clone(&entry.code),
+                    };
+                    self.touch(key.index);
+                    return Some(code);
+                }
+            }
+            self.remove(key);
+            self.source_invalidations = self.source_invalidations.saturating_add(1);
+        }
+        if let Some(key) = self
             .trace_entries
             .get(&pc)
             .copied()
@@ -1102,6 +1318,16 @@ impl CoreCache32 {
         memory: &AddressSpace,
         pc: u32,
     ) -> Option<(RegionRef, u32)> {
+        if let Some(key) = self
+            .window_entries
+            .get(&pc)
+            .copied()
+            .filter(|key| key.identity != self.trace_bypass_identity)
+        {
+            if let Some(linked) = self.lookup_linked_key(memory, key) {
+                return Some(linked);
+            }
+        }
         if let Some(key) = self
             .trace_entries
             .get(&pc)
@@ -1270,6 +1496,7 @@ impl CoreCache32 {
         self.advance_ownership_epoch();
         self.advance_entries_epoch();
         let trace = code.trace_root().is_some();
+        let window = code.is_execution_window();
         let code = Rc::new(code);
         for pc in entries.iter().filter(|_| !trace) {
             if let Some(key) = self.entries.remove(&pc.0) {
@@ -1281,12 +1508,23 @@ impl CoreCache32 {
             }
         }
         let charge = Self::code_charge(&code, entries.capacity());
-        self.make_resident_space(charge, entries.len(), code.instruction_count(), trace);
+        if window {
+            self.make_resident_space_kind(
+                charge,
+                entries.len(),
+                code.instruction_count(),
+                DirectoryKind::Window,
+            );
+        } else {
+            self.make_resident_space(charge, entries.len(), code.instruction_count(), trace);
+        }
         let index = self.free.pop().unwrap();
         let identity = code.identity();
         let key = RegionKey { index, identity };
         for entry in &entries {
-            if trace {
+            if window {
+                self.window_entries.insert(entry.0, key);
+            } else if trace {
                 self.trace_entries.insert(entry.0, key);
             } else {
                 self.entries.insert(entry.0, key);
@@ -1297,6 +1535,7 @@ impl CoreCache32 {
         }
         debug_assert!(self.entries.capacity() <= self.entries_capacity);
         debug_assert!(self.trace_entries.capacity() <= self.trace_entries_capacity);
+        debug_assert!(self.window_entries.capacity() <= self.window_entries_capacity);
         debug_assert!(self.coverage.capacity() <= self.coverage_capacity);
         self.bytes += code.wasm().len();
         self.owner_charge += charge;
@@ -1392,6 +1631,9 @@ impl CoreCache32 {
             self.slot_regions[entry.slot as usize] = NO_REGION;
         }
         for pc in &entry.admitted_entries {
+            if self.window_entries.get(&pc.0) == Some(&key) {
+                self.window_entries.remove(&pc.0);
+            }
             if self.trace_entries.get(&pc.0) == Some(&key) {
                 self.trace_entries.remove(&pc.0);
             }
@@ -1452,7 +1694,7 @@ impl CoreCache32 {
     // Distinct hot ports and already observed owners can form a later capture.
     // Failed/equal captures back off without permanently consuming the site.
     pub(super) fn trace_candidate(&mut self, code: &RegionRef, pc: u32) -> bool {
-        if self.retained(code).is_none() || !code.supports_entry(pc) {
+        if code.is_execution_window() || self.retained(code).is_none() || !code.supports_entry(pc) {
             return false;
         }
         let entry = self.regions[code.key.index].as_mut().unwrap();
@@ -1491,3 +1733,7 @@ mod residency_tests;
 #[cfg(test)]
 #[path = "cache/allocation_tests.rs"]
 mod allocation_tests;
+
+#[cfg(test)]
+#[path = "cache/window_tests.rs"]
+mod window_tests;
