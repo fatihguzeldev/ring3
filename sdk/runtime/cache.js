@@ -15,6 +15,8 @@ const SUPPORT_FUNCTIONS = [
   ['support.record_trace',6],
 ];
 const SUPPORT_IMPORTS = [...SUPPORT_FUNCTIONS.map(([name])=>name),'support.abi'];
+const RECOVERY_SUPPORT_FUNCTIONS = [...SUPPORT_FUNCTIONS,['support.recover',4]];
+const RECOVERY_WORKSPACE_BYTES = 132096;
 const NATIVE_COUNTERS = ['compiled','admittedEncodedBytes','countEvictions','byteEvictions',
   'sourceInvalidations','retainedUnits','retainedEncodedBytes','unitCapacity'];
 const RESIDENT_COUNTERS = ['residentCharge','residentBudget','linkCapacity','bindingEpoch'];
@@ -41,6 +43,7 @@ export class CodeCache {
   #contextView;
   #linkGlobals;
   #support;
+  #supportImports = SUPPORT_IMPORTS;
   #residentLayout = false;
   #prunedEpoch = null;
   #slotExtent = 0;
@@ -71,6 +74,8 @@ export class CodeCache {
     }));
     if (typeof this.api.core_cold_run === 'function') this.native.core_cold_run = this.api.core_cold_run;
     if (typeof this.api.core_precise === 'function') this.native.core_precise = this.api.core_precise;
+    if (typeof this.api.core_recovery_scratch_ptr === 'function')
+      this.native.core_recovery_scratch_ptr = this.api.core_recovery_scratch_ptr;
     if (typeof this.api.core_lookup === 'function') this.native.core_lookup = this.api.core_lookup;
     const executable = EXECUTABLE_EXPORTS.map(name=>typeof this.api[name] === 'function');
     if (executable.some(Boolean) && !executable.every(Boolean))
@@ -322,12 +327,33 @@ export class CodeCache {
     if (exports.supportAbi === undefined) {
       if (supportNames.length) throw new Error('core support exports lack an ABI');
     } else {
-      if (!(exports.supportAbi instanceof WebAssembly.Global) || exports.supportAbi.value !== 5 ||
-          supportNames.length !== SUPPORT_FUNCTIONS.length ||
-          SUPPORT_FUNCTIONS.some(([name,arity])=>typeof exports[name] !== 'function' || exports[name].length !== arity))
+      const abi=exports.supportAbi instanceof WebAssembly.Global?exports.supportAbi.value:0;
+      const functions=abi===6?RECOVERY_SUPPORT_FUNCTIONS:SUPPORT_FUNCTIONS;
+      if (![5,6].includes(abi) || supportNames.length !== functions.length ||
+          functions.some(([name,arity])=>typeof exports[name] !== 'function' || exports[name].length !== arity))
         throw new Error('invalid core support ABI');
       const support = {'support.abi':exports.supportAbi};
-      for (const [name] of SUPPORT_FUNCTIONS) support[name] = exports[name];
+      for (const [name] of functions) support[name] = exports[name];
+      if(abi===6) {
+        if(typeof this.native.core_recovery_scratch_ptr!=='function')
+          throw new Error('missing core recovery workspace export');
+        const pointer=this.native.core_recovery_scratch_ptr()>>>0,buffer=this.memory.buffer;
+        if(!pointer||pointer%8||pointer+RECOVERY_WORKSPACE_BYTES>buffer.byteLength)
+          throw new Error('invalid core recovery workspace pointer');
+        const descriptor=new DataView(buffer,pointer,1024);
+        const context=descriptor.getUint32(16,true),continuation=descriptor.getUint32(20,true);
+        if(descriptor.getUint32(0,true)!==0x5233504b||descriptor.getUint32(4,true)!==1||
+            descriptor.getUint32(8,true)!==RECOVERY_WORKSPACE_BYTES||descriptor.getUint32(12,true)!==8192||
+            descriptor.getUint32(40,true)!==1024||descriptor.getUint32(44,true)!==0||
+            !context||context%8||context+128>buffer.byteLength||
+            !continuation||continuation%8||continuation+136>buffer.byteLength||
+            descriptor.getBigUint64(24,true)===0n||descriptor.getBigUint64(32,true)!==0n||
+            descriptor.getUint32(48,true)!==0||descriptor.getBigUint64(152,true)!==0n||
+            new DataView(buffer,continuation,136).getUint32(0,true)!==2)
+          throw new Error('invalid core recovery workspace descriptor');
+        support['recovery.scratch']=new WebAssembly.Global({value:'i32',mutable:false},pointer);
+      }
+      this.#supportImports=[...functions.map(([name])=>name),'support.abi'];
       this.#support = Object.freeze(support);
     }
     this.chainedColdEnabled = cold.every(value => value !== undefined);
@@ -506,6 +532,9 @@ export class CodeCache {
       if (item.name === 'recovery.base' && item.kind === 'global' && recoveryBase) {
         bindings[item.name]=recoveryBase;continue;
       }
+      if(item.name==='recovery.scratch'&&item.kind==='global'&&this.#support?.[item.name]) {
+        bindings[item.name]=this.#support[item.name];continue;
+      }
       if (item.kind === 'global' && this.#linkGlobals && Object.hasOwn(this.#linkGlobals,item.name)) {
         bindings[item.name] = this.#linkGlobals[item.name]; continue;
       }
@@ -521,7 +550,7 @@ export class CodeCache {
     if (!['memory', 'read', 'write'].every(name => found.has(name)) ||
         (this.linkedCore && ![...LINK_GLOBALS,...(this.continuationCore?CONTINUATION_GLOBALS:[])].every(name=>found.has(name)))) throw new Error('incomplete core imports');
     if (this.preciseCore && !found.has('precise')) throw new Error('incomplete exact-prefix core imports');
-    if (this.#support && !SUPPORT_IMPORTS.every(name=>found.has(name)))
+    if (this.#support && !this.#supportImports.every(name=>found.has(name)))
       throw new Error('incomplete core support imports');
     const instance = this.compilation
       ? this.measureCompilation('instance',()=>new WebAssembly.Instance(module,{ring3:bindings}))

@@ -18,10 +18,12 @@ const helpers=[
   ['support.store16',10],['support.store32',10],['support.commit_pool_cold',11],['support.commit_native',12],['support.commit_raw',13],
   ['support.record_trace',14],
 ];
+const recoveryHelper=['support.recover',15],scratch=131072;
+const helpersFor=abi=>abi===6?[...helpers,recoveryHelper]:helpers;
 
-function types({wrongFlagsType=false,wrongFlagsArity=false,wrongStoreArity=false,wrongRecordArity=false}={}) {
+function types({wrongFlagsType=false,wrongFlagsArity=false,wrongStoreArity=false,wrongRecordArity=false,wrongRecoveryArity=false}={}) {
   const flags=Array(8-Number(wrongFlagsArity)).fill(i32);if(wrongFlagsType)flags[0]=f64;
-  return [15,
+  return [16,
     ...signature([i32,i32],[i32]),...signature([i32,i32,i32],[i64]),
     ...signature([i32,i32,i32,i32],[i32]),...signature([i32,i32,i32],[i32]),
     ...signature([i32],[i32]),...signature(flags,[i32]),
@@ -34,11 +36,12 @@ function types({wrongFlagsType=false,wrongFlagsArity=false,wrongStoreArity=false
     ...signature([i32,i32,f64,i32,i32],[i32]),
     ...signature([i32,i32,i64,i32],[i32]),
     ...signature([i32,i64,i32,i32,i32,...(wrongRecordArity?[]:[i32])],[]),
+    ...signature(Array(wrongRecoveryArity?3:4).fill(i32),[i32]),
   ];
 }
 
 function driver({abi=5,omit,mutableAbi=false,...typeOptions}={}) {
-  const emitted=helpers.filter(([name])=>name!==omit);
+  const emitted=helpersFor(abi).filter(([name])=>name!==omit);
   const imports=[3,...str('ring3'),...str('memory'),2,0,2,
     ...str('ring3'),...str('functions'),1,0x70,1,1,...u(4097),
     ...str('ring3'),...str('next'),0,4];
@@ -52,6 +55,8 @@ function driver({abi=5,omit,mutableAbi=false,...typeOptions}={}) {
     if(name==='support.resolve_status')return body(get(1));
     if(name==='support.translate_page'||name==='support.acquire_group')return body([...constant(0),...constant(0),...constant(0)]);
     if(name==='support.commit_native'||name==='support.commit_raw')return body(constant(0));
+    if(name==='support.recover')return body([0x23,1,...constant(1),0x6a,0x24,1,
+      ...constant(1056),...get(typeOptions.wrongRecoveryArity?2:3),0x36,2,0,...constant(0)]);
     if(name.startsWith('support.store'))return body([...constant(0),...get(typeOptions.wrongStoreArity?5:6)]);
     return body([]);
   });
@@ -63,14 +68,16 @@ function driver({abi=5,omit,mutableAbi=false,...typeOptions}={}) {
     ...section(10,[1+emitted.length,...body([...constant(1),0x24,0,...get(0),...get(1),...get(2),0x11,0,0]),...code])]);
 }
 
-function owner(pc,{omit}={}) {
-  const emitted=helpers.filter(([name])=>name!==omit);
-  const imports=[4+emitted.length,...str('ring3'),...str('memory'),2,0,2,
+function owner(pc,{omit,abi=5,scratchMutable=false,sharedRecovery=true}={}) {
+  const emitted=helpersFor(abi).filter(([name])=>name!==omit);
+  const imports=[4+emitted.length+Number(abi===6&&sharedRecovery),...str('ring3'),...str('memory'),2,0,2,
     ...str('ring3'),...str('read'),0,1,...str('ring3'),...str('write'),0,2,
     ...emitted.flatMap(([name,kind])=>[...str('ring3'),...str(name),0,kind]),
-    ...str('ring3'),...str('support.abi'),3,i32,0];
+    ...str('ring3'),...str('support.abi'),3,i32,0,
+    ...(abi===6&&sharedRecovery?[...str('ring3'),...str('recovery.scratch'),3,i32,Number(scratchMutable)]:[])];
   const mark=pc===0x1000?0x1234:0x5678;
   const ops=[...get(0),...[2,1,32,mark,0,mark,0,0x8d5].flatMap(constant),0x10,2,0x36,2,0,
+    ...(abi===6&&sharedRecovery?[...get(0),...constant(0),...constant(1),0x23,1,0x10,...u(2+emitted.findIndex(([name])=>name==='support.recover')),0x1a]:[]),
     ...get(0),...constant(pc+4),0x36,2,32,
     ...get(0),...get(0),0x28,2,40,...constant(1),0x6a,0x36,2,40,
     ...get(0),...get(1),...constant(1),0x6b,0x36,2,44,...constant(2)];
@@ -80,10 +87,10 @@ function owner(pc,{omit}={}) {
 }
 
 function fixture(driverOptions,ownerOptions) {
-  const memory=new WebAssembly.Memory({initial:2}),context=256,calls=[],links=new Map(),encodedDriver=driver(driverOptions);
+  const memory=new WebAssembly.Memory({initial:5}),context=256,calls=[],links=new Map(),encodedDriver=driver(driverOptions);
   const d=()=>new DataView(memory.buffer);let encoded,identity=0n;
   const api={
-    core_prepare(pc){calls.push(['prepare',pc]);identity=pc===0x1000?1n:2n;encoded=owner(pc,ownerOptions);
+    core_prepare(pc){calls.push(['prepare',pc]);identity=pc===0x1000?1n:2n;encoded=owner(pc,{abi:driverOptions?.abi??5,...ownerOptions});
       d().setUint32(context+32,pc,true);d().setBigUint64(context+120,identity,true);
       new Uint8Array(memory.buffer,65536,encoded.length).set(encoded);return 0;},
     core_code_ptr:()=>65536,core_code_len:()=>encoded.length,core_context_ptr:()=>context,
@@ -97,6 +104,11 @@ function fixture(driverOptions,ownerOptions) {
     core_link_owners_ptr(){new Uint8Array(memory.buffer,16384,4097*8).fill(0);
       for(const[slot,id]of links)d().setBigUint64(16384+slot*8,id,true);return 16384;},
     core_cache_status_ptr:()=>49168,
+  };
+  if(driverOptions?.abi===6&&driverOptions.scratchExport!==false)api.core_recovery_scratch_ptr=()=>{
+    for(const[offset,value]of[[0,driverOptions.scratchMagic??0x5233504b],[4,1],[8,132096],[12,8192],[16,context],[20,2048],[40,1024]])
+      d().setUint32(scratch+offset,value,true);
+    d().setBigUint64(scratch+24,1n,true);d().setUint32(2048,2,true);return driverOptions.scratchPointer??scratch;
   };
   const engine={api,memory,get:offset=>offset===48?0x1000:0,
     ok(name,...args){assert.equal(api[name](...args),0);}};
@@ -123,7 +135,7 @@ test('owners call one per-CPU typed Wasm support instance directly',()=>{
 });
 
 for(const [name,options]of [
-  ['missing ABI',{abi:null}],['retired ABI1',{abi:1}],['retired ABI2',{abi:2}],['retired ABI3',{abi:3}],['retired ABI4',{abi:4}],['unknown ABI',{abi:6}],
+  ['missing ABI',{abi:null}],['retired ABI1',{abi:1}],['retired ABI2',{abi:2}],['retired ABI3',{abi:3}],['retired ABI4',{abi:4}],['unknown ABI',{abi:7}],
   ['partial functions',{omit:'support.commit_pool_cold'}],['wrong function arity',{wrongFlagsArity:true}],
   ['old store arity under current ABI',{wrongStoreArity:true}],
   ['wrong recorder arity under current ABI',{wrongRecordArity:true}],
@@ -134,6 +146,44 @@ for(const [name,options]of [
 test('support negotiation rejects a partial owner import set before admission',()=>{
   const f=fixture({}, {omit:'support.materialize_numeric'}),cache=new CodeCache(f.engine,{chain:true});
   assert.throws(()=>cache.entry(0x1000),/incomplete core support imports/);
+  assert.equal(cache.stats().admissions,0);assert.equal(cache.units.size,0);
+});
+
+test('support ABI6 binds one immutable CPU-private recovery workspace for two owners',()=>{
+  const f=fixture({abi:6}),cache=new CodeCache(f.engine,{chain:true,budget:1});
+  for(const pc of[0x1000,0x2000]) {
+    const run=cache.execute(cache.entry(pc));
+    assert.deepEqual([run.coreReason,run.work,run.retired],[2,1,1]);
+    assert.equal(f.d().getUint32(1056,true),scratch);
+  }
+  assert.equal(cache.dispatch.supportCalls.value,4);
+  assert.equal(cache.stats().admissions,2);
+});
+
+test('support ABI6 permits an exact legacy owner without a scratch import',()=>{
+  const f=fixture({abi:6},{sharedRecovery:false}),cache=new CodeCache(f.engine,{chain:true,budget:1});
+  for(const pc of[0x1000,0x2000]) {
+    const run=cache.execute(cache.entry(pc));
+    assert.deepEqual([run.coreReason,run.work,run.retired],[2,1,1]);
+  }
+  assert.equal(f.d().getUint32(1056,true),0);
+  assert.equal(cache.dispatch.supportCalls.value,2);
+  assert.equal(cache.stats().admissions,2);
+});
+
+for(const[name,options]of[
+  ['missing recovery function',{omit:'support.recover'}],['wrong recovery arity',{wrongRecoveryArity:true}],
+  ['missing workspace export',{scratchExport:false}],['wrong workspace magic',{scratchMagic:0}],
+  ['unaligned workspace pointer',{scratchPointer:scratch+1}],['out-of-range workspace pointer',{scratchPointer:327680}],
+])test('support ABI6 rejects '+name+' before any owner admission',()=>{
+  const f=fixture({abi:6,...options});
+  assert.throws(()=>new CodeCache(f.engine,{chain:true}),/support.*ABI|support exports|recovery|workspace/i);
+  assert.equal(f.calls.length,0);
+});
+
+test('support ABI6 refuses a mutable owner workspace binding',()=>{
+  const f=fixture({abi:6},{scratchMutable:true}),cache=new CodeCache(f.engine,{chain:true});
+  assert.throws(()=>cache.entry(0x1000),WebAssembly.LinkError);
   assert.equal(cache.stats().admissions,0);assert.equal(cache.units.size,0);
 });
 
