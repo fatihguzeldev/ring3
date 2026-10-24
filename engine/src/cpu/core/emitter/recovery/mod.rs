@@ -9,6 +9,7 @@ pub(crate) mod packet;
 pub(super) mod program;
 mod recipe_vm;
 mod recipes;
+mod shared;
 
 use super::Output;
 use crate::cpu::core::region::values::{
@@ -505,6 +506,12 @@ fn candidate_cost(out: &Output<'_>, state: &State) -> CandidateCost {
     }
 }
 
+pub(super) fn shared_support(word: u32, continuation_global: u32) -> wasm_encoder::Function {
+    shared::emit(word, continuation_global)
+}
+pub(super) fn shared_word() -> wasm_encoder::Function {
+    shared::emit_word()
+}
 pub(super) fn metadata(words: &[i64], identity: u64) -> Vec<u8> {
     data::encode(words, identity)
 }
