@@ -615,3 +615,143 @@ fn inline_wait_observes_status_and_preserves_unpublished_fp_values() {
     assert_eq!(effect.before.fp.tag_written, effect.after.fp.tag_written);
     assert_ne!(effect.before.fp.status.bits, effect.after.fp.status.bits);
 }
+
+#[test]
+fn tagged_input_certificate_is_a_complete_typed_entry_argument() {
+    let (_, program) = plan(&[block(
+        0x1000,
+        &[memory_fp(
+            X87Operation::BinaryMemory {
+                kind: X87Binary::Add,
+                format: X87Format::Float32,
+            },
+            4,
+        )],
+    )]);
+    let body = program.block(BlockId(0));
+    let entry = &body.entry.fp;
+    let FpPayload::Tagged {
+        valid, certificate, ..
+    } = entry.payload[0]
+    else {
+        panic!("an arbitrary external input remains tagged")
+    };
+    assert_eq!(program.value(certificate).ty, ValueType::I32);
+    assert!(matches!(
+        program.value(certificate).node,
+        ValueNode::Fp(FpValueNode::InputCertificate {
+            point: ProgramPoint { block: BlockId(0), prefix: 0 },
+            logical: 0,
+            control,
+            valid: actual_valid,
+        }) if control == entry.control && actual_valid == valid
+    ));
+    assert_eq!(
+        program.dependency_order(&[certificate]),
+        vec![entry.control, valid, certificate],
+        "the certificate is keyed by the same actual validity and CW values"
+    );
+    assert_eq!(entry.payload[0].roots().len(), 5);
+    assert!(
+        program
+            .fp_parameters(BlockId(0))
+            .roots(entry)
+            .contains(&certificate),
+        "the public adapter snapshots the certificate before any effect"
+    );
+    assert!(
+        body.effects()
+            .next()
+            .unwrap()
+            .inputs()
+            .contains(&certificate)
+    );
+}
+
+#[test]
+fn tagged_certificate_follows_aliases_but_not_changed_or_barrier_payloads() {
+    let (_, program) = plan(&[block(
+        0x1000,
+        &[
+            fp(X87Operation::LoadRegister { index: 0 }),
+            Operation::X87StatusToAx,
+            fp(X87Operation::ChangeSign),
+            memory_fp(X87Operation::LoadControl, 12),
+        ],
+    )]);
+    let body = program.block(BlockId(0));
+    let effects: Vec<_> = body.effects().collect();
+    let original = body.entry.fp.payload[0];
+    let FpPayload::Tagged {
+        certificate: original_certificate,
+        ..
+    } = original
+    else {
+        panic!("tagged input")
+    };
+    assert_eq!(effects[0].after.fp.payload[0], original);
+    assert_eq!(effects[0].after.fp.payload[1], original);
+    assert_eq!(effects[1].after.fp.payload[0], original);
+    let FpPayload::Tagged {
+        certificate: changed_certificate,
+        ..
+    } = effects[2].after.fp.payload[0]
+    else {
+        panic!("changed opaque payload")
+    };
+    assert!(matches!(
+        program.value(changed_certificate).node,
+        ValueNode::Fp(FpValueNode::I32(0))
+    ));
+    assert_eq!(
+        effects[2].after.fp.payload[1], original,
+        "changing one alias never changes the original value's certificate"
+    );
+    let after = &effects[3].after.fp;
+    let FpPayload::Tagged {
+        valid, certificate, ..
+    } = after.payload[0]
+    else {
+        panic!("fresh canonical payload")
+    };
+    assert_ne!(certificate, original_certificate);
+    assert_ne!(after.control, body.entry.fp.control);
+    assert!(matches!(
+        program.value(certificate).node,
+        ValueNode::Fp(FpValueNode::InputCertificate {
+            point: ProgramPoint { prefix: 4, .. },
+            control,
+            valid: actual_valid,
+            ..
+        }) if control == after.control && actual_valid == valid
+    ));
+}
+
+#[test]
+fn downstream_tagged_certificate_is_carried_through_scalar_predecessors() {
+    let (_, program) = plan(&[
+        block(0x1000, &[Operation::Nop, jump(0x1100)]),
+        block(0x1100, &[Operation::Nop, jump(0x1200)]),
+        block(
+            0x1200,
+            &[memory_fp(
+                X87Operation::BinaryMemory {
+                    kind: X87Binary::Add,
+                    format: X87Format::Float32,
+                },
+                4,
+            )],
+        ),
+    ]);
+    for index in 0..3 {
+        let entry = &program.block(BlockId(index)).entry.fp;
+        let FpPayload::Tagged { certificate, .. } = entry.payload[0] else {
+            panic!("unknown incoming payload")
+        };
+        let required = program.fp_parameters(BlockId(index)).roots(entry);
+        for id in entry.payload[0].roots() {
+            assert!(required.contains(&id));
+        }
+        assert!(required.contains(&certificate));
+    }
+}

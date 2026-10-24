@@ -54,6 +54,15 @@ pub(in crate::cpu::core) enum FpValueNode {
     PrecisionMode {
         control: ExecValueId,
     },
+    /// Snapshot a certificate for this complete actual input, before any
+    /// projection can overwrite its physical record. Internal edges pass the
+    /// resulting value with the payload rather than rereading that record.
+    InputCertificate {
+        point: ProgramPoint,
+        logical: u8,
+        control: ExecValueId,
+        valid: ExecValueId,
+    },
     /// Classification is a real value expression, not the incoming tag class.
     Classify(FpPayload),
 }
@@ -63,6 +72,7 @@ impl FpValueNode {
         match self {
             Self::Classify(value) => value.roots(),
             Self::PrecisionMode { control } => vec![*control],
+            Self::InputCertificate { control, valid, .. } => vec![*control, *valid],
             _ => Vec::new(),
         }
     }
@@ -90,6 +100,15 @@ impl NativeDomain {
             || self == Self::Native24
             || (self == Self::InSingle && other == Self::Bounded)
     }
+    /// These bits describe this native value under its actual control epoch.
+    pub fn certificate_bits(self) -> u32 {
+        match self {
+            Self::Exact => 1,
+            Self::Bounded => 3,
+            Self::InSingle => 11,
+            Self::Native24 => 15,
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -108,6 +127,7 @@ pub(in crate::cpu::core) enum FpPayload {
         high: ExecValueId,
         native: ExecValueId,
         valid: ExecValueId,
+        certificate: ExecValueId,
     },
 }
 impl FpPayload {
@@ -120,7 +140,8 @@ impl FpPayload {
                 high,
                 native,
                 valid,
-            } => vec![low, high, native, valid],
+                certificate,
+            } => vec![low, high, native, valid, certificate],
         }
     }
 }
@@ -206,12 +227,28 @@ fn result(
         ValueNode::Fp(FpValueNode::EffectResult { effect, output }),
     )
 }
-fn tagged(builder: &mut ExecutableBuilder, point: ProgramPoint, logical: u8) -> FpPayload {
+fn tagged(
+    builder: &mut ExecutableBuilder,
+    point: ProgramPoint,
+    logical: u8,
+    control: ExecValueId,
+) -> FpPayload {
+    let valid = input(builder, point, FpInput::Valid(logical), ValueType::I32);
+    let certificate = builder.push_value(
+        ValueType::I32,
+        ValueNode::Fp(FpValueNode::InputCertificate {
+            point,
+            logical,
+            control,
+            valid,
+        }),
+    );
     FpPayload::Tagged {
         low: input(builder, point, FpInput::Low(logical), ValueType::I64),
         high: input(builder, point, FpInput::High(logical), ValueType::I32),
         native: input(builder, point, FpInput::Native(logical), ValueType::F64),
-        valid: input(builder, point, FpInput::Valid(logical), ValueType::I32),
+        valid,
+        certificate,
     }
 }
 fn domain(values: &RegionPlan, frame: FrameStateId, logical: usize) -> NativeDomain {
@@ -271,7 +308,8 @@ impl FpRecovery {
     }
 
     fn unknown(builder: &mut ExecutableBuilder, point: ProgramPoint, frame: &FpFrame) -> Self {
-        let payload = std::array::from_fn(|i| tagged(builder, point, i as u8));
+        let control = input(builder, point, FpInput::Control, ValueType::I32);
+        let payload = std::array::from_fn(|i| tagged(builder, point, i as u8, control));
         let tags =
             std::array::from_fn(|i| input(builder, point, FpInput::Tag(i as u8), ValueType::I32));
         let status = FpStatus {
@@ -288,7 +326,6 @@ impl FpRecovery {
             cs: input(builder, point, FpInput::Cs, ValueType::I32),
             ds: input(builder, point, FpInput::Ds, ValueType::I32),
         };
-        let control = input(builder, point, FpInput::Control, ValueType::I32);
         let mode = builder.push_value(
             ValueType::I32,
             ValueNode::Fp(FpValueNode::PrecisionMode { control }),
@@ -899,6 +936,7 @@ pub(in crate::cpu::core) fn lower_effect(
                         high,
                         native,
                         valid,
+                        certificate: constant(builder, 0),
                     }
                 }
             };
