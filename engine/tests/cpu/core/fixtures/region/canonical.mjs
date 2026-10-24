@@ -8,28 +8,30 @@ const hash=bytes=>createHash('sha256').update(bytes).digest('hex');
 const registers=[0,2,0,0x3000,0x4800,0,0x1800,0];
 const roundingData=page=>{const d=new DataView(page.buffer);d.setFloat32(0,0,true);d.setFloat32(4,2,true);};
 
-function observe(t,wanted,{helpers,writes=0,fast=false,port=false,after},checks) {
+function observe(t,wanted,{helpers=0,precise=0,entries=1,materializers=helpers+precise,writes=0,fast=false,revoked=false,after},checks) {
   const source=t.bytes(t.api.core_code_ptr()>>>0,t.api.core_code_len()>>>0),revision=t.version();
   const id=new DataView(t.engine.memory.buffer).getBigUint64(t.context()+120,true);
   const run=t.check(wanted);
   assert.equal(run.activations.length,1,'the original body executes the exact canonical continuation without another preparation');
   assert.equal(t.result.modules.length,1,'canonical service does not replace its source owner');
-  assert.equal(run.helperCalls,helpers,'the literal number of completed and faulting canonical callbacks is preserved');
+  assert.equal(run.helperCalls,helpers,'only planned canonical effects call the retained owner ordinal');
+  assert.equal(run.preciseCalls,precise,'a rejected or partial span uses the shared exact adapter');
   assert.equal(t.version(),revision+BigInt(writes),'only the literal completed stores advance the transaction sequence');
-  assert.equal(new DataView(t.engine.memory.buffer).getBigUint64(t.context()+120,true),id);
+  assert.equal(new DataView(t.engine.memory.buffer).getBigUint64(t.context()+120,true),revoked?0n:id,
+    'a precise code store revokes execution authority while retaining source metadata for stale rejection');
   assert.equal(hash(t.bytes(t.api.core_code_ptr()>>>0,t.api.core_code_len()>>>0)),hash(source),
     'the same actual encoded owner retains its identity and bytes');
   after?.();
   const spine=inspectCanonicalSpine(source),witness=t.stateWitness();
   t.result.canonicalSpine=spine;t.result.canonicalWitness=witness;t.result.semanticComplete=true;
   checks.push(()=>{
-    assert.equal(witness.body_entries,1,'canonical continuation stays inside one real architectural body entry');
+    assert.equal(witness.body_entries,entries,'only an eligible post-precise span re-enters the retained hot body');
     assert.equal(witness.canonical_calls,helpers,'actual Wasm canonical calls match the independent callback oracle');
     assert.equal(spine.sites.length,1,'the numerical owner has one actual canonical import callsite, independent of its instruction count');
     assert(spine.sites.every(site=>site.function===spine.body),'the canonical spine belongs to the shared instruction body');
     assert.equal(witness.wide_snapshot_calls,0,'a first planned fallback transports no 40-value state snapshot');
-    assert(witness.materializer_calls<=helpers+Number(port),
-      'canonical resumption adds no materializer beyond one per callback and the initial arbitrary-port import');
+    assert.equal(witness.materializer_calls,materializers,
+      'only the specified canonical or precise authority transitions materialize the pool');
     if(fast){
       assert.equal(witness.materializer_calls,0,'successful direct execution gains no canonical publication');
       assert.equal(witness.raw80_stores,0,'successful direct execution leaves the canonical FP bank private');
@@ -65,7 +67,7 @@ export function runCanonicalCases(fixture) {
       budget===2?{status:0x20,tag:0xfffc,opcode:0x43,fip:0x1002,fdp:0x3004,registers:{0:FIVE}}:
       {status:0x820,opcode:0x37b,fip:0x1005,fdp:0x3010,registers:{0:FIVE}});
     observe(t,{pc:[0x1000,0x1002,0x1005,0,0x1800][budget],retired:budget,budget,fp:expected},
-      {helpers:Math.min(budget,3),writes:Number(budget===4)},checks);
+      {precise:Number(budget!==0),entries:budget===4?2:1,writes:Number(budget===4)},checks);
   });
 
   fixture('canonical-service-arbitrary-port-imports-full80-top-and-unexecuted-history',{
@@ -78,7 +80,7 @@ export function runCanonicalCases(fixture) {
     t.writeExpected(0x3010,FULL80);
     observe(t,{pc:0x1800,retired:3,budget:3,
       fp:t.fp({status:0x1800,opcode:0x37b,fip:0x1005,fdp:0x3010,
-        registers:{2:FULL80,7:'00000000000000000080'}})}, {helpers:2,writes:1,port:true},checks);
+        registers:{2:FULL80,7:'00000000000000000080'}})}, {precise:1,entries:2,writes:1},checks);
   });
 
   for(const codeStore of[false,true])fixture(`canonical-service-${codeStore?'smc-commits-current-once':'late-fault-preserves-completed-prefix'}`,{
@@ -91,7 +93,7 @@ export function runCanonicalCases(fixture) {
       fault:codeStore?[0,0,0]:[0x6000,0x1020a,0xa0e],
       fp:t.fp(codeStore?{status:0x820,opcode:0x33f,fip:0x1002,fdp:0x1100,registers:{0:THREE}}:
         {status:0x20,tag:0xfffc,opcode:3,fip:0x1000,fdp:0x3000,registers:{0:THREE}})},
-      {helpers:2,writes:Number(codeStore),after:()=>{if(codeStore)t.status('core_begin',4);}},checks);
+      {precise:1,revoked:codeStore,writes:Number(codeStore),after:()=>{if(codeStore)t.status('core_begin',4);}},checks);
   });
 
   fixture('canonical-service-planned-fault-publishes-pending-c1-and-empty-ghost',{
@@ -108,8 +110,8 @@ export function runCanonicalCases(fixture) {
         registers:{0:'00000000000000e00040',7:'0010000000000080ff3f'}})}, {helpers:1},checks);
   });
 
-  // Legal authored repetition supplies a scalable static discriminator, not a
-  // timing benchmark. Both arms retain one body and exact callback counts.
+  // Legal authored repetition supplies a scalable static discriminator. Native
+  // success stays hot; rejected full80 executes one decoded precise suffix.
   for(const canonical of[false,true])fixture(`canonical-service-160-fp-sites-${canonical?'exact-full80-suffix':'successful-native'}`,{
     segments:[[0x1000,'d8c1'.repeat(160)+'ffe6']],registers,stateWitness:true,compileBlocks:1,
     control:canonical?0x37f:0x27f,
@@ -118,7 +120,7 @@ export function runCanonicalCases(fixture) {
     observe(t,{pc:0x1800,retired:161,budget:161,
       fp:t.fp({tag:0xfff0,opcode:0xc1,fip:0x113e,
         registers:{0:canonical?FULL80:'00000000000080a10740',1:canonical?'00000000000000000000':TWO}})},
-      {helpers:canonical?160:0,fast:!canonical},checks);
+      {precise:canonical?1:0,fast:!canonical},checks);
   });
   for(const check of checks)check();
 }
@@ -143,7 +145,7 @@ export function runCanonicalStatusCases(fixture) {
     // harness never configures it. timestamp() therefore fails Infrastructure
     // before processor.rs writes the tentative EAX/EDX state back to Context.
     observe(t,{pc:0x1001,retired:1,budget:4,work:1,remaining:3,stop:8,flags:0x403,
-      fp:t.startingFp},{helpers:1},checks);
+      fp:t.startingFp},{helpers:1,materializers:0},checks);
   });
   for(const check of checks)check();
 }

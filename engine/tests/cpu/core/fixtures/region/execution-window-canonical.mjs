@@ -31,6 +31,7 @@ function lookup(source) {
   assert.equal(matches.length,1);const index=matches[0][0],fn=module.functions[index-module.imports.length];
   assert(fn);assert.deepEqual(module.types[module.functionTypes[index-module.imports.length]],
     {parameters:[0x7f],results:[0x7f]});assert.equal(fn.locals.length,0);
+  const precise=module.imports.some(item=>item.module==='ring3'&&item.name==='precise'),bits=precise?14:10;
   const entries=[],ops=fn.ops;let at=0;
   const take=op=>{const result=ops[at++];assert.equal(result?.op,op,'exact emitted lookup tree');return result;};
   const constant=value=>{const result=take(0x41);if(value!==undefined)assert.equal(result.value,value);return result.value;};
@@ -40,12 +41,12 @@ function lookup(source) {
     input();const pc=constant()>>>0;take(0x46);const outer=take(0x04);assert.equal(outer.frame.type,-1);
     const port=constant();assert(Number.isInteger(port)&&port>=0);assert.equal(take(0x05).frame,outer.frame);
     input();assert.equal(constant()>>>0,pc);take(0x49);const inner=take(0x04);assert.equal(inner.frame.type,-1);
-    tree();entries.push({pc,block:port&1023,prefix:port>>>10});assert.equal(take(0x05).frame,inner.frame);tree();
+    tree();entries.push({pc,block:port&((1<<bits)-1),prefix:port>>>bits});assert.equal(take(0x05).frame,inner.frame);tree();
     assert.equal(take(0x0b).frame,inner.frame);assert.equal(take(0x0b).frame,outer.frame);
   }
   tree();assert.equal(take(0x0b).frame.kind,0xff);assert.equal(at,ops.length);
   for(let i=1;i<entries.length;i++)assert(entries[i-1].pc<entries[i].pc);
-  return{entries,blocks:new Set(entries.map(entry=>entry.block)).size};
+  return{entries,blocks:new Set(entries.map(entry=>entry.block)).size,precise};
 }
 
 function retain(world,unit,ports) {
@@ -99,12 +100,16 @@ export function runExecutionWindowCanonicalCases(artifact,report) {
         .flatMap((pc,i)=>i===63?[pc]:[pc,pc+1])]:
         [B,B+5,B+7,...Array.from({length:63},(_,i)=>[B+9+i*3,B+10+i*3]).flat()];
       const decoded=lookup(world.moduleRecords.get(unit.id).source);
-      assert.deepEqual(decoded.entries.map(entry=>entry.pc),ports);assert.equal(decoded.blocks,base===A?65:64);
+      assert.deepEqual(decoded.entries.map(entry=>entry.pc),ports);assert.equal(decoded.blocks,base===A||decoded.precise?65:64);
       parents.push(retain(world,unit,ports));
     }
     const[parentA,parentB]=parents;
     assert.notEqual(parentA.id,parentB.id);assert.equal(world.cache.admissions,2);assert.equal(world.cache.units.size,2);
-    world.result.parentHistories={blocks:[65,64],instructions:[129,129],limitBlocks:128,
+    // The authored branch-target source lower bounds still total129>128.
+    // New hot spans additionally split the canonical continuation in B.
+    world.result.parentHistories={sourceBlockLowerBounds:[65,64],
+      executableSpans:parents.map(parent=>lookup(world.moduleRecords.get(parent.id).source).blocks),
+      instructions:[129,129],limitBlocks:128,
       parents:parents.map(parent=>({id:String(parent.id),pc:parent.pc,slot:parent.slot,bytes:parent.bytes,sha256:parent.sha256}))};
 
     // All 1100 CPUID callbacks execute in the original B module. Automatic

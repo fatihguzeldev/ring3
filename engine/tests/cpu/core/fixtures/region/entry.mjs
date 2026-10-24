@@ -44,8 +44,10 @@ export function runEntryCases(fixture) {
       t.result.semanticComplete=true;
       checks.push(()=>{
         assert.equal(counters.body_entries,1,'secondary entry executes exactly one real instruction body');
-        assert.equal(counters.prefix_quota_queries,budget+1,
-          'routing preserves the selected instruction and stopping-prefix quota checks');
+        assert.equal(run.preciseCalls,0,
+          'zero quota and the complete NOP span both stop before the separate UD2 boundary');
+        assert.equal(counters.prefix_quota_queries,0,
+          'the hot body contains no per-instruction stopping-prefix quota checks');
         assert.equal(counters.entry_filter_queries,0,
           `${blocks}-block late entry executes no linear per-block pending/INDEX filters`);
         assert.equal(counters.entry_index_compares,0,
@@ -68,6 +70,8 @@ export function runEntryCases(fixture) {
     t.result.semanticComplete=true;
     checks.push(()=>{
       assert.equal(counters.body_entries,1,'natural backedges stay inside the retained instruction body');
+      assert.equal(run.preciseCalls,0,'the final complete NOP span stays hot before UD2');
+      assert.equal(counters.prefix_quota_queries,0,'admitted loop spans have no per-instruction quota skeleton');
       assert.equal(counters.entry_filter_queries,0,'known natural backedges do not run per-block entry filters');
       assert.equal(counters.entry_index_compares,0,'known natural backedges do not compare dynamic entry membership');
       assert(counters.entry_table_selections<=2,

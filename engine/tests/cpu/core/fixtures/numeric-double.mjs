@@ -70,7 +70,7 @@ function runCase(name,options) {
   const word=(at,offset=0)=>view().getUint32(at+offset,true),put=(at,offset,value)=>view().setUint32(at+offset,value>>>0,true);
   const row={name,code:options.code??'d8c1',controls:[]};report.cases.push(row);
   const status=(operation,wanted,...args)=>{const actual=api[operation](...args)>>>0;row.controls.push({operation,wanted,actual});assert.equal(actual,wanted,`${name}: ${operation}`);};
-  let opened=false,active=false,helpers=0;
+  let opened=false,active=false,helpers=0,preciseCalls=0;
   try {
     status('open',0,12,97,0);opened=true;const arena=api.arena_ptr()>>>0;
     const pages=new Map([[0x1000,{permission:7,bytes:new Uint8Array(4096)}],[0x3000,{permission:3,bytes:new Uint8Array(4096)}],[0x4000,{permission:3,bytes:new Uint8Array(4096)}]]);
@@ -100,10 +100,13 @@ function runCase(name,options) {
     if(options.pending)ev.setUint16(18,initialStatus|0x8080,true);
     status('core_prepare',0,0x1000,256,32);const context=api.core_context_ptr()>>>0;
     const module=new WebAssembly.Module(slice(api.core_code_ptr()>>>0,api.core_code_len()>>>0));
+    const exact=WebAssembly.Module.imports(module).some(item=>item.module==='ring3'&&item.name==='precise');
     const numeric=(...args)=>{helpers++;return api.core_numeric(...args);};
-    const run=instantiateCore(module,{ring3:{memory,read:api.core_read,write:api.core_write,numeric}}).exports.run;
+    const precise=(...args)=>{preciseCalls++;return api.core_precise(...args);};
+    const run=instantiateCore(module,{ring3:{memory,read:api.core_read,write:api.core_write,numeric,
+      ...(exact?{precise}:{})}}).exports.run;
     status('core_begin',0);active=true;const budget=options.budget??1,retired=options.retired??budget,wantedStop=options.stop??2;
-    const stop=run(context,budget)>>>0;row.actual={stop,helpers,retired:word(context,40),pc:word(context,32),vector:word(context,116),detail:word(context,48)};checkpoint();
+    const stop=run(context,budget)>>>0;row.actual={stop,helpers,preciseCalls,retired:word(context,40),pc:word(context,32),vector:word(context,116),detail:word(context,48)};checkpoint();
     assert.equal(stop,wantedStop);assert.equal(word(context,40),retired);assert.equal(word(context,44),budget-retired);assert.equal(word(context,32),options.pc??0x1000+code.length);assert.equal(word(context,36),0x402);
     if(options.vector!==undefined)assert.equal(word(context,116),options.vector);if(options.detail!==undefined)assert.equal(word(context,48),options.detail);
     status('core_end',0);active=false;assert.deepEqual(slice(arena+FP,128),initial,'resident state is unpublished until export');
@@ -112,7 +115,9 @@ function runCase(name,options) {
     assert.deepEqual(Array.from({length:8},(_,i)=>word(context,i*4)),registers);
     const physical=address=>{const slot=word(word(context,56)+(address>>>12)*4);assert(slot>0);return word(context,64)+(slot-1)*4096+(address&4095);};
     for(const[address,bytes]of expectedPages)assert.deepEqual(slice(physical(address),4096),bytes,`${name}: entire RAM page`);
-    assert.equal(helpers,options.helpers??0,`${name}: direct versus canonical helper admission`);
+    row.semanticComplete=true;
+    assert.equal(helpers,exact?0:options.helpers??0,`${name}: inline arithmetic and stores do not invent planned canonical ordinals`);
+    assert.equal(preciseCalls,exact?options.helpers??0:0,`${name}: each rare before-op failure uses the real exact CPU adapter once`);
     row.complete=true;checkpoint();
   } finally {if(active)api.core_end();if(opened)api.close();}
 }

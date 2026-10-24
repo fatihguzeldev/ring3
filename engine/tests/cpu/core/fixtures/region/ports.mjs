@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import {readGeneratedModule} from './structure.mjs';
 
 const TWO='00000000000000800040',THREE='00000000000000c00040',FIVE='00000000000000a00140';
 const NEGATIVE_ZERO='00000000000000000080',FULL80='01000000000000c00040';
@@ -11,11 +12,31 @@ function enter(t,pc) {
   t.result.interiorPort={pc,primary:t.result.modules[0].pc,primarySha256:t.result.modules[0].sha256};
 }
 
-function check(t,wanted) {
+function check(t,wanted,{precise=wanted.budget===0?0:1}={}) {
+  const adapter=usesPreciseAdapter(t);
   const actual=t.check(wanted);
-  assert.equal(actual.activations.length,1,'the precompiled primary body executes this exact interior suffix');
+  assert.equal(actual.activations.length,1,'the retained primary owner supplies this exact interior suffix');
   assert.equal(t.result.modules.length,1,'no replacement module hides an unsupported interior port');
+  if(adapter){
+    assert.equal(actual.preciseCalls,precise,
+      'interior or variable work uses the exact adapter; a complete legal span and zero quota stay hot');
+    assert.equal(actual.helperCalls,0,'the exact CPU adapter owns canonical numeric operations directly');
+  }
   return actual;
+}
+
+function usesPreciseAdapter(t) {
+  if(!t.result.portExecution){
+    const bytes=t.bytes(t.api.core_code_ptr()>>>0,t.api.core_code_len()>>>0);
+    const module=readGeneratedModule(bytes),precise=module.imports.findIndex(item=>item.module==='ring3'&&item.name==='precise');
+    t.result.portExecution={kind:precise<0?'in-body-prefix':'exact-adapter',preciseImport:precise};
+  }
+  return t.result.portExecution.kind==='exact-adapter';
+}
+
+function canonicalCalls(t,legacy) {
+  assert.equal(t.result.runs[0].helperCalls,usesPreciseAdapter(t)?0:legacy,
+    'the actual selected execution backend performs the exact numeric callback protocol');
 }
 
 export function runPortCases(fixture) {
@@ -28,7 +49,7 @@ export function runPortCases(fixture) {
     enter(t,0x1003);const before=t.version();
     check(t,{pc:0x1004,retired:1,budget:1,fp:t.startingFp});
     enter(t,0x1000);
-    check(t,{pc:0x1005,retired:2,budget:1,regs:{0:0xc3909090},fp:t.startingFp});
+    check(t,{pc:0x1005,retired:2,budget:1,regs:{0:0xc3909090},fp:t.startingFp},{precise:0});
     assert.equal(t.version(),before,'both distinct decodes read unchanged source bytes');
   });
   fixture('immutable-port-at-prefix-1024-executes-one-instruction-with-bounded-selector-depth',{
@@ -38,7 +59,12 @@ export function runPortCases(fixture) {
     check(t,{pc:0x1401,retired:1,budget:1,fp:t.startingFp});
     assert.equal(t.version(),before);
     const depth=t.portDepth();
-    assert(depth['guest.run'].branchTables>0,'the sole instruction body contains actual instruction-port branch tables');
+    if(usesPreciseAdapter(t)){
+      assert.deepEqual(depth['guest.run'].portRouting.errors,[],
+        'the real body has exact whole-span admission and canonical precise wrappers');
+      assert.equal(depth['guest.run'].portRouting.tables.length,0,'1026 instruction starts add no dense hot-prefix tables');
+      assert.equal(depth['guest.run'].portRouting.prefixQuotaGuards.length,0,'the hot body has no per-instruction quota skeleton');
+    }else assert(depth['guest.run'].branchTables>0,'the legacy sole body contains actual instruction-port branch tables');
     assert(depth['guest.run'].maxDepth<=96,'1026 instruction starts use bounded 64-label chunks plus outer control');
   });
   for(const budget of[0,1,3])fixture(`immutable-port-aliases-and-unexecuted-metadata-budget-${budget}`,{
@@ -51,7 +77,7 @@ export function runPortCases(fixture) {
     check(t,{pc:budget===0?0x1002:budget===1?0x1003:0x1008,retired:budget,budget,
       fp:budget<3?t.startingFp:t.fp({status:0x820,tag:0xfff3,opcode:0x37b,fip:0x1005,fdp:0x3008,registers:{0:FIVE}})});
     assert.equal(t.version(),before+(budget===3?1n:0n),'only the executed raw80 store commits');
-    assert.equal(t.result.runs[0].helperCalls,budget===3?2:0,'only suffix arithmetic and raw80 store use exact helpers');
+    canonicalCalls(t,budget===3?2:0);
   });
 
   fixture('immutable-port-rejects-internal-gpr-constant-and-collapsed-address-facts',{
@@ -72,7 +98,7 @@ export function runPortCases(fixture) {
     enter(t,0x1002);const before=t.version();t.writeExpected(0x3008,FULL80);
     check(t,{pc:0x1009,retired:3,budget:3,
       fp:t.fp({status:0x1800,tag:0xffff,opcode:0x37b,fip:0x1006,fdp:0x3008,registers:{2:FULL80}})});
-    assert.equal(t.version(),before+1n);assert.equal(t.result.runs[0].helperCalls,2);
+    assert.equal(t.version(),before+1n);canonicalCalls(t,2);
   });
 
   fixture('immutable-port-observes-external-rounding-and-c1-before-store',{
@@ -83,7 +109,7 @@ export function runPortCases(fixture) {
     enter(t,0x1002);const before=t.version();t.writeExpected(0x3008,UP_ONE);
     check(t,{pc:0x100b,retired:4,budget:4,regs:{0:0x220},
       fp:t.fp({status:0x820,tag:0xffff,opcode:0x37b,fip:0x1008,fdp:0x3008,registers:{0:UP_ONE}})});
-    assert.equal(t.version(),before+1n);assert.equal(t.result.runs[0].helperCalls,2);
+    assert.equal(t.version(),before+1n);canonicalCalls(t,2);
   });
 
   fixture('immutable-port-fwait-observes-pending-exception-without-skipped-fp-metadata',{
@@ -93,7 +119,7 @@ export function runPortCases(fixture) {
     enter(t,0x1003);const before=t.version();
     check(t,{pc:0x1003,retired:0,budget:4,work:0,remaining:4,stop:9,fault:[0x8081,0,16],
       fp:t.fp({status:0x8081,tag:0xfffc,opcode:0x5a5,fip:0x11223344,fdp:0x55667788,cs:0x33,ds:0x5b,registers:{0:ONE}})});
-    assert.equal(t.version(),before);assert.equal(t.result.runs[0].helperCalls,1);
+    assert.equal(t.version(),before);canonicalCalls(t,1);
   });
 
   for(const codeStore of[false,true])fixture(`immutable-port-${codeStore?'smc-commits-once-before-stale-reentry':'late-fault-publishes-only-the-completed-suffix'}`,{
@@ -106,7 +132,7 @@ export function runPortCases(fixture) {
       fault:codeStore?[0,0,0]:[0x6000,0x1020a,0xa0e],
       fp:t.fp(codeStore?{status:0x820,tag:0xfff3,opcode:0x33f,fip:0x1005,fdp:0x1100,registers:{0:FIVE}}:
         {status:0x20,tag:0xfff0,opcode:0xc1,fip:0x1003,fdp:0x55667788,ds:0x5b,registers:{0:FIVE}})});
-    assert.equal(t.version(),before+(codeStore?1n:0n));assert.equal(t.result.runs[0].helperCalls,2);
+    assert.equal(t.version(),before+(codeStore?1n:0n));canonicalCalls(t,2);
     if(codeStore)t.status('core_begin',4);
   });
 
@@ -129,8 +155,10 @@ export function runPortCases(fixture) {
     data:page=>page.set([0x11,0x22,0x33]),
   },t=>{
     enter(t,0x1005);const before=t.version();t.writeExpected(0x5fff,'11');
+    const adapter=usesPreciseAdapter(t);
+    t.result.faultProtocol=adapter?'canonical byte width1 plus page-fault vector14':'legacy vector14 with width in access metadata';
     check(t,{pc:0x1005,retired:0,budget:3,work:1,remaining:2,ecx:2,regs:{6:0x3001,7:0x6000},
-      stop:3,fault:[0x6000,0x10201,14],fp:t.startingFp});
+      stop:3,fault:[0x6000,0x10201,adapter?0x10e:14],fp:t.startingFp});
     assert.equal(t.version(),before+1n);
   });
 }

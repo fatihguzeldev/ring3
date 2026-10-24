@@ -229,8 +229,104 @@ export function inspectCanonicalSpine(bytes) {
     bodyOperators:defined(module,bodies[0].index).ops.length};
 }
 
-function inspectPortRouting(fn) {
+function inspectPortRouting(fn,module) {
+  const precise=module.imports.findIndex(item=>item.module==='ring3'&&item.name==='precise');
+  return precise<0?inspectLegacyPortRouting(fn):inspectHotSpanRouting(fn,module,precise);
+}
+
+function inspectHotSpanRouting(fn,module,precise) {
+  const {ops,edges}=fn,summary={kind:'exact-adapter',tables:[],fullBlockAssignments:[],prefixQuotaGuards:[],
+    spanGuards:[],wrappers:[],errors:[]};
+  const check=(okay,message)=>{if(!okay)summary.errors.push(message);};
+  const local=(node,op,index)=>node?.op===op&&node.local===index;
+  const constant=(node,value)=>node?.op===0x41&&node.value===value;
+  check(JSON.stringify(signature(module,precise))===JSON.stringify({parameters:[0x7f],results:[0x7f]}),
+    'the real precise import takes the active Context pointer and returns one stop reason');
+  const outer=ops[0]?.op===2?ops[0].frame:undefined;
+  const service=ops.find(node=>node.op===3&&node.frames.at(-1)===outer)?.frame;
+  const inner=service&&ops[service.open+1]?.op===2?ops[service.open+1].frame:undefined;
+  check(outer?.kind===2&&service?.kind===3&&inner?.kind===2,
+    'hot-span rejection shares the actual outer publication/in-body commit service');
+  for(const[index,node]of ops.entries()){
+    if(node.op===0x21&&node.local===151){
+      if(constant(ops[index-1],0))continue;
+      summary.fullBlockAssignments.push(node.offset);
+      const end=ops[index-2],guard=end?.op===11?end.frame:undefined;
+      const p=guard?ops.slice(guard.open-9,guard.open):[];
+      const admitted=constant(ops[index-1],1)&&guard?.kind===4&&guard.type===-64&&guard.otherwise===undefined&&
+        p.length===9&&local(p[0],0x20,130)&&constant(p[1],0)&&p[2].op===0x47&&
+        local(p[3],0x20,12)&&p[4].op===0x41&&p[4].value>0&&p[5].op===0x49&&p[6].op===0x72&&
+        p[7].op===0x41&&[0,1].includes(p[7].value)&&p[8].op===0x72;
+      check(admitted,'every FULL_BLOCK=1 follows an exact offset/whole-span quota/variable-work rejection guard');
+      if(!admitted)continue;
+      const tail=ops.slice(guard.end-7,guard.end),branch=tail[6];
+      const target=branch?.op===12?branch.frames.at(-1-branch.targets[0]):undefined;
+      check(tail.length===7&&constant(tail[0],2)&&constant(tail[1],11)&&local(tail[2],0x20,12)&&
+        tail[3].op===0x45&&tail[4].op===0x1b&&local(tail[5],0x21,108)&&branch?.op===12&&
+        (target===inner||target===outer),
+        'rejected ingress selects Budget only at zero quota, otherwise ExactPrefix11, then branches to the common exit');
+      // The rejected arm must never fall through into FULL_BLOCK, including
+      // through an unexpected nested branch. Stop at the shared exit itself.
+      const reached=new Set(),pending=[guard.open+1],stop=target?.end+1;
+      while(pending.length){const at=pending.pop();if(at===stop||reached.has(at))continue;
+        reached.add(at);pending.push(...(edges[at]??[]));}
+      check(!reached.has(guard.end+1)&&!reached.has(index),
+        'every rejected-arm path exits before establishing hot-span permission');
+      summary.spanGuards.push({offset:ops[guard.open].offset,fullOffset:node.offset,
+        instructions:p[4].value,variable:p[7].value,exitOffset:branch?.offset});
+    }
+    if(node.op===0x4d&&local(ops[index-4],0x20,12)&&ops[index-3]?.op===0x41&&
+      local(ops[index-2],0x20,131)&&ops[index-1]?.op===0x6b)summary.prefixQuotaGuards.push(node.offset);
+    if(node.op===14){
+      const outer=ops.slice(index-3,index),inner=ops.slice(index-10,index);
+      if(outer.length===3&&local(outer[0],0x20,131)&&constant(outer[1],6)&&outer[2].op===0x76||
+        inner.length===10&&local(inner[0],0x20,131)&&inner[1].op===0x41&&inner[2].op===0x4b&&inner[3].op===4&&
+        local(inner[4],0x20,131)&&inner[5].op===0x41&&inner[6].op===0x6b&&inner[7].op===5&&
+        constant(inner[8],0)&&inner[9].op===11)summary.tables.push({offset:node.offset});
+    }
+  }
+  check(summary.fullBlockAssignments.length>0&&summary.spanGuards.length===summary.fullBlockAssignments.length,
+    'each actual hot span establishes permission exactly after its validated rejection guard');
+  check(summary.prefixQuotaGuards.length===0,'the hot body contains no old per-instruction exact-quota checks');
+  check(summary.tables.length===0,'the hot body contains no dense arbitrary instruction-prefix selector tables');
+  const body=named(module,'guest.run'),publisher=named(module,'guest.publish_link');
+  for(const[exportName,name,linked]of[['run','guest.entry',false],['link','guest.link',true]]){
+    const index=named(module,name),wrapper=defined(module,index),record={name,index,bodyCalls:[],preciseCalls:[]};
+    summary.wrappers.push(record);
+    check(Number.isInteger(index)&&module.exports.get(exportName)===index&&wrapper,
+      `${exportName} exposes its actual named precise-aware entry wrapper`);
+    if(!wrapper)continue;
+    check(JSON.stringify(signature(module,index))===JSON.stringify({parameters:[0x7f,0x7f],results:[0x7f]}),
+      `${name} retains the context/quota entry ABI`);
+    wrapper.ops.forEach((node,i)=>{
+      if(node.op===16&&node.call===body)record.bodyCalls.push(i);
+      if(node.op===16&&node.call===precise)record.preciseCalls.push(i);
+    });
+    check(record.bodyCalls.length===1&&record.preciseCalls.length===1,
+      `${name} has one hot-body call site and one exact CPU adapter call site`);
+    const call=record.bodyCalls[0],exact=record.preciseCalls[0],w=wrapper.ops;
+    const prefix=w.slice(call-2,call+5),guard=w[call+4]?.frame;
+    check(prefix.length===7&&local(prefix[0],0x20,0)&&local(prefix[1],0x20,1)&&
+      prefix[2].op===16&&prefix[2].call===body&&local(prefix[3],0x22,2)&&constant(prefix[4],11)&&
+      prefix[5].op===0x46&&prefix[6].op===4&&guard?.kind===4&&guard.otherwise===undefined&&
+      exact>guard.open&&exact<guard.end&&w[exact].frames.includes(guard)&&local(w[exact-1],0x20,0),
+      `${name} calls the real precise adapter only after the published hot body returns ExactPrefix11`);
+    if(linked){
+      const before=w.slice(guard?.open+1,exact);
+      check(before.length===3&&local(before[0],0x20,0)&&before[1].op===16&&before[1].call===publisher&&
+        local(before[2],0x20,0),
+        'the linked wrapper explicitly publishes actual canonical state immediately before exact execution');
+    }else check(exact===guard?.open+2,
+      'the standalone wrapper enters exact execution immediately after the canonical hot-body publication');
+  }
+  check(module.functions.reduce((count,fn)=>count+fn.ops.filter(node=>node.op===16&&node.call===precise).length,0)===2,
+    'only the two actual public entry wrappers invoke the precise adapter');
+  return summary;
+}
+
+function inspectLegacyPortRouting(fn) {
   const {ops}=fn,summary={tables:[],fullBlockAssignments:[],prefixQuotaGuards:[],errors:[]};
+  summary.kind='in-body-prefix';
   const check=(okay,message)=>{if(!okay)summary.errors.push(message);};
   for(const[index,node]of ops.entries()){
     if(node.op===0x21&&node.local===151){
@@ -700,7 +796,7 @@ export function inspectRegion(bytes,supportBytes) {
         loops:fn.ops.filter(node=>node.op===3).map(node=>({offset:node.offset,
           bitScans:fn.ops.slice(node.frame.open,node.frame.end).filter(op=>op.op===0x68).length}))};
     })():undefined,
-    portRouting:inspectPortRouting(run),
+    portRouting:inspectPortRouting(run,module),
     nativeFloatStores:run.ops.flatMap((node,index)=>{
       const single=node.op===0x38,p=run.ops.slice(index-(single?3:2),index);
       return(single||node.op===0x39)&&node.memoryOffset===0&&p[0]?.op===0x20&&p[0].local===52&&
@@ -743,7 +839,8 @@ export function inspectPortDepth(bytes) {
     assert(Number.isInteger(index)&&index>=module.imports.length,`actual defined ${name}`);
     const fn=module.functions[index-module.imports.length];
     return[name,{maxDepth:fn.ops.reduce((maximum,node)=>Math.max(maximum,node.frames.length-1),0),
-      branchTables:fn.ops.filter(node=>node.op===14).length,operators:fn.ops.length}];
+      branchTables:fn.ops.filter(node=>node.op===14).length,operators:fn.ops.length,
+      portRouting:inspectPortRouting(fn,module)}];
   }));
 }
 

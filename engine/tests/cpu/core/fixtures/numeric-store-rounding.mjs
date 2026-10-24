@@ -55,7 +55,7 @@ function runCase(name,options){
   const code=unhex(`${prefixCode}${width===4?'d9':'dd'}${pop?'1b':'13'}${options.scalarEdges?'894320':''}`);
   const row={name,width,mode,negative,pop,input:hex(extended(significand,exponent,negative)),oracle:{bits:String(result.bits),flags:result.flags,c1:result.c1},controls:[]};report.cases.push(row);
   const status=(operation,wanted,...args)=>{const actual=api[operation](...args)>>>0;row.controls.push({operation,wanted,actual});assert.equal(actual,wanted,`${name}: ${operation}`);};
-  let opened=false,active=false,helpers=0;
+  let opened=false,active=false,helpers=0,preciseCalls=0;
   try{
     status('open',0,12,97,0);opened=true;const arena=api.arena_ptr()>>>0;
     const pages=new Map([[0x1000,{permission:7,bytes:new Uint8Array(4096)}],[0x3000,{permission:3,bytes:new Uint8Array(4096)}]]);
@@ -83,13 +83,16 @@ function runCase(name,options){
     status('core_prepare',0,0x1000,256,32);const context=api.core_context_ptr()>>>0;
     const physical=address=>{const slot=word(word(context,56)+(address>>>12)*4);assert(slot>0);return word(context,64)+(slot-1)*4096+(address&4095);};
     const module=new WebAssembly.Module(slice(api.core_code_ptr()>>>0,api.core_code_len()>>>0));
-    const importVersions=[];
+    const exact=WebAssembly.Module.imports(module).some(item=>item.module==='ring3'&&item.name==='precise');
+    const importVersions=[],preciseVersions=[];
     const numeric=(...args)=>{helpers++;importVersions.push(String(view().getBigUint64(word(context,80),true)));return api.core_numeric(...args);};
-    const run=instantiateCore(module,{ring3:{memory,read:api.core_read,write:api.core_write,numeric}}).exports.run;
+    const precise=(...args)=>{preciseCalls++;preciseVersions.push(String(view().getBigUint64(word(context,80),true)));return api.core_precise(...args);};
+    const run=instantiateCore(module,{ring3:{memory,read:api.core_read,write:api.core_write,numeric,
+      ...(exact?{precise}:{})}}).exports.run;
     status('core_begin',0);active=true;
     const transactionPointer=word(context,80),version=view().getBigUint64(transactionPointer,true),pageVersions=slice(word(context,84),word(context,68)*16);
     const completed=1+prefix+(options.scalarEdges?1:0),budget=fault||options.smc?8:completed,retired=fault?prefix:completed,stop=run(context,budget)>>>0,wantedStop=fault?3:options.smc?6:2;
-    row.actual={stop,helpers,retired:word(context,40),pc:word(context,32),importVersions};checkpoint();
+    row.actual={stop,helpers,preciseCalls,retired:word(context,40),pc:word(context,32),importVersions,preciseVersions};checkpoint();
     assert.equal(stop,wantedStop);assert.equal(word(context,40),retired);assert.equal(word(context,44),budget-retired);assert.equal(word(context,32),0x1000+(fault?prefixBytes:code.length));assert.equal(word(context,36),0x402);
     if(fault){assert.equal(word(context,116),(width<<8)|14);assert.equal(word(context,48),options.denied?base:0x4000);}
     status('core_end',0);active=false;assert.deepEqual(slice(arena+FP,128),initial,'no resident publication before export');status('core_export',0,stop,retired);
@@ -101,8 +104,12 @@ function runCase(name,options){
     assert.equal(view().getBigUint64(transactionPointer,true),version+BigInt(writes.length),'one transaction per complete store');
     for(const[ordinal,[address,bytes]]of writes.entries())for(const page of new Set([address&~4095,(address+bytes.length-1)&~4095])){const slot=word(word(context,56)+(page>>>12)*4)-1;new DataView(pageVersions.buffer).setBigUint64(slot*16+8,version+BigInt(ordinal+1),true);}
     assert.deepEqual(slice(word(context,84),pageVersions.length),pageVersions,'all physical page versions');
-    if(options.scalarEdges&&helpers)assert.deepEqual(importVersions,[String(version+1n)],'numeric helper sees the preceding scalar store version');
-    assert.equal(helpers,options.helpers??0,`${name}: direct versus canonical helper admission`);row.complete=true;checkpoint();
+    row.semanticComplete=true;
+    if(options.scalarEdges&&(options.helpers??0))assert.deepEqual(exact?preciseVersions:importVersions,[String(version+1n)],
+      'the actual rare-store backend sees the preceding scalar store version');
+    assert.equal(helpers,exact?0:options.helpers??0,`${name}: inline stores do not invent planned canonical ordinals`);
+    assert.equal(preciseCalls,exact?options.helpers??0:0,`${name}: each rare before-op store failure enters the exact CPU adapter once`);
+    row.complete=true;checkpoint();
   }finally{if(active)api.core_end();if(opened)api.close();}
 }
 

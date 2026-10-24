@@ -29,12 +29,14 @@ import {runFamilyGrowthCases} from './region/family-growth.mjs';
 import {runFamilyPlanCases} from './region/family-plan.mjs';
 import {runFamilyResidencyCases} from './region/family-residency.mjs';
 import {runFamilyPoolCases} from './region/family-pool.mjs';
+import {runExecutionProofCases} from './region/execution-proofs.mjs';
+import {runExecutableValueCases} from './region/executable-values.mjs';
 import {runExecutionWindowCases} from './region/execution-window.mjs';
 import {runExecutionWindowCanonicalCases} from './region/execution-window-canonical.mjs';
 import {runObservedCases,runObservedBaselineCases,runObservedPrefixCases,runObservedRepeatedCases,runObservedCanonicalCases,runObservedExitCases,runObservedRefusalCases} from './region/observed.mjs';
 
 const [enginePath,reportPath,mode]=process.argv.slice(2);
-assert(enginePath&&reportPath&&(mode===undefined||mode==='--execution-window'||mode==='--execution-window-canonical'||mode==='--family-pool'||mode==='--family-pool-ordinary'||mode==='--family-residency'||mode==='--family-plan'||mode==='--family-entry'||mode==='--family-growth'||mode?.startsWith('--observed')||mode==='--flow-convergence'||mode==='--arithmetic-owner'||mode==='--arithmetic-owner-baseline'||mode==='--access-epoch'||mode==='--access-epoch-baseline'||mode==='--arithmetic'||mode==='--arithmetic-baseline'||mode==='--canonical'||mode==='--canonical-baseline'||mode==='--canonical-status'||mode==='--entry'||mode==='--entry-baseline'||mode==='--entry-nested'||mode==='--entry-unmatched'||mode==='--structure'||mode==='--graph'||mode==='--groups'||mode==='--native-stores'||mode==='--pool'||mode==='--pool-baseline'||mode==='--transport'||mode==='--transport-baseline'||mode==='--execution'||mode==='--execution-flags'||mode==='--execution-loads'||mode==='--execution-guards'||mode==='--execution-multiply'||mode==='--execution-flags-oracle'),
+assert(enginePath&&reportPath&&(mode===undefined||mode==='--execution-proofs'||mode==='--executable-values'||mode==='--execution-window'||mode==='--execution-window-canonical'||mode==='--family-pool'||mode==='--family-pool-ordinary'||mode==='--family-residency'||mode==='--family-plan'||mode==='--family-entry'||mode==='--family-growth'||mode?.startsWith('--observed')||mode==='--flow-convergence'||mode==='--arithmetic-owner'||mode==='--arithmetic-owner-baseline'||mode==='--access-epoch'||mode==='--access-epoch-baseline'||mode==='--arithmetic'||mode==='--arithmetic-baseline'||mode==='--canonical'||mode==='--canonical-baseline'||mode==='--canonical-status'||mode==='--entry'||mode==='--entry-baseline'||mode==='--entry-nested'||mode==='--entry-unmatched'||mode==='--structure'||mode==='--graph'||mode==='--groups'||mode==='--native-stores'||mode==='--pool'||mode==='--pool-baseline'||mode==='--transport'||mode==='--transport-baseline'||mode==='--execution'||mode==='--execution-flags'||mode==='--execution-loads'||mode==='--execution-guards'||mode==='--execution-multiply'||mode==='--execution-flags-oracle'),
   'usage: region.mjs engine.wasm fresh-report.json [--execution-window|--execution-window-canonical|--family-pool|--family-pool-ordinary|--family-residency|--family-plan|--arithmetic|--arithmetic-baseline|--arithmetic-owner|--arithmetic-owner-baseline|--access-epoch|--access-epoch-baseline|--canonical|--canonical-baseline|--canonical-status|--entry|--entry-baseline|--entry-nested|--entry-unmatched|--structure|--graph|--groups|--native-stores|--pool|--pool-baseline|--transport|--transport-baseline|--execution|--execution-flags|--execution-loads|--execution-guards|--execution-multiply|--execution-flags-oracle]');
 const artifact=readEngine(enginePath),hash=bytes=>createHash('sha256').update(bytes).digest('hex');
 const hex=bytes=>Buffer.from(bytes).toString('hex');
@@ -42,7 +44,7 @@ const unhex=text=>Uint8Array.from(Buffer.from(text.replaceAll(' ',''),'hex'));
 closeSync(openSync(reportPath,'wx'));
 const report={schema:1,complete:false,engineSha256:artifact.sha256,
   scope:'actual generated mixed integer/x87 CFG with exact instruction-prefix, publication and fault oracles; no timing claim',
-  sources:Object.fromEntries(['./region/execution-window.mjs','./region/execution-window-canonical.mjs','./region/family-pool.mjs','./region/family-residency.mjs','./region/family-plan.mjs','./region/family-growth.mjs','./region/family-entry.mjs','../../../support/core_wasm/cold_observed.mjs','./region.mjs','./region/observed.mjs','./region/observed-witness.mjs','./region/observed-auto.mjs','./region/observed-growth.mjs','./region/flow.mjs','./region/access-epoch.mjs','./region/arithmetic.mjs','./link.mjs','./region/structure.mjs','./region/control.mjs','./region/link.mjs','./region/status.mjs','./region/state.mjs','./region/quota.mjs','./region/ownership.mjs','./region/ports.mjs','./region/graph.mjs','./region/groups.mjs','./region/native-store.mjs','./region/pool.mjs','./region/execution.mjs','./region/execution-flags.mjs','./region/canonical.mjs','./region/entry.mjs','./region/witness.mjs','./pool-state.mjs',
+  sources:Object.fromEntries(['./region/execution-proofs.mjs','./region/executable-values.mjs','./region/execution-window.mjs','./region/execution-window-canonical.mjs','./region/family-pool.mjs','./region/family-residency.mjs','./region/family-plan.mjs','./region/family-growth.mjs','./region/family-entry.mjs','../../../support/core_wasm/cold_observed.mjs','./region.mjs','./region/observed.mjs','./region/observed-witness.mjs','./region/observed-auto.mjs','./region/observed-growth.mjs','./region/flow.mjs','./region/access-epoch.mjs','./region/arithmetic.mjs','./link.mjs','./region/structure.mjs','./region/control.mjs','./region/link.mjs','./region/status.mjs','./region/state.mjs','./region/quota.mjs','./region/ownership.mjs','./region/ports.mjs','./region/graph.mjs','./region/groups.mjs','./region/native-store.mjs','./region/pool.mjs','./region/execution.mjs','./region/execution-flags.mjs','./region/canonical.mjs','./region/entry.mjs','./region/witness.mjs','./pool-state.mjs',
     '../../../support/wasm/engine.mjs','../../../../../sdk/runtime/engine.js','../../../../../sdk/runtime/cache.js']
     .map(path=>[path,hash(readFileSync(new URL(path,import.meta.url)))])),cases:[]};
 const checkpoint=()=>writeFileSync(reportPath,JSON.stringify(report,null,2));
@@ -64,14 +66,14 @@ function fixture(name,{segments,entry=0x1000,registers=[0,2,0,0x3000,0x4800,0,0,
   compileInstructions=256,compileBlocks=32,initialFlags=2,
   initialFp,missing=[],stateWitness=false,witnessData,data=page=>{view(page).setFloat32(0,3,true);view(page).setFloat32(4,2,true);}}={},body) {
   stage=name;
-  const result={name,controls:[],modules:[],runs:[],numericCalls:[]};report.cases.push(result);checkpoint();
+  const result={name,controls:[],modules:[],runs:[],numericCalls:[],preciseCalls:[]};report.cases.push(result);checkpoint();
   const instance=instantiateCore(artifact.module,{ring3_observability:{now_ns:()=>0n}});
   const api=Object.fromEntries(Object.entries(instance.exports).filter(([key])=>key.startsWith('ring3_abi_v1_'))
     .map(([key,value])=>[key.slice(13),value]));
   const memory=instance.exports.memory,engine=new Engine(api,memory,artifact.sha256);
   const bytes=(pointer,length)=>new Uint8Array(memory.buffer).slice(pointer,pointer+length);
   const word=(pointer,offset=0)=>new DataView(memory.buffer).getUint32(pointer+offset,true);
-  let opened=false,active=false,context=0,helpers=0,run,publish,witnessReader,encodedModule,groupWitnessProof;
+  let opened=false,active=false,context=0,helpers=0,preciseCalls=0,run,publish,witnessReader,encodedModule,groupWitnessProof;
   const version=()=>new DataView(memory.buffer).getBigUint64(word(context,80),true);
   const status=(operation,wanted,...args)=>{
     const actual=api[operation](...args)>>>0;result.controls.push({operation,wanted,actual});
@@ -92,6 +94,10 @@ function fixture(name,{segments,entry=0x1000,registers=[0,2,0,0x3000,0x4800,0,0,
     groupWitnessProof=diagnostic?.groupProof;
     if(diagnostic)moduleRecord.instrumentedSha256=hash(diagnostic.bytes);
     const generated=instantiateCore(diagnostic?new WebAssembly.Module(diagnostic.bytes):module,{ring3:{...support,memory,read:api.core_read,write:api.core_write,
+      precise:typeof api.core_precise==='function'?pointer=>{
+        preciseCalls++;const before=version(),returned=api.core_precise(pointer);
+        result.preciseCalls.push({before:String(before),after:String(version()),returned});return returned;
+      }:undefined,
       numeric:(...args)=>{
         helpers++;const before=version(),returned=api.core_numeric(...args);
         result.numericCalls.push({before:String(before),after:String(version()),returned});return returned;
@@ -129,7 +135,7 @@ function fixture(name,{segments,entry=0x1000,registers=[0,2,0,0x3000,0x4800,0,0,
     };
     const check=({pc,retired,flags=2,ecx=registers[1],fp:expectedFp,simd:expectedSimd=startingSimd,stop=2,budget,work=budget,remaining=0,
       fault=[0,0,0],regs={},continueNeedCode=true})=>{
-      const beforeHelpers=helpers,activations=[];
+      const beforeHelpers=helpers,beforePrecise=preciseCalls,activations=[];
       let actual,available=budget;
       do {
         assert(activations.length<=budget+1,'bounded genuine NeedCode continuations');
@@ -161,7 +167,7 @@ function fixture(name,{segments,entry=0x1000,registers=[0,2,0,0x3000,0x4800,0,0,
       for(const[index,value]of Object.entries(regs))wantedRegisters[Number(index)]=value;
       const observed={stop:actual,pc:word(context,32),flags:word(context,36),retired:word(context,40),
         remaining:word(context,44),fault:[word(context,48),word(context,52),word(context,116)],registers:actualRegisters,
-        helperCalls:helpers-beforeHelpers,activations};
+        helperCalls:helpers-beforeHelpers,preciseCalls:preciseCalls-beforePrecise,activations};
       result.runs.push(observed);checkpoint();
       assert.equal(actual,stop,'exact stop reason');assert.equal(observed.pc,pc,'next unretired guest PC');
       assert.equal(observed.retired,retired,'cumulative completed instruction prefix');
@@ -226,7 +232,11 @@ function exchangeCase(name,eax,structural=false) {
 }
 
 try {
-  if(mode==='--execution-window') {
+  if(mode==='--execution-proofs') {
+    stage='proof-typed-fp-continuations';runExecutionProofCases(fixture);checkpoint();
+  }else if(mode==='--executable-values') {
+    stage='executable-value-effect-ir';runExecutableValueCases(fixture);checkpoint();
+  }else if(mode==='--execution-window') {
     stage='bounded-compiled-execution-window';runExecutionWindowCases(artifact,report);checkpoint();
     runExecutionWindowCanonicalCases(artifact,report);checkpoint();
   }else if(mode==='--execution-window-canonical') {
@@ -418,7 +428,11 @@ try {
       fault:[0x6000,0x10204,0x40e],
       fp:t.fp({status:0x3800,tag:0x3fff,opcode:0x4b,fip:0x1005,fdp:0x3004,registers:{7:EXT.six}})});
     assert.equal(t.version(),before+1n,'a failed numeric store does not advance the write sequence');
-    assert.deepEqual(t.result.numericCalls.map(call=>[call.before,call.after]),
+    if(typeof t.api.core_precise==='function'){
+      assert.equal(t.result.numericCalls.length,0,'failed speculative admission deopts before the faulting store');
+      assert.deepEqual(t.result.preciseCalls.map(call=>[call.before,call.after]),
+        [[String(before+1n),String(before+1n)]],'the actual exact adapter observes the preceding scalar commit and no failed write');
+    }else assert.deepEqual(t.result.numericCalls.map(call=>[call.before,call.after]),
       [[String(before+1n),String(before+1n)]],'the failed canonical helper observes the preceding scalar commit');
   });
   runControlCases(fixture);

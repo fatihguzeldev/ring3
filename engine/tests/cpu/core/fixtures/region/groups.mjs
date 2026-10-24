@@ -10,16 +10,30 @@ function retained(t,wanted) {
 }
 
 export function runGroupCases(fixture) {
-  fixture('access-group-short-quota-tail-keeps-the-single-ordinary-exact-access-path',{
+  fixture('access-group-complete-prefix-before-terminal-keeps-one-hot-admission',{
     segments:[[0x1000,'8b03 894308 8b5304 89530c 0f0b']],stateWitness:true,
     data:page=>{const d=new DataView(page.buffer);d.setUint32(0,0x12345678,true);d.setUint32(4,0x89abcdef,true);},
   },t=>{
     const before=t.version();t.writeExpected(0x3008,'78563412');t.writeExpected(0x300c,'efcdab89');
-    retained(t,{pc:0x100b,retired:4,budget:4,regs:{0:0x12345678,2:0x89abcdef},fp:t.startingFp});
-    assert.equal(t.version(),before+2n,'the precise tail preserves both logical store commits');
+    const run=retained(t,{pc:0x100b,retired:4,budget:4,regs:{0:0x12345678,2:0x89abcdef},fp:t.startingFp});
+    assert.equal(t.version(),before+2n,'the completed prefix preserves both logical store commits');
     const witness=t.stateWitness();
-    assert.equal(witness.group_acquisitions,0,'a short quota tail uses the ordinary exact memory path');
-    assert.equal(witness.page_translations,1,'the precise tail reuses its ordinary page translation');
+    assert.equal(run.preciseCalls,0,'quota ending before a separate terminal admits the complete hot prefix');
+    assert.equal(witness.group_acquisitions,1,'all four admitted accesses reuse one group');
+    assert.equal(witness.page_translations,0,'the completed prefix needs no ordinary translation');
+  });
+
+  fixture('access-group-short-quota-executes-real-prefix-without-hot-group-authority',{
+    segments:[[0x1000,'8b03 894308 8b5304 89530c 0f0b']],stateWitness:true,
+    data:page=>{const d=new DataView(page.buffer);d.setUint32(0,0x12345678,true);d.setUint32(4,0x89abcdef,true);},
+  },t=>{
+    const before=t.version();t.writeExpected(0x3008,'78563412');
+    const run=retained(t,{pc:0x1008,retired:3,budget:3,regs:{0:0x12345678,2:0x89abcdef},fp:t.startingFp});
+    const witness=t.stateWitness();
+    assert.equal(t.version(),before+1n,'only the first literal store retires');
+    assert.equal(run.preciseCalls,1,'the real decoded executor owns the incomplete span');
+    assert.equal(witness.group_acquisitions,0,'short quota never borrows future hot group authority');
+    assert.equal(witness.page_translations,0,'the hot body executes no access in a rejected span');
   });
 
   fixture('access-group-fast-full-block-reuses-one-real-admission-across-four-accesses',{
@@ -70,10 +84,11 @@ export function runGroupCases(fixture) {
   },t=>{
     new DataView(t.engine.memory.buffer).setUint32(t.context()+32,0x1002,true);
     const before=t.version();
-    retained(t,{pc:0x1007,retired:2,budget:2,regs:{0:0x12345678,2:0x89abcdef},fp:t.startingFp});
+    const run=retained(t,{pc:0x1007,retired:2,budget:2,regs:{0:0x12345678,2:0x89abcdef},fp:t.startingFp});
     const witness=t.stateWitness();
     assert.equal(witness.group_acquisitions,0,'contradictory skipped GPR facts cannot acquire a descriptor');
-    assert.equal(witness.page_translations,1,'the precise port validates its actual address through the ordinary page path');
+    assert.equal(run.preciseCalls,1,'the exact adapter reads the two literal values under actual skipped GPR state');
+    assert.equal(witness.page_translations,0,'the interior ingress executes no speculative hot address path');
     assert.equal(t.version(),before);
   });
 

@@ -37,7 +37,12 @@ function runCase(name, codeHex, budget, options, verify) {
   const view = () => new DataView(memory.buffer);
   const word = (pointer,offset=0) => view().getUint32(pointer+offset,true);
   const put = (pointer,offset,value) => view().setUint32(pointer+offset,value>>>0,true);
-  let arena = 0, context = 0, active = false, opened = false, numericCalls = 0;
+  let arena = 0, context = 0, active = false, opened = false, numericCalls = 0, preciseCalls = 0;
+  const precise = pointer => {
+    const payloads=options?.precisePayloads?.[preciseCalls];
+    if(payloads)assertBankPayloads('precise ingress observes the completed numerical prefix',payloads);
+    preciseCalls++;return api.core_precise(pointer);
+  };
   const numeric = (...args) => {
     numericCalls++;
     const returned = api.core_numeric(...args);
@@ -107,7 +112,9 @@ function runCase(name, codeHex, budget, options, verify) {
     assert.deepEqual(coreImports(module), [
       {module:'ring3',name:'memory',kind:'memory'}, {module:'ring3',name:'read',kind:'function'},
       {module:'ring3',name:'write',kind:'function'}, {module:'ring3',name:'numeric',kind:'function'}]);
-    let run = instantiateCore(module,{ring3:{memory,read:api.core_read,write:api.core_write,numeric}}).exports.run;
+    const bindings={memory,read:api.core_read,write:api.core_write,numeric,
+      ...(typeof api.core_precise==='function'?{precise}:{})};
+    let run = instantiateCore(module,{ring3:bindings}).exports.run;
     result.module = {sha256:hash(code),wasmHex:hex(code)};
     status('core_begin',0); active = true;
     const initialVersion=view().getBigUint64(word(context,80),true),initialPageVersions=slice(word(context,84),word(context,68)*16);
@@ -131,7 +138,7 @@ function runCase(name, codeHex, budget, options, verify) {
       const resumedModule = new WebAssembly.Module(resumedCode);
       assert.equal(hash(resumedCode),result.module.sha256,'interior handoff retains the exact owner module');
       assertCoreNames(resumedModule,0x1000);
-      run = instantiateCore(resumedModule,{ring3:{memory,read:api.core_read,write:api.core_write,numeric}}).exports.run;
+      run = instantiateCore(resumedModule,{ring3:bindings}).exports.run;
       result.handoff = {prefixRetired,prefixPc,published:hex(published),imported:hex(unpublishedFp),moduleSha256:hash(resumedCode)};
       status('core_begin',0); active = true;
     }
@@ -149,16 +156,15 @@ function runCase(name, codeHex, budget, options, verify) {
       const resumedCode=slice(api.core_code_ptr()>>>0,api.core_code_len()>>>0),resumedModule=new WebAssembly.Module(resumedCode);
       assert.equal(hash(resumedCode),result.module.sha256,'private interior reentry retains the exact owner module');
       assertCoreNames(resumedModule,0x1000);
-      run=instantiateCore(resumedModule,{ring3:{memory,read:api.core_read,write:api.core_write,numeric}}).exports.run;
+      run=instantiateCore(resumedModule,{ring3:bindings}).exports.run;
       result.reentry={prefixRetired,prefixPc,moduleSha256:hash(resumedCode)};
       status('core_begin',0);active=true;
     }
     const bankPointer=word(context,92);
     if(options?.nullBank) put(context,92,0);
     const stop = run(context,budget)>>>0;
-    result.executed = {stop,numericCalls,...raw()}; checkpoint();
+    result.executed = {stop,numericCalls,preciseCalls,...raw()}; checkpoint();
     if(options?.nullBank) put(context,92,bankPointer);
-    if(options?.numericCalls!==undefined) assert.equal(numericCalls,options.numericCalls,`${name}: numerical helper calls`);
     status('core_end',0); active = false;
     if(options?.endPayloads) assertBankPayloads('core_end preserves completed and popped physical register payloads',options.endPayloads);
     neutral('inactive numerical import',()=>status('core_numeric',8,context,0));
@@ -180,6 +186,11 @@ function runCase(name, codeHex, budget, options, verify) {
     assert.deepEqual(slice(arena+ymmOffset,144),initialYmm,'unmodified upper vector bank');
     assert.deepEqual(Array.from({length:8},(_,i)=>word(arena,16+i*4)),state.registers,'published architectural general state');
     assertRam();
+    const adapter=typeof api.core_precise==='function';
+    if(options?.numericCalls!==undefined)assert.equal(numericCalls,adapter?(options?.newNumericCalls??options.numericCalls):options.numericCalls,
+      `${name}: only planned effects use a selected native ordinal`);
+    if(adapter&&options?.preciseCalls!==undefined)assert.equal(preciseCalls,options.preciseCalls,
+      `${name}: actual exact-prefix adapter calls, including any private prefix run`);
     if(stop===3 || stop===9) {
       neutral('outstanding exception export',()=>status('core_export',12,stop,0));
       neutral('outstanding exception import',()=>status('core_import',12));
@@ -208,9 +219,9 @@ function bank(t,wanted) {assert.deepEqual(t.slice(t.arena+fpOffset,128),wanted,'
 try {
   runCase('private-reentry-preserves-stack-through-exchange-pop-and-sign',
     'd903 d94304 d9c9 dec1 d9e0 d9e1 0f0b',4,
-    // Both prefix FLDs stay direct. The immutable interior port executes the
-    // remaining FXCH, FADDP, FCHS, and FABS through four exact helpers.
-    {control:0x27f,data:values,numericCalls:4,
+    // The incomplete initial span and its interior continuation each use the
+    // exact executor. The literal physical payload checks remain independent.
+    {control:0x27f,data:values,numericCalls:4,newNumericCalls:0,preciseCalls:2,
       reentry:{budget:2,payloads:{6:'00000000000000800040',7:ext3}},
       endPayloads:{6:ext3,7:'00000000000000a00140'}},t=>{
       assert.equal(t.stop,2);assert.equal(t.state.retired,6);assert.equal(t.state.remaining,0);
@@ -233,7 +244,8 @@ try {
     });
   runCase('completed-arithmetic-prefix-survives-helper-fault',
     'd903 d84b04 d91d00600000 0f0b',8,
-    {control:0x27f,data:values,numericCalls:1,helperPayloads:[{7:ext6}]},t=>{
+    {control:0x27f,data:values,numericCalls:1,newNumericCalls:0,preciseCalls:1,
+      helperPayloads:[{7:ext6}],precisePayloads:[{7:ext6}]},t=>{
       standard(t,2,0x1005,2,3);assert.equal(t.state.detail,0x6000);
       assert.equal(t.state.metadata,0x10204);assert.equal(t.state.vector,0x40e);
       bank(t,t.fp({status:0x3800,tag:0x3fff,opcode:0x4b,fip:0x1002,fdp:0x3004,
@@ -254,20 +266,20 @@ try {
         registers:{6:ext3,7:'00000000000000a00140'}}));
     });
   runCase('consecutive-control-reloads-after-canonical-control-write','d903 d96b0c d84304 dd5b08 0f0b',4,
-    // A canonical control write keeps the rest of this block in the exact suffix.
-    {control:0x27f,numericCalls:3,data:v=>{v.setFloat32(0,1,true);v.setFloat32(4,2**-24,true);v.setUint16(12,0x7f,true);}},t=>{
+    // The planned control write ends a span; the next span imports its new CW.
+    {control:0x27f,numericCalls:3,newNumericCalls:1,preciseCalls:0,data:v=>{v.setFloat32(0,1,true);v.setFloat32(4,2**-24,true);v.setUint16(12,0x7f,true);}},t=>{
       standard(t,4,0x100b);t.writeExpected(0x3008,unhex('000000000000f03f'));
       const wanted=t.fp({status:0x20,opcode:0x55b,fip:0x1008,fdp:0x3008,cs:0x1b,ds:0x23,registers:{7:'0000000000000080ff3f'}});
       new DataView(wanted.buffer).setUint16(16,0x7f,true);bank(t,wanted);
     });
   runCase('consecutive-null-bank-declines-each-private-initialization','d903 d84b04 d95b08 0f0b',3,
-    {control:0x27f,data:values,numericCalls:3,nullBank:true},t=>{
+    {control:0x27f,data:values,numericCalls:3,newNumericCalls:0,preciseCalls:1,nullBank:true},t=>{
       standard(t,3,0x1008);t.writeExpected(0x3008,unhex('0000c040'));
       bank(t,t.fp({opcode:0x15b,fip:0x1005,fdp:0x3008,cs:0x1b,ds:0x23,registers:{7:ext6}}));
     });
   runCase('consecutive-stack-reloads-after-canonical-cross-page-pop','d903 d91dfe3f0000 d94304 d84b04 d95b08 0f0b',5,
-    // Cross-page pop and all three following x87 instructions share the exact suffix.
-    {control:0x27f,data:values,numericCalls:4},t=>{
+    // Cross-page pop and all three following x87 instructions share one exact suffix.
+    {control:0x27f,data:values,numericCalls:4,newNumericCalls:0,preciseCalls:1},t=>{
       standard(t,5,0x1011);t.writeExpected(0x3ffe,unhex('0000'));t.writeExpected(0x4000,unhex('4040'));
       t.writeExpected(0x3008,unhex('00008040'));
       bank(t,t.fp({opcode:0x15b,fip:0x100e,fdp:0x3008,cs:0x1b,ds:0x23,registers:{7:'00000000000000800140'}}));
@@ -302,12 +314,12 @@ try {
       bank(t,t.fp({opcode:0x15b,fip:0x1008,fdp:0x3008,cs:0x1b,ds:0x23,registers:{7:'00000000000000800240'}}));
     });
   runCase('consecutive-arithmetic-after-canonical-helper','d903 d9fa d84b04 d95b08 0f0b',4,
-    {control:0x27f,numericCalls:3,data:v=>{v.setFloat32(0,4,true);v.setFloat32(4,2,true);}},t=>{
+    {control:0x27f,numericCalls:3,newNumericCalls:1,preciseCalls:0,data:v=>{v.setFloat32(0,4,true);v.setFloat32(4,2,true);}},t=>{
       standard(t,4,0x100a);t.writeExpected(0x3008,unhex('00008040'));
       bank(t,t.fp({opcode:0x15b,fip:0x1007,fdp:0x3008,cs:0x1b,ds:0x23,registers:{7:'00000000000000800140'}}));
     });
   runCase('consecutive-arithmetic-after-direct-decline','d903 d84304 d84b08 d95b0c 0f0b',4,
-    {control:0x27f,numericCalls:3,data:v=>{v.setUint32(0,0x00800000,true);v.setUint32(4,1,true);v.setFloat32(8,2,true);}},t=>{
+    {control:0x27f,numericCalls:3,newNumericCalls:0,preciseCalls:1,data:v=>{v.setUint32(0,0x00800000,true);v.setUint32(4,1,true);v.setFloat32(8,2,true);}},t=>{
       standard(t,4,0x100b);t.writeExpected(0x300c,unhex('01000001'));
       bank(t,t.fp({status:2,opcode:0x15b,fip:0x1008,fdp:0x300c,cs:0x1b,ds:0x23,
         registers:{7:'0000000000010080823f'}}));
@@ -319,7 +331,7 @@ try {
         registers:{0:ext6,7:'00000000000000800140'}}));
     });
   runCase('consecutive-arithmetic-keeps-prefix-before-memory-fault','d903 d84b04 d80d00600000 0f0b',8,
-    {control:0x27f,data:values,numericCalls:1},t=>{
+    {control:0x27f,data:values,numericCalls:1,newNumericCalls:0,preciseCalls:1},t=>{
       standard(t,2,0x1005,2,3);assert.equal(t.state.detail,0x6000);assert.equal(t.state.vector,0x40e);
       bank(t,t.fp({status:0x3800,tag:0x3fff,opcode:0x4b,fip:0x1002,fdp:0x3004,cs:0x1b,ds:0x23,registers:{7:ext6}}));
     });
@@ -403,17 +415,17 @@ try {
     bank(t,t.fp({opcode:0x15b,fip:0x1009,fdp:0x3008,cs:0x1b,ds:0x23,registers:{6:ext3,7:ext3}}));
   });
   // FNSTSW remains a direct observer; the declined FADD and suffix FSTP use helpers.
-  runCase('direct-pc24-declines-denormal-memory-operand','d903 d84304 dfe0 d95b08 0f0b',4,{control:0x7f,numericCalls:2,data:v=>{v.setFloat32(0,3,true);v.setUint32(4,1,true);}},t=>{
+  runCase('direct-pc24-declines-denormal-memory-operand','d903 d84304 dfe0 d95b08 0f0b',4,{control:0x7f,numericCalls:2,newNumericCalls:0,preciseCalls:1,data:v=>{v.setFloat32(0,3,true);v.setUint32(4,1,true);}},t=>{
     standard(t,4,0x100a,2,2,{0:0x3822});t.writeExpected(0x3008,unhex('00004040'));
     bank(t,t.fp({status:0x22,opcode:0x15b,fip:0x1007,fdp:0x3008,cs:0x1b,ds:0x23,registers:{7:ext3}}));
   });
-  runCase('direct-pc24-retains-values-below-binary32-range','d903 d84b04 db7b08 0f0b',3,{control:0x7f,numericCalls:2,data:v=>{v.setUint32(0,0x00800000,true);v.setUint32(4,0x00800000,true);}},t=>{
+  runCase('direct-pc24-retains-values-below-binary32-range','d903 d84b04 db7b08 0f0b',3,{control:0x7f,numericCalls:2,newNumericCalls:0,preciseCalls:1,data:v=>{v.setUint32(0,0x00800000,true);v.setUint32(4,0x00800000,true);}},t=>{
     standard(t,3,0x1008);const value='0000000000000080033f';t.writeExpected(0x3008,unhex(value));
     bank(t,t.fp({opcode:0x37b,fip:0x1005,fdp:0x3008,cs:0x1b,ds:0x23,registers:{7:value}}));
   });
   // The prefix FLD stays direct; the imported interior FMUL and FSTP execute
   // through the immutable owner's canonical suffix rather than a rebuilt body.
-  runCase('direct-bank-import-reprepare-resume','d903 d84b04 d95b08 0f0b',2,{control:0x7f,data:values,numericCalls:2,handoff:{budget:1,replacement:'00000000000000800140'}},t=>{
+  runCase('direct-bank-import-reprepare-resume','d903 d84b04 d95b08 0f0b',2,{control:0x7f,data:values,numericCalls:2,newNumericCalls:0,preciseCalls:2,handoff:{budget:1,replacement:'00000000000000800140'}},t=>{
     assert.equal(t.stop,2);assert.equal(t.state.retired,3);assert.equal(t.state.remaining,0);assert.equal(t.state.pc,0x1008);assert.equal(t.state.flags,2);
     assert.deepEqual(t.state.registers,t.initialRegisters);t.writeExpected(0x3008,unhex('00000041'));
     bank(t,t.fp({opcode:0x15b,fip:0x1005,fdp:0x3008,cs:0x1b,ds:0x23,registers:{7:'00000000000000800240'}}));
@@ -438,7 +450,7 @@ try {
         standard(t,1,0x1002,0xcd7,2,{0:(0xa5c30000|status)>>>0});bank(t,t.initialFp);
       });
     runCase(`wait-delivers-pending-${bit}`,'9b 0f0b',8,
-      {control,fp:{...stateMetadata,status},registers:stateRegisters,flags:0xcd7,numericCalls:1},t=>{
+      {control,fp:{...stateMetadata,status},registers:stateRegisters,flags:0xcd7,numericCalls:1,newNumericCalls:0,preciseCalls:1},t=>{
         standard(t,0,0x1000,0xcd7,9);assert.equal(t.state.vector,16);assert.equal(t.state.detail,status|0x8080);
         bank(t,t.fp({...stateMetadata,status:status|0x8080}));
       });
@@ -450,13 +462,13 @@ try {
       });
   }
   runCase('status-before-wait-retains-successful-prefix','dfe0 9b 0f0b',8,
-    {control:0x37e,fp:{...stateMetadata,status:0x4a01},registers:stateRegisters,flags:0xcd7,numericCalls:1},t=>{
+    {control:0x37e,fp:{...stateMetadata,status:0x4a01},registers:stateRegisters,flags:0xcd7,numericCalls:1,newNumericCalls:0,preciseCalls:1},t=>{
       standard(t,1,0x1002,0xcd7,9,{0:0xa5c34a01});assert.equal(t.state.vector,16);assert.equal(t.state.detail,0xca81);
       bank(t,t.fp({...stateMetadata,status:0xca81}));
     });
   for(const[code,pc]of[['dfe0',0x1002],['9b',0x1001]]) {
     runCase(`state-null-bank-fallback-${code}`,`${code} 0f0b`,1,
-      {fp:{...stateMetadata,status:0x6a3f},registers:stateRegisters,flags:0xcd7,numericCalls:1,nullBank:true},t=>{
+      {fp:{...stateMetadata,status:0x6a3f},registers:stateRegisters,flags:0xcd7,numericCalls:1,newNumericCalls:0,preciseCalls:1,nullBank:true},t=>{
         standard(t,1,pc,0xcd7,2,code==='dfe0'?{0:0xa5c36a3f}:{});bank(t,t.initialFp);
       });
   }

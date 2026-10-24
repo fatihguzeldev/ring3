@@ -4,7 +4,9 @@ function retained(t,wanted,format,helpers=0) {
   const run=t.check(wanted);
   assert.equal(run.activations.length,1,'one actual body executes the exact native-store prefix');
   assert.equal(t.result.modules.length,1,'no replacement body hides a store admission failure');
-  assert.equal(run.helperCalls,helpers,'only rejected memory access uses the exact canonical fault path');
+  const adapter=typeof t.api.core_precise==='function';
+  assert.equal(run.helperCalls,adapter?0:helpers,'failed fast admission deopts before the current numerical effect');
+  if(adapter)assert.equal(run.preciseCalls,helpers,'the actual precise executor owns each rejected store suffix');
   const sites=t.inspect().nativeFloatStores;
   assert.deepEqual(sites.map(site=>site.format),format?[format]:[],
     format?'the actual body stores the admitted native value with a floating-point Wasm store':

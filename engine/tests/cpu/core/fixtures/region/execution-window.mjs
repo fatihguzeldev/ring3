@@ -35,6 +35,7 @@ function lookup(source) {
   assert.equal(matches.length,1);const index=matches[0][0],fn=module.functions[index-module.imports.length];
   assert(fn);assert.deepEqual(module.types[module.functionTypes[index-module.imports.length]],
     {parameters:[0x7f],results:[0x7f]});assert.equal(fn.locals.length,0);
+  const precise=module.imports.some(item=>item.module==='ring3'&&item.name==='precise'),bits=precise?14:10;
   const entries=[],ops=fn.ops;let at=0;
   const take=op=>{const result=ops[at++];assert.equal(result?.op,op,'exact emitted lookup tree');return result;};
   const constant=value=>{const result=take(0x41);if(value!==undefined)assert.equal(result.value,value);return result.value;};
@@ -44,12 +45,12 @@ function lookup(source) {
     input();const pc=constant()>>>0;take(0x46);const outer=take(0x04);assert.equal(outer.frame.type,-1);
     const port=constant();assert(Number.isInteger(port)&&port>=0);assert.equal(take(0x05).frame,outer.frame);
     input();assert.equal(constant()>>>0,pc);take(0x49);const inner=take(0x04);assert.equal(inner.frame.type,-1);
-    tree();entries.push({pc,block:port&1023,prefix:port>>>10});assert.equal(take(0x05).frame,inner.frame);tree();
+    tree();entries.push({pc,block:port&((1<<bits)-1),prefix:port>>>bits});assert.equal(take(0x05).frame,inner.frame);tree();
     assert.equal(take(0x0b).frame,inner.frame);assert.equal(take(0x0b).frame,outer.frame);
   }
   tree();assert.equal(take(0x0b).frame.kind,0xff);assert.equal(at,ops.length);
   for(let i=1;i<entries.length;i++)assert(entries[i-1].pc<entries[i].pc);
-  return{entries,blocks:new Set(entries.map(entry=>entry.block)).size};
+  return{entries,blocks:new Set(entries.map(entry=>entry.block)).size,precise};
 }
 
 function retain(world,unit,ports) {

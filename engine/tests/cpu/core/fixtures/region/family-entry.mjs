@@ -60,24 +60,22 @@ export function runFamilyEntryCases(artifact,report) {
         {name:'primary-interior-jump',entry:0x1002,budget:1,pc:0x1010,
           registers,flags:0x403,fp:contradictory,helpers:0},
         {name:'primary-full80-arithmetic',entry:0x1000,budget:1,pc:0x1002,
-          registers,flags:0x403,helpers:1,
+          registers,flags:0x403,helpers:0,
           fp:image(contradictory,{control:0x37f,status:0x1020,tag:0xff0f,opcode:0xc1,fip:0x1000,cs:0x1b,registers:{}})},
       ];
       for(const test of cases){
         world.reset({registers,flags:0x403,pc:test.entry,fp:contradictory});
         before=world.snapshot();
         const helperStart=world.helperCalls.length;
+        const preciseStart=world.cache.preciseRuns;
         run=world.execute(test.budget,test.entry);
         coldLiteral(world,before,run,{pc:test.pc,retired:test.budget,budget:test.budget,
           registers:test.registers,flags:test.flags,fp:test.fp,writes:[],versionWrites:0});
         world.result.runs.at(-1).entryCase=test.name;
         world.result.runs.at(-1).semanticComplete=true;
         assert.equal(world.helperCalls.length-helperStart,test.helpers);
-        if(test.helpers){
-          const callback=world.helperCalls.at(-1);
-          assert.equal(callback.ordinal,0,'the callback uses the family native dictionary');
-          assert.equal(BigInt(callback.identity),retained.id,'the actual callback is bound to the selected family');
-        }
+        assert.equal(world.cache.preciseRuns-preciseStart,test.budget===0?0:1,
+          'arbitrary short/interior state uses exact decoded execution without borrowing a family ordinal');
         assert.equal(run.id,retained.id);
         assert.equal(world.cache.units.get(retained.id),family);
         assert.equal(family.slot,retained.slot);

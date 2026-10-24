@@ -17,7 +17,7 @@ const words = values => {
 const report = {schema: 1, complete: false, engineSha256: engine.sha256,
   sourceSha256: hash(readFileSync(new URL(import.meta.url))), cases: [],
   limits: ['authored actual wasm numerical and memory boundaries; no game or performance claim',
-    'helper call counts distinguish direct execution from canonical fallback; this does not prove all SIMD instructions']};
+    'actual helper/precise counts distinguish hot execution from exact fallback; this does not prove all SIMD instructions']};
 const checkpoint = () => writeFileSync(reportPath, JSON.stringify(report, null, 2));
 const FP = 4236, SIMD = 4364, YMM = 4612;
 let stage = 'initialization';
@@ -48,7 +48,7 @@ function runCase(name, options) {
   const initialXmm = Array.from({length: 8}, (_, index) => words(options.xmm?.[index] ?? [index, index + 1, index + 2, index + 3]));
   const expectedXmm = initialXmm.map(bytes => bytes.slice());
   for (const [index, values] of Object.entries(options.expectedXmm ?? {})) expectedXmm[Number(index)] = words(values);
-  let arena, context, opened = false, active = false, helperCalls = 0, readCalls = 0, writeCalls = 0;
+  let arena, context, opened = false, active = false, helperCalls = 0, preciseCalls = 0, readCalls = 0, writeCalls = 0;
   const row = {name, codeHex: Buffer.from(code).toString('hex'), controls: []}; report.cases.push(row);
   const status = (name, wanted, ...args) => {
     const actual = api[name](...args) >>> 0; row.controls.push({name, wanted, actual});
@@ -74,8 +74,10 @@ function runCase(name, options) {
     status('core_prepare', 0, 0x1000, 256, 32); context = api.core_context_ptr() >>> 0;
     const generated = slice(api.core_code_ptr() >>> 0, api.core_code_len() >>> 0);
     const module = new WebAssembly.Module(generated);
+    const exact=WebAssembly.Module.imports(module).some(item=>item.module==='ring3'&&item.name==='precise');
     const run = instantiateCore(module, {ring3: {memory,
       numeric: (...args) => {helperCalls++; return api.core_numeric(...args);},
+      ...(exact?{precise:(...args)=>{preciseCalls++;return api.core_precise(...args);}}:{}),
       read: (...args) => {readCalls++; return api.core_read(...args);},
       write: (...args) => {writeCalls++; return api.core_write(...args);}}}).exports.run;
     const physical = address => {
@@ -87,13 +89,11 @@ function runCase(name, options) {
     const initialVersion = view().getBigUint64(word(context, 80), true);
     const pageVersions = slice(word(context, 84), word(context, 68) * 16);
     row.stop = run(context, budget) >>> 0;
-    row.helperCalls = helperCalls; row.readCalls = readCalls; row.writeCalls = writeCalls;
+    row.helperCalls = helperCalls; row.preciseCalls = preciseCalls; row.readCalls = readCalls; row.writeCalls = writeCalls;
     row.state = {pc: word(context, 32), flags: word(context, 36), retired: word(context, 40),
       remaining: word(context, 44), detail: word(context, 48), metadata: word(context, 52), vector: word(context, 116)};
     row.moduleSha256 = hash(generated); checkpoint();
     assert.equal(row.stop, stop, `${name}: stop`);
-    assert.equal(helperCalls, options.helpers ?? 0, `${name}: numerical helper calls`);
-    assert.equal(readCalls, 0, `${name}: scalar read helper`); assert.equal(writeCalls, 0, `${name}: scalar write helper`);
     assert.equal(row.state.retired, retired, `${name}: retired`);
     assert.equal(row.state.remaining, budget - retired, `${name}: remaining`);
     assert.equal(row.state.pc, options.pc ?? 0x1000 + code.length, `${name}: pc`);
@@ -122,6 +122,10 @@ function runCase(name, options) {
     assert.deepEqual(slice(word(context, 84), expectedVersions.length), expectedVersions, `${name}: all physical page versions`);
     row.final = {simdSha256: hash(wantedSimd), ram: Object.fromEntries([...expectedPages].map(([address, bytes]) => [address.toString(16), hash(bytes)])),
       transactionVersion: String(initialVersion + versionDelta)};
+    row.semanticComplete=true;
+    assert.equal(helperCalls,exact?0:options.helpers??0,`${name}: basic SIMD stays inline or enters exact execution before the operation`);
+    assert.equal(preciseCalls,exact?options.helpers??0:0,`${name}: each rare SIMD admission failure executes the actual exact adapter once`);
+    assert.equal(readCalls,0,`${name}: scalar read helper`);assert.equal(writeCalls,0,`${name}: scalar write helper`);
     row.complete = true; checkpoint();
   } finally {
     if (active) api.core_end(); if (opened) api.close();

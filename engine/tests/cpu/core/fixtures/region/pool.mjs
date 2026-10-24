@@ -99,7 +99,7 @@ function runLinkedPoolCase(artifact,report,iterations) {
     cache.dispatch=support;diagnostics.push(support);result.supportProof=dispatchDiagnostic.proof;
     for(const module of result.modules){
       const diagnostic=instrumentWitnessModule(module.source,readGeneratedModule(module.source));
-      const bindings={memory,read:api.core_read,write:api.core_write,numeric:api.core_numeric,
+      const bindings={memory,read:api.core_read,write:api.core_write,numeric:api.core_numeric,precise:api.core_precise,
         ...support,'support.abi':support.supportAbi};
       const generated=new WebAssembly.Instance(new WebAssembly.Module(diagnostic.bytes),{ring3:bindings}).exports;
       const unit=units.get(module.pc);Object.assign(unit,{run:generated.run,link:generated.link,publish:generated.publish});

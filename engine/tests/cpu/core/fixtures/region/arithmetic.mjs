@@ -33,11 +33,12 @@ function packingProof(source) {
   return{guards,stores};
 }
 
-function observe(t,wanted,{helpers=0,writes=1,packs,conditional=true,queries=0},checks) {
+function observe(t,wanted,{helpers=0,precise=0,writes=1,packs,conditional=true,queries=0},checks) {
   const source=t.bytes(t.api.core_code_ptr()>>>0,t.api.core_code_len()>>>0),before=t.version();
   const id=new DataView(t.engine.memory.buffer).getBigUint64(t.context()+120,true),run=t.check(wanted);
   assert.equal(run.activations.length,1);assert.equal(t.result.modules.length,1);
-  assert.equal(run.helperCalls,helpers,'the literal canonical fallback count is unchanged');
+  assert.equal(run.helperCalls,helpers,'only planned canonical effects use the retained owner ordinal');
+  assert.equal(run.preciseCalls,precise,'rejected or partial arithmetic uses the exact adapter once per required suffix');
   assert.equal(t.version(),before+BigInt(writes));
   assert.equal(new DataView(t.engine.memory.buffer).getBigUint64(t.context()+120,true),id);
   assert.deepEqual(t.bytes(t.api.core_code_ptr()>>>0,t.api.core_code_len()>>>0),source,'the actual owner bytes remain immutable');
@@ -76,7 +77,7 @@ export function runArithmeticCases(fixture) {
     t.writeExpected(0x3008,'0200803f');
     observe(t,{pc:0x1800,retired:4,budget:4,
       fp:t.fp({status:single?0x820:0xa20,opcode:0x15b,fip:0x1026,fdp:0x3008,
-        registers:{0:single?TWO_ULPS:THREE_HALVES}})}, {helpers:single?3:0,packs:single?0:1},checks);
+        registers:{0:single?TWO_ULPS:THREE_HALVES}})}, {precise:single?1:0,packs:single?0:1},checks);
   });
 
   for(const single of[true,false])for(const budget of[1,2])fixture(
@@ -85,7 +86,7 @@ export function runArithmeticCases(fixture) {
     },t=>observe(t,{pc:budget===1?0x1002:0x1005,retired:budget,budget,
       fp:t.fp({status:0x3800+(single&&budget===2?0x20:0),tag:0x3fff,
         opcode:budget===1?0x103:0x43,fip:budget===1?0x1000:0x1002,fdp:budget===1?0x3000:0x3004,
-        registers:{7:budget===1||single?ONE:HALF}})}, {writes:0,packs:0},checks));
+        registers:{7:budget===1||single?ONE:HALF}})}, {precise:1,writes:0,packs:0},checks));
 
   fixture('arithmetic-mode-correlation-fldcw-kills-prior-single-result-fact',{
     segments:[[0x1000,'d903 d84304 d96b0c d84304 d95b08 ffe6']],registers:regs,
@@ -94,7 +95,7 @@ export function runArithmeticCases(fixture) {
     t.writeExpected(0x3008,'0000803f');
     const expected=t.fp({status:0x20,opcode:0x15b,fip:0x100b,fdp:0x3008,registers:{7:HALF}});
     new DataView(expected.buffer,expected.byteOffset,expected.length).setUint16(16,0x27f,true);
-    observe(t,{pc:0x1800,retired:6,budget:6,fp:expected}, {helpers:3,packs:0,conditional:false},checks);
+    observe(t,{pc:0x1800,retired:6,budget:6,fp:expected}, {helpers:1,packs:1},checks);
   });
 
   fixture('arithmetic-mode-correlation-directed-rounding-retains-canonical-suffix',{
@@ -102,7 +103,7 @@ export function runArithmeticCases(fixture) {
   },t=>{
     t.writeExpected(0x3008,'0200803f');
     observe(t,{pc:0x1800,retired:6,budget:6,fp:t.fp({status:0x220,opcode:0x15b,fip:0x100b,fdp:0x3008,
-      registers:{7:THREE_HALVES}})}, {helpers:4,packs:0},checks);
+      registers:{7:THREE_HALVES}})}, {precise:1,packs:0},checks);
   });
 
   fixture('arithmetic-mode-correlation-canonical-wide-single-result-is-not-native24',{
@@ -114,7 +115,7 @@ export function runArithmeticCases(fixture) {
     t.writeExpected(0x3008,'0000807f');
     observe(t,{pc:0x1800,retired:5,budget:5,
       fp:t.fp({status:0x228,opcode:0x15b,fip:0x1020,fdp:0x3008,registers:{7:WIDE}})},
-      {helpers:2,packs:0},checks);
+      {precise:2,packs:0},checks);
   });
 
   fixture('arithmetic-mode-correlation-raw-sign-producer-does-not-grant-native-admission',{
@@ -128,7 +129,7 @@ export function runArithmeticCases(fixture) {
     observe(t,{pc:0x1800,retired:4,budget:4,
       fp:t.fp({status:0x820,opcode:0x15b,fip:0x1004,fdp:0x3008,
         registers:{0:'00000000000000c000c0'}})},
-      {helpers:2,packs:0,conditional:false},checks);
+      {precise:1,packs:0,conditional:false},checks);
   });
   for(const check of checks)check();
 }
@@ -193,7 +194,8 @@ export function runArithmeticOwnerCases(artifact,report) {
       for(const module of result.modules){
         const diagnostic=instrumentWitnessModule(module.source,readGeneratedModule(module.source));
         const generated=new WebAssembly.Instance(new WebAssembly.Module(diagnostic.bytes),{ring3:{memory,
-          read:api.core_read,write:api.core_write,numeric:api.core_numeric,...support,'support.abi':support.supportAbi}}).exports;
+          read:api.core_read,write:api.core_write,numeric:api.core_numeric,precise:api.core_precise,
+          ...support,'support.abi':support.supportAbi}}).exports;
         const unit=units.get(module.pc);Object.assign(unit,{run:generated.run,link:generated.link,publish:generated.publish});
         cache.table.set(unit.slot,unit.link);cache.publishers.set(unit.slot,unit.publish);diagnostics.push(generated);
         module.packing=packingProof(module.source);module.instrumentedSha256=hash(diagnostic.bytes);delete module.source;

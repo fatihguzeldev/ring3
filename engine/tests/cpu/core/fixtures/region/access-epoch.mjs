@@ -12,11 +12,17 @@ function stamp(t,address) {
   return new DataView(t.engine.memory.buffer).getBigUint64(pointer,true);
 }
 
-function checked(t,wanted,{writes=0,helpers=0,version=t.version()}={}) {
+function checked(t,wanted,{writes=0,helpers=0,precise=0,version=t.version()}={}) {
+  const source=t.bytes(t.api.core_code_ptr()>>>0,t.api.core_code_len()>>>0);
+  const id=new DataView(t.engine.memory.buffer).getBigUint64(t.context()+120,true);
   const run=t.check(wanted);
   assert.equal(run.activations.length,1,'the original generated owner executes the exact access prefix');
   assert.equal(t.result.modules.length,1,'repreparation cannot conceal an access epoch error');
   assert.equal(run.helperCalls,helpers,'only the specified canonical numeric boundary executes');
+  assert.equal(run.preciseCalls,precise,'only a short exact prefix enters the shared precise adapter');
+  assert.equal(new DataView(t.engine.memory.buffer).getBigUint64(t.context()+120,true),id);
+  assert.deepEqual(t.bytes(t.api.core_code_ptr()>>>0,t.api.core_code_len()>>>0),source,
+    'exact access prefixes do not synthesize another source owner');
   assert.equal(t.version(),version+BigInt(writes),'each completed logical store has its exact transaction sequence');
   t.result.semanticComplete=true;
   return t.stateWitness();
@@ -61,9 +67,9 @@ export function runAccessEpochCases(fixture,{mechanism=true}={}) {
   },t=>{
     const before=t.version();t.writeExpected(0x47fc,'44332211');t.writeExpected(0x47f8,'88776655');
     const witness=checked(t,{pc:0x1002,retired:2,budget:2,flags:0x403,
-      ecx:B,regs:{4:0x47f8},fp:t.startingFp},{writes:2,version:before});
+      ecx:B,regs:{4:0x47f8},fp:t.startingFp},{writes:2,precise:1,version:before});
     assert.equal(stamp(t,0x4000),before+2n);
-    remember(t,witness,{groups:0,exec:2,private:2});
+    remember(t,witness,{groups:0,exec:0,private:0});
   });
 
   fixture('access-epoch-rejected-stack-envelope-does-not-raise-a-future-unmapped-fault',{
@@ -121,9 +127,9 @@ export function runAccessEpochCases(fixture,{mechanism=true}={}) {
     const witness=checked(t,{pc:0x1100,retired:6,budget:6,ecx:B,fp},
       {writes:4,helpers:1,version:before});
     assert.equal(stamp(t,0x3000),before+4n);
-    // helper continuation is an exact interior suffix (FULL0), so its two stores
-    // correctly use ordinary authority after the first shared prehelper proof.
-    remember(t,witness,{groups:1,exec:3,private:3});
+    // The planned callback ends a span. Its offset-zero successor obtains one
+    // fresh shared write proof after the canonical authority barrier.
+    remember(t,witness,{groups:2,exec:2,private:2});
   });
 
   // all independent full-state, RAM and transaction oracles finish before the

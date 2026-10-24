@@ -22,9 +22,15 @@ function secondary(t) {
 }
 
 function retained(t,wanted) {
+  const source=t.bytes(t.api.core_code_ptr()>>>0,t.api.core_code_len()>>>0);
+  const id=new DataView(t.engine.memory.buffer).getBigUint64(t.context()+120,true);
   const observed=t.check(wanted);
   assert.equal(observed.activations.length,1,'the retained primary handles the selected numerical entry');
   assert.equal(t.result.modules.length,1,'the external entry is not hidden by compilation of a replacement unit');
+  assert.equal(new DataView(t.engine.memory.buffer).getBigUint64(t.context()+120,true),id);
+  assert.deepEqual(t.bytes(t.api.core_code_ptr()>>>0,t.api.core_code_len()>>>0),source,
+    'precise ingress retains the immutable original source owner');
+  return observed;
 }
 
 export function runStateCases(fixture) {
@@ -35,7 +41,7 @@ export function runStateCases(fixture) {
     data:page=>{const d=new DataView(page.buffer);for(let i=0;i<8;i++)d.setFloat32(i*4,i,true);},
   },t=>{
     // The first block owns all eight native payloads. Its nine completed instructions
-    // leave seven quota for the seven swaps in the next block's precise body.
+    // leave seven quota for the seven swaps before the separate UD2 boundary.
     const before=t.version();
     retained(t,{pc:0x104e,retired:16,budget:16,
       fp:t.fp({tag:0x1000,opcode:0x1c9,fip:0x104c,fdp:0x301c,registers:{
@@ -43,7 +49,8 @@ export function runStateCases(fixture) {
         3:'00000000000000c00040',4:'00000000000000800040',5:'0000000000000080ff3f',
         6:'00000000000000000000',7:'00000000000000e00140',
       }})});
-    assert.equal(t.result.runs[0].helperCalls,0,'all eight native selections and register exchanges stay direct');
+    assert.equal(t.result.runs[0].helperCalls,0,'the short exchange suffix has no owner-bound numeric import');
+    assert.equal(t.result.runs[0].preciseCalls,0,'the seven complete exchanges remain hot before the separate UD2 boundary');
     assert.equal(t.version(),before,'register permutation does not invent a memory transaction');
   });
   const vector='0000803f000000400000404000008040';
@@ -59,7 +66,8 @@ export function runStateCases(fixture) {
     retained(t,{pc:0x1017,retired:8,budget:8,simd,
       fp:t.fp({opcode:0x15b,fip:0x1014,fdp:0x300c,
         registers:{6:'00000000000000a00140',7:'00000000000000800040'}})});
-    assert.equal(t.result.runs[0].helperCalls,0,'the supported packed moves and admitted x87 instructions stay direct');
+    assert.equal(t.result.runs[0].helperCalls,0,'the short mixed suffix executes no owner-bound numeric import');
+    assert.equal(t.result.runs[0].preciseCalls,0,'the complete mixed span stays hot when the quota ends before UD2');
     assert.equal(t.version(),before+3n,'the packed store and two scalar FP stores each commit once');
   });
   fixture('dynamic-internal-entry-revalidates-the-target-fp-contract',{
@@ -78,16 +86,16 @@ export function runStateCases(fixture) {
   const quietNaN='00000000000000c0ff7f';
   for(const c of[
     {name:'fld-preserves-source-special-class-and-classifies-new-normal',code:'d9c0',budget:1,
-      initialTag:0xfffe,initial:{0:three},tag:0x3ffe,status:0x3a20,opcode:0x1c0,values:{0:three,7:three},helpers:0},
+      initialTag:0xfffe,initial:{0:three},tag:0x3ffe,status:0x3a20,opcode:0x1c0,values:{0:three,7:three},helpers:0,precise:0},
     {name:'fst-preserves-source-normal-class-and-classifies-written-zero',code:'ddd1',budget:2,
       initialTag:0xfffc,initial:{0:negativeZero,1:three},tag:0xfff4,status:0x220,opcode:0x5d1,
-      values:{0:negativeZero,1:negativeZero},helpers:0},
+      values:{0:negativeZero,1:negativeZero},helpers:0,precise:0},
     {name:'fxch-classifies-both-written-zero-and-normal',code:'d9c9',budget:1,
       initialTag:0xfff2,initial:{0:three,1:negativeZero},tag:0xfff1,status:0x20,opcode:0x1c9,
-      values:{0:negativeZero,1:three},helpers:0},
+      values:{0:negativeZero,1:three},helpers:0,precise:0},
     {name:'fst-preserves-source-normal-class-and-classifies-written-special',code:'ddd1',budget:2,
       initialTag:0xfffc,initial:{0:quietNaN,1:three},tag:0xfff8,status:0x220,opcode:0x5d1,
-      values:{0:quietNaN,1:quietNaN},helpers:1},
+      values:{0:quietNaN,1:quietNaN},helpers:0,precise:1},
   ])fixture(`occupied-tag-transfer-${c.name}`,{
     segments:[[0x1000,`${c.code} 0f0b`]],
     initialFp:{status:0x220,tag:c.initialTag,registers:c.initial,opcode:0x5a5,
@@ -99,7 +107,8 @@ export function runStateCases(fixture) {
     retained(t,{pc:0x1002,retired:1,budget:c.budget,work:1,remaining:c.budget-1,stop:c.budget===1?2:4,
       fp:t.fp({status:c.status,tag:c.tag,opcode:c.opcode,fip:0x1000,fdp:0x55667788,
         ds:0x5b,registers:c.values})});
-    assert.equal(t.result.runs[0].helperCalls,c.helpers,'only the special payload requires canonical transfer semantics');
+    assert.equal(t.result.runs[0].helperCalls,c.helpers,'precise transfer does not borrow a compiled native ordinal');
+    assert.equal(t.result.runs[0].preciseCalls,c.precise,'short quotas and rejected special input select the exact adapter');
     assert.equal(t.version(),before,'register-only tag transfer does not invent a memory transaction');
   });
   fixture('secondary-entry-does-not-inherit-the-primary-predecessor-gpr-constant',{
@@ -151,7 +160,8 @@ export function runStateCases(fixture) {
       fp:t.fp({status:0x801,tag:0xffff,opcode:0x37b,fip:0x1013,fdp:0x3008,
         registers:{0:indefinite}})});
     assert.equal(t.version(),before+1n,'only the completed raw80 store advances the transaction sequence');
-    assert.equal(t.result.runs[0].helperCalls,2,'unsupported entry state selects exact arithmetic and store without a speculative guest fault');
+    assert.equal(t.result.runs[0].helperCalls,0,'unsupported input executes decoded exact operations without compiled numeric imports');
+    assert.equal(t.result.runs[0].preciseCalls,1,'unsupported input selects one exact suffix without a speculative guest fault');
   });
   fixture('numeric-secondary-entry-observes-external-directed-rounding-before-arithmetic',{
     segments:[[0x1000,'d903 85c0 740a eb08'],[0x1010,'d84304 dfe0 db7b08 0f0b']],

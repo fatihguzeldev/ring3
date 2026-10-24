@@ -42,8 +42,9 @@ function retainSources(world,saved) {
 
 // Explicit core_trace_start keeps the legacy root-only executor contract. The
 // normal cold/automatic family growth contract is tested in family-growth.mjs.
-// The first capture is deliberately short: its final caller event confirms
-// FADD/RET, but does not claim that the caller's partially executed block ended.
+// A partial caller span is an exact-prefix boundary, so the original three-op
+// run below must decline capture. A second run completes the caller span: its
+// real final BLOCK confirms FADD/RET without inventing a partial-span event.
 // The next capture starts in the baseline caller and must cross that already
 // installed executor. No descriptor or recorder event is authored by this test.
 function growthCase(artifact,report,name,afterLong=()=>{}) {
@@ -62,9 +63,23 @@ function growthCase(artifact,report,name,afterLong=()=>{}) {
     cache.budget=3;before=world.snapshot();run=cache.execute(selected);
     observedLiteral(world,before,run,{pc:0x1008,retired:3,budget:3,
       registers:registers(before,{eax:1,esp:0x4800}),fpValue:FIVE,fpPc:CALLEE});
-    result.shortCapture=recording(world);result.shortSemanticComplete=true;
+    const exact=typeof world.raw.core_precise==='function';
+    result.partialCapture=recording(world);result.shortSemanticComplete=true;
+    assert(result.partialCapture.events.some(event=>event.owner===String(callee.id)&&event.pc===CALLEE));
+    if(exact){
+      assert(!result.partialCapture.events.some(event=>event.owner===String(root.id)&&event.pc===0x1005),
+        'the partially executed caller span never fabricates a completed BLOCK witness');
+      before=world.snapshot();world.status('core_trace_finish',18,CALLEE,128,32);sameImages(world,before);
+      assert.equal(cache.admissions,2);assert.equal(cache.units.size,2);
+      primeCall(world,3);selected=world.select(CALLEE);world.status('core_trace_start',0,CALLEE);
+      cache.budget=5;before=world.snapshot();run=cache.execute(selected);
+      observedLiteral(world,before,run,{pc:ROOT,retired:5,budget:5,
+        registers:registers(before,{eax:1,ecx:2,esp:0x4800}),fpValue:FIVE,fpPc:CALLEE});
+    }
+    result.shortCapture=recording(world);
     assert(result.shortCapture.events.some(event=>event.owner===String(callee.id)&&event.pc===CALLEE));
-    assert(result.shortCapture.events.some(event=>event.owner===String(root.id)&&event.pc===0x1005));
+    assert(result.shortCapture.events.some(event=>event.owner===String(root.id)&&event.pc===0x1005),
+      'only actual admission of the complete caller span supplies the confirming witness');
     world.status('core_trace_finish',0,CALLEE,128,32);
     const short=world.select(CALLEE);world.install();
     assert.notEqual(short.id,callee.id);assert.notEqual(short.id,root.id);

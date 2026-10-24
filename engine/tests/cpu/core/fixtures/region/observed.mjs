@@ -20,13 +20,15 @@ const difference=(after,before)=>Object.fromEntries(witnessCounters.map(name=>[n
 // supplies the candidate graph, never the expected architectural results.
 const programs={
   loop:{root:'e8fb000000 83c001 49 75f5 90 0f0b',callee:'d8c1 c3',perIteration:6,end:0x100b,returnPc:0x1005},
+  canonicalMemory:{root:'e8fb000000 83c001 49 75f5 90 0f0b',callee:'dc4308 c3',
+    perIteration:6,end:0x100b,returnPc:0x1005,canonicalMemory:true},
   repeated:{root:'e8fb000000 e8f6000000 49 75f3 90 0f0b',callee:'d8c1 c3',perIteration:8,end:0x100d,returnPc:0x100a},
   changedReturn:{root:'e8fb000000 83c001 49 75f5 90 0f0b',callee:'891424 d8c1 c3',
     perIteration:7,end:0x100b,returnPc:0x1005},
   recursive:{root:'e8fb000000 90 0f0b',callee:'49 7407 e8f8ffffff d8c1 c3',
     trainingBudget:15,end:0x1005,returnPc:0x1005},
-  ordinal:{root:'d92b dc4308 e8f6000000 83c001 49 75f0 90 0f0b',callee:'d8c1 c3',
-    perIteration:8,end:0x1010,returnPc:0x100a,canonicalPerIteration:3},
+  ordinal:{root:'d92b dc4308 e8f6000000 83c001 49 75f0 90 0f0b',callee:'dc4308 c3',
+    perIteration:8,end:0x1010,returnPc:0x100a,canonicalPerIteration:3,canonicalMemory:true},
 };
 
 function recorder(world) {
@@ -54,7 +56,7 @@ function fixture(artifact,report,name,options,body) {
   const bigint=(pointer,offset=0)=>new DataView(memory.buffer).getBigUint64(pointer+offset,true);
   const setWord=(pointer,offset,value)=>new DataView(memory.buffer).setUint32(pointer+offset,value,true);
   let cache,engine,opened=false;
-  const diagnostics=[],owners=[],units=new Map();let prepares=0,probes=0,helpers=0;
+  const diagnostics=[],owners=[],units=new Map();let prepares=0,probes=0,helpers=0,preciseCalls=0;
   const api={...raw,
     core_prepare:(...args)=>{prepares++;return raw.core_prepare(...args);},
     core_numeric:(context,ordinal)=>{
@@ -63,6 +65,9 @@ function fixture(artifact,report,name,options,body) {
       const bank=word(context,92);call.fip=word(bank,8);
       call.opcode=new DataView(memory.buffer).getUint16(bank+6,true);return call.returned;
     },
+    ...(typeof raw.core_precise==='function'?{core_precise:(context)=>{
+      preciseCalls++;return raw.core_precise(context);
+    }}:{}),
     core_chain_probe:(...args)=>{probes++;const returned=raw.core_chain_probe(...args);
       result.selections.push({operation:'probe',args,returned});return returned;},
     ...(typeof raw.core_chain_select==='function'?{core_chain_select:(...args)=>{
@@ -128,7 +133,7 @@ function fixture(artifact,report,name,options,body) {
       }
       for(const{unit,module}of units.values())if(!module.instrumentedSha256){
         const diagnostic=instrumentObservedModule(module.source);
-        const bindings={memory,read:api.core_read,write:api.core_write,numeric:api.core_numeric,
+        const bindings={memory,read:api.core_read,write:api.core_write,numeric:api.core_numeric,precise:api.core_precise,
           ...cache.dispatch,'support.abi':cache.dispatch.supportAbi};
         const generated=new WebAssembly.Instance(new WebAssembly.Module(diagnostic.bytes),{ring3:bindings}).exports;
         Object.assign(unit,{run:generated.run,link:generated.link,publish:generated.publish});
@@ -141,6 +146,7 @@ function fixture(artifact,report,name,options,body) {
     const world={artifact,result,raw,api,memory,bytes,word,bigint,setWord,status,engine,cache,context,bank,
       program,root,callee,units,select,encoded,install,diagnostics,initialFp,initialSimd,initialYmm,makeState,
       get prepares(){return prepares;},get probes(){return probes;},get helpers(){return helpers;},
+      get preciseCalls(){return preciseCalls;},
       physical:address=>{const slot=word(word(context,56)+(address>>>12)*4);assert(slot>0);return word(context,64)+(slot-1)*4096+(address&4095);},
       revision:()=>bigint(word(context,80)),
       counters:()=>sum(diagnostics),
@@ -148,14 +154,14 @@ function fixture(artifact,report,name,options,body) {
         for(const name of Object.keys(total))total[name]+=row[name];return total;},{lookup_entries:0,frame_commits:0}),
       reset(iterations=9,changes={}){
         const next=makeState(iterations,changes);new Uint8Array(memory.buffer,engine.base,56).set(next);
-        for(const[offset,image]of[[FP,initialFp],[SIMD,initialSimd],[YMM,initialYmm]])
+        for(const[offset,image]of[[FP,changes.fp??initialFp],[SIMD,initialSimd],[YMM,initialYmm]])
           new Uint8Array(memory.buffer,engine.base+offset,image.length).set(image);
         cache.import();return next;
       },
       snapshot(){return{context:bytes(context,128),state:bytes(engine.base,56),fp:bytes(engine.base+FP,128),
         simd:bytes(engine.base+SIMD,160),ymm:bytes(engine.base+YMM,144),
         ram:bytes(word(context,64),word(context,68)*4096),pages:bytes(word(context,84),word(context,68)*16),
-        revision:bigint(word(context,80)),counters:sum(diagnostics),routing:this.routing(),probes,prepares,helpers};},
+        revision:bigint(word(context,80)),counters:sum(diagnostics),routing:this.routing(),probes,prepares,helpers,preciseCalls};},
       rawExecute(unit,budget){
         const retired=word(context,40);status('core_begin',0);let stop;
         try{stop=unit.run(context,budget)>>>0;}finally{status('core_end',0);}
@@ -206,7 +212,7 @@ function literal(world,before,run,{pc,retired,budget,registers,flags=2,writes=0,
     fpHex:Buffer.from(wantedFp).toString('hex'),ramSha256:hash(wantedRam),revision:String(world.revision()),
     counters:difference(world.counters(),before.counters),
     routing:Object.fromEntries(Object.entries(world.routing()).map(([name,value])=>[name,value-before.routing[name]])),
-    probes:world.probes-before.probes});
+    probes:world.probes-before.probes,preciseCalls:world.preciseCalls-before.preciseCalls});
   return result.runs.at(-1);
 }
 
@@ -225,7 +231,8 @@ function train(world,{baseline=false,finish=true}={}) {
     fpValue:world.result.canonical?FULL80:recursive?'00000000000000e00140':
       repeated?'00000000000000f00240':'00000000000000900240',
     fpPc:recursive?0x1108:program===programs.changedReturn?0x1103:CALLEE,
-    fpData:program===programs.ordinal?0x3008:undefined,fpDs:program===programs.ordinal?0x23:undefined,
+    fpOpcode:program.canonicalMemory?0x443:0xc1,
+    fpData:program.canonicalMemory?0x3008:undefined,fpDs:program.canonicalMemory?0x23:undefined,
     helpers:world.result.canonical?numericCount:0});
   if(!baseline){result.recording=recorder(world);assert.equal(result.recording.overflow,0);
     assert(result.recording.used>3,'the actual normal compiled path records more than a marker');
@@ -312,17 +319,39 @@ export function runObservedRepeatedCases(artifact,report) {
 }
 
 export function runObservedCanonicalCases(artifact,report) {
-  fixture(artifact,report,'observed-canonical-callee-uses-overlay-native-ordinal-authority',{
-    canonical:true},world=>{
+  fixture(artifact,report,'observed-original-full80-register-arithmetic-keeps-state-through-rare-exact-suffix',{
+    },world=>{
+    // Keep the original PC64/full80 register-arithmetic oracle. Its new
+    // before-op admission failure executes the exact decoded instruction,
+    // rather than pretending that this rare path has a generated ordinal.
+    train(world);
+    const fp=world.initialFp.slice(),f=view(fp);
+    for(const[offset,value]of[[16,0x37f],[18,0x200],[20,0xfff4]])f.setUint16(offset,value,true);
+    fp.set(unhex(FULL80),40);fp.set(unhex(ZERO),50);
+    world.reset(2,{fp});const selected=world.select(ROOT);world.install();
+    const exact=typeof world.raw.core_precise==='function';
+    const before=world.snapshot();world.cache.budget=12;const run=world.cache.execute(selected);
+    const registers=Array.from({length:8},(_,i)=>view(before.state).getUint32(16+i*4,true));registers[0]=2;registers[1]=0;
+    const completed=literal(world,before,run,{pc:0x100b,retired:12,budget:12,registers,flags:0x46,writes:2,
+      stackReturn:0x1005,fpValue:FULL80,fpPc:CALLEE,helpers:exact?0:2});
+    world.result.semanticComplete=true;
+    assert.equal(completed.preciseCalls,exact?2:0,'each actual PC64 register admission miss uses its selected exact backend');
+    assert.equal(completed.counters.canonical_calls,exact?0:2,'rare before-op failures do not fabricate new generated native ordinals');
+    assert.equal(world.cache.admissions,3,'the exact suffix reuses the observed executor and both retained source owners');
+  });
+  fixture(artifact,report,'observed-planned-canonical-callee-uses-overlay-native-ordinal-authority',{
+    canonical:true,program:'canonicalMemory'},world=>{
     world.result.canonical=true;train(world);world.reset(2);const selected=world.select(ROOT);world.install();
     const before=world.snapshot();world.cache.budget=12;const run=world.cache.execute(selected);
     const registers=Array.from({length:8},(_,i)=>view(before.state).getUint32(16+i*4,true));registers[0]=2;registers[1]=0;
     const completed=literal(world,before,run,{pc:0x100b,retired:12,budget:12,registers,flags:0x46,writes:2,
-      stackReturn:0x1005,fpValue:FULL80,fpPc:CALLEE,helpers:2});
-    for(const call of world.result.numericCalls.slice(-2))assert.equal(call.identity,String(selected.id),
-      'the real canonical callback executes under the overlay capability, not the prior callee owner');
+      stackReturn:0x1005,fpValue:FULL80,fpPc:CALLEE,fpOpcode:0x443,fpData:0x3008,fpDs:0x23,helpers:2});
+    for(const call of world.result.numericCalls.slice(-2)){
+      assert.equal(call.identity,String(selected.id),'planned canonical callbacks use the observed executor capability');
+      assert.equal(call.ordinal,0);assert.equal(call.opcode,0x443);assert.equal(call.returned,0);
+    }
     world.result.semanticComplete=true;assert.equal(completed.counters.body_entries,1);assert.equal(completed.probes,0);
-    assert.equal(completed.counters.canonical_calls,2);
+    assert.equal(completed.preciseCalls,0);assert.equal(completed.counters.canonical_calls,2);
   });
   fixture(artifact,report,'observed-canonical-callee-ordinal-differs-from-both-baseline-owner-dictionaries',{
     canonical:true,program:'ordinal'},world=>{
@@ -330,18 +359,18 @@ export function runObservedCanonicalCases(artifact,report) {
     const baseline=world.result.numericCalls.filter(call=>call.identity===String(world.callee.id));
     assert.equal(baseline.length,3);for(const call of baseline){
       assert.equal(call.ordinal,0,'the independently compiled callee really uses native ordinal zero');
-      assert.equal(call.identity,String(world.callee.id));assert.equal(call.opcode,0xc1);assert.equal(call.returned,0);
+      assert.equal(call.identity,String(world.callee.id));assert.equal(call.opcode,0x443);assert.equal(call.returned,0);
     }
     world.reset(2);const selected=world.select(ROOT);world.install();
     const before=world.snapshot(),first=world.result.numericCalls.length;world.cache.budget=16;
     const run=world.cache.execute(selected),registers=Array.from({length:8},(_,i)=>view(before.state).getUint32(16+i*4,true));
     registers[0]=2;registers[1]=0;
     const completed=literal(world,before,run,{pc:0x1010,retired:16,budget:16,registers,flags:0x46,writes:2,
-      stackReturn:0x100a,fpValue:FULL80,fpPc:CALLEE,fpData:0x3008,fpDs:0x23,helpers:6});
+      stackReturn:0x100a,fpValue:FULL80,fpPc:CALLEE,fpOpcode:0x443,fpData:0x3008,fpDs:0x23,helpers:6});
     const callbacks=world.result.numericCalls.slice(first);
     // These operations require the canonical boundary independently of how the
     // observed graph partitions blocks: FLDCW has no direct lowering, memory
-    // arithmetic admits only float32, and register arithmetic rejects PC64.
+    // arithmetic admits only float32, so both memory64 additions stay planned.
     // FLDCW itself preserves historical FIP/FDP; the double-zero addition
     // records the exact data address without rounding this full80 payload.
     assert.deepEqual(callbacks.map(call=>call.fip),[0x11223344,0x1002,CALLEE,CALLEE,0x1002,CALLEE],

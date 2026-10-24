@@ -84,11 +84,14 @@ export function runExecutionLoadCases(fixture) {
   },t=>{
     if(secondary){new DataView(t.engine.memory.buffer).setUint32(t.context()+32,0x1002,true);
       t.result.secondaryEntry={pc:0x1002,retainedPrimary:0x1000};}
-    const{before,witness}=retained(t,secondary?{pc:0x1100,retired:2,budget:2,
+    const{run,before,witness}=retained(t,secondary?{pc:0x1100,retired:2,budget:2,
       regs:{2:0x89abcdef},fp:t.startingFp}:{pc:0x1002,retired:1,budget:1,
       regs:{0:0x89abcdef},fp:t.startingFp});
     assert.equal(t.version(),before);t.result.executionWitness=witness;
-    assert.equal(witness.data_reads,1,'an unexecuted producer or partial-block cache never supplies a value');
+    if(typeof t.api.core_precise==='function'){
+      assert.equal(run.preciseCalls,1,'the actual decoded ingress reads the literal value without an unexecuted hot producer');
+      assert.equal(witness.data_reads,0,'partial and interior entries never acquire a speculative hot data cache');
+    }else assert.equal(witness.data_reads,1,'an unexecuted producer or partial-block cache never supplies a value');
   });
   fixture('execution-load-availability-store-kills-the-earlier-value',{
     segments:[[0x1000,'8b03 890b 8b13 ffe7']],

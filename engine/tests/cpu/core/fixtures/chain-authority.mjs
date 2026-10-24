@@ -39,6 +39,20 @@ function fixture(name,{entry=0x1000,target=0x1040,registers=[0,0,0x1080,0x3000,0
   const native = Object.fromEntries(Object.entries(instance.exports).filter(([name]) => name.startsWith('ring3_abi_v1_'))
     .map(([name,value]) => [name.slice(13),value]));
   const selectionCalls = {core_prepare:0,core_lookup:0,core_cold_run:0};
+  if(traceSelection){
+    const finish=native.core_trace_finish;
+    native.core_trace_finish=(...args)=>{
+      const pointer=native.core_trace_pointer()>>>0,d=new DataView(instance.exports.memory.buffer);
+      const used=pointer?d.getUint32(pointer+4,true):0;
+      const attempt={args,header:pointer?Array.from({length:4},(_,i)=>d.getUint32(pointer+i*4,true)):null,
+        events:Array.from({length:Math.min(used,129)},(_,i)=>{
+          const at=pointer+32+i*24;
+          return {kind:d.getUint32(at,true),pc:d.getUint32(at+4,true),end:d.getUint32(at+8,true),
+            offset:d.getUint32(at+12,true),owner:String(d.getBigUint64(at+16,true))};
+        })};
+      (result.traceAttempts??=[]).push(attempt);attempt.status=finish(...args);checkpoint();return attempt.status;
+    };
+  }
   if (traceSelection) for (const name of Object.keys(selectionCalls)) {
     const operation = native[name];
     native[name] = (...args) => {selectionCalls[name]++; return operation(...args);};
@@ -203,7 +217,9 @@ try {
   });
   fixture('repeat-write-fault-prefix',{...repeat,registers:[5,3,0x1140,0x3000,0x4800,0,0x3000,0x4fff]},t => {
     const {sourceVersion} = t.run(t.first,8); t.expectedRam[8192+4095]=0x11;
-    t.expect({stop:3,pc:0x1100,retired:0,work:1,remaining:7,regions:1,id:t.first.id,sourceVersion,fault:[0x5000,0x10201,14],
+    t.result.faultProtocol=typeof t.api.core_precise==='function'?'canonical width1 plus #PF14':'legacy #PF14';
+    t.expect({stop:3,pc:0x1100,retired:0,work:1,remaining:7,regions:1,id:t.first.id,sourceVersion,
+      fault:[0x5000,0x10201,typeof t.api.core_precise==='function'?0x10e:14],
       regs:[5,2,0x1140,0x3000,0x4800,0,0x3001,0x5000]});
   });
   fixture('code-write-prevents-next-region',{entry:0x1200,target:0x1140,registers:[0x11223344,0,0,0x1200,0x4800,0,0x1140,0]},t => {
@@ -236,6 +252,8 @@ try {
     t.expectedRam.set(unhex('0000c040'),4096+8);
     t.expectedRam.set(unhex('07130000'),8192+0x7fc);
     const stats=t.cache.stats();
+    t.result.executionRoutes={preciseRuns:stats.preciseRuns,preciseWork:stats.preciseWork,
+      preciseRetired:stats.preciseRetired,ready:t.api.core_trace_ready(),root:t.api.core_trace_root()};checkpoint();
     const overlays=[...t.cache.units.values()].filter(unit=>unit!==t.first&&unit!==t.next);
     assert.equal(overlays.length,1,'normal post-lease recording installs exactly one separate observed executor');
     const overlay=overlays[0],overlayModule=t.result.modules.find(module=>module.id===String(overlay.id));
