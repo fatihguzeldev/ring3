@@ -755,3 +755,65 @@ fn downstream_tagged_certificate_is_carried_through_scalar_predecessors() {
         assert!(required.contains(&certificate));
     }
 }
+
+#[test]
+fn opaque_scalar_definitions_preserve_unpublished_fp_values_and_effects() {
+    use crate::cpu::x86::ir::{ShiftCount, ShiftKind};
+    for operation in [
+        Operation::Shift {
+            kind: ShiftKind::Shl,
+            destination: Location32::Register(Register32::Eax),
+            count: ShiftCount::Immediate(1),
+        },
+        Operation::Shift {
+            kind: ShiftKind::Shr,
+            destination: Location32::Register(Register32::Eax),
+            count: ShiftCount::Immediate(1),
+        },
+        Operation::SignedMultiply {
+            destination: Register32::Eax,
+            source: Location32::Register(Register32::Ecx),
+            immediate: None,
+        },
+        Operation::ByteSwap {
+            destination: Register32::Eax,
+        },
+        Operation::Shift {
+            kind: ShiftKind::Shl,
+            destination: Location32::Memory(EffectiveAddress {
+                base: Some(Register32::Esi),
+                ..Default::default()
+            }),
+            count: ShiftCount::Immediate(1),
+        },
+    ] {
+        let (_, program) = plan(&[block(0x1000, &[
+            memory_fp(X87Operation::Load(X87Format::Float32), 0),
+            operation,
+            memory_fp(X87Operation::Store {
+                format: X87Format::Float32,
+                pop: true,
+                truncate: false,
+            }, 4),
+        ])]);
+        let effects: Vec<_> = program.block(BlockId(0)).effects().collect();
+        let scalar = effects[1];
+        assert!(matches!(scalar.kind, EffectKind::Exact(_)));
+        assert_eq!(scalar.contract.fp, FpEffectClass::Preserve, "{operation:?}");
+        assert_eq!(scalar.contract.gpr_reads, u8::MAX);
+        assert_eq!(scalar.contract.gpr_writes, u8::MAX);
+        assert_eq!(scalar.before.fp.payload, scalar.after.fp.payload);
+        assert_eq!(scalar.before.fp.tags, scalar.after.fp.tags);
+        assert_eq!(scalar.before.fp.top, scalar.after.fp.top);
+        assert_eq!(scalar.before.fp.control, scalar.after.fp.control);
+        assert_eq!(scalar.before.fp.epoch, scalar.after.fp.epoch);
+        assert_eq!(scalar.before.fp.status.roots(), scalar.after.fp.status.roots());
+        assert_eq!(scalar.before.fp.written, scalar.after.fp.written);
+        assert_eq!(scalar.before.fp.tag_written, scalar.after.fp.tag_written);
+        let EffectKind::Fp(store) = &effects[2].kind else {
+            panic!("typed store after the scalar exact effect")
+        };
+        assert!(matches!(store.kind,
+            FpEffectKind::Store { source, .. } if source == scalar.before.fp.payload[0]));
+    }
+}

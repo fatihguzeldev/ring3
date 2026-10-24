@@ -15,6 +15,77 @@ const hash=bytes=>createHash('sha256').update(bytes).digest('hex');
 
 export function runMixedFpValueCases(fixture) {
   const checks=[];
+  // These integer kernels execute inline. They must preserve an already dirty
+  // FP value even when their conservative scalar def/use contract is opaque.
+  // Expected flags follow the existing exact kernel policy, including defined
+  // zero for IMUL's otherwise undefined arithmetic flag bits.
+  for(const scalar of[
+    {name:'shl',bytes:'c1e001',eax:0x26af37be,flags:0x406},
+    {name:'shr',bytes:'c1e801',eax:0x09abcdef,flags:0x403},
+    {name:'imul',bytes:'6bc003',eax:0x3a06d39d,flags:0x402},
+    {name:'bswap',bytes:'0fc8',eax:0xdf9b5713,flags:FLAGS},
+  ])fixture(`mixed-fp-dirty-value-survives-inline-${scalar.name}`,{
+    segments:[[ROOT,`d903 ${scalar.bytes} d95b04 ffe6`]],registers,
+    initialFlags:FLAGS,initialFp,control:0x27f,stateWitness:true,
+    data:page=>page.set(Buffer.from('00006040aabbccdd','hex')),
+  },t=>{
+    const encoded=t.bytes(t.api.core_code_ptr()>>>0,t.api.core_code_len()>>>0);
+    const expectedContext=t.bytes(t.context(),128),context=new DataView(expectedContext.buffer);
+    const identity=context.getBigUint64(120,true),revision=t.version();
+    const storePc=ROOT+2+scalar.bytes.length/2;
+    t.writeExpected(0x3004,'00006040');
+    const run=t.check({pc:TARGET,retired:4,budget:4,regs:{0:scalar.eax},flags:scalar.flags,
+      fp:t.fp({status:0,tag:0xffff,opcode:0x15b,fip:storePc,fdp:0x3004,
+        registers:{7:'00000000000000e00040'}})});
+    for(const[offset,value]of[[0,scalar.eax],[32,TARGET],[36,scalar.flags],[40,4],[44,0],[112,0]])
+      context.setUint32(offset,value,true);
+    assert.deepEqual(t.bytes(t.context(),128),expectedContext,'full scalar/FP barrier Context128');
+    assert.equal(t.version(),revision+1n,'only the final FSTP performs a write');
+    assert.equal(new DataView(t.engine.memory.buffer).getBigUint64(t.context()+120,true),identity);
+    assert.deepEqual(t.bytes(t.api.core_code_ptr()>>>0,t.api.core_code_len()>>>0),encoded);
+    t.result.semanticComplete=true;
+    t.result.barrier={scalar:scalar.name,storedFloat32:'00006040',storePc,
+      owner:{id:String(identity),sha256:hash(encoded)}};
+    assert.equal(run.activations.length,1);assert.equal(run.helperCalls,0);assert.equal(run.preciseCalls,0);
+    assert.equal(t.result.modules.length,1,'the real inline integer kernel preserves the same FP owner');
+  });
+  fixture('mixed-fp-real-canonical-control-change-publishes-the-dirty-prefix',{
+    segments:[[ROOT,'d903 d96b08 d95b04 ffe6']],registers,initialFlags:FLAGS,
+    initialFp,control:0x27f,stateWitness:true,
+    data:page=>page.set(Buffer.from('00006040aabbccdd7f00','hex')),
+  },t=>{
+    const expectedContext=t.bytes(t.context(),128),context=new DataView(expectedContext.buffer);
+    const encoded=t.bytes(t.api.core_code_ptr()>>>0,t.api.core_code_len()>>>0),revision=t.version();
+    const wantedFp=t.fp({status:0,tag:0xffff,opcode:0x15b,fip:0x1005,fdp:0x3004,
+      registers:{7:'00000000000000e00040'}});
+    new DataView(wantedFp.buffer).setUint16(16,0x7f,true);
+    t.writeExpected(0x3004,'00006040');
+    const run=t.check({pc:TARGET,retired:4,budget:4,flags:FLAGS,fp:wantedFp});
+    for(const[offset,value]of[[32,TARGET],[40,4],[44,0],[112,0]])context.setUint32(offset,value,true);
+    assert.deepEqual(t.bytes(t.context(),128),expectedContext,'canonical CW mutation preserves the full scalar lease');
+    assert.equal(t.version(),revision+1n);assert.deepEqual(t.bytes(t.api.core_code_ptr()>>>0,t.api.core_code_len()>>>0),encoded);
+    t.result.semanticComplete=true;
+    assert.equal(run.helperCalls,1,'FLDCW remains an actual canonical FP-changing callback');
+    assert.equal(run.preciseCalls,0);assert.equal(run.activations.length,1);assert.equal(t.result.modules.length,1);
+  });
+  fixture('mixed-fp-inline-scalar-then-store-fault-retains-the-completed-dirty-value',{
+    segments:[[ROOT,'d903 c1e001 d91f ffe6']],registers:[...registers.slice(0,7),0x5000],
+    initialFlags:FLAGS,initialFp,control:0x27f,missing:[0x5000],stateWitness:true,
+    data:page=>page.set(Buffer.from('00006040aabbccdd','hex')),
+  },t=>{
+    const expectedContext=t.bytes(t.context(),128),context=new DataView(expectedContext.buffer);
+    const revision=t.version();
+    const run=t.check({pc:0x1005,retired:2,budget:4,work:2,remaining:2,stop:3,
+      regs:{0:0x26af37be},flags:0x406,fault:[0x5000,0x10204,0x40e],
+      fp:t.fp({status:0x3800,tag:0x3fff,opcode:0x103,fip:ROOT,fdp:0x3000,
+        registers:{7:'00000000000000e00040'}})});
+    for(const[offset,value]of[[0,0x26af37be],[32,0x1005],[36,0x406],[40,2],[44,2],
+      [48,0x5000],[52,0x10204],[112,0],[116,0x40e]])context.setUint32(offset,value,true);
+    assert.deepEqual(t.bytes(t.context(),128),expectedContext,'fault exposes exactly the completed FLD and SHL');
+    assert.equal(t.version(),revision,'the faulting store neither writes nor pops the loaded value');
+    t.result.semanticComplete=true;
+    assert.equal(run.helperCalls,0);assert.equal(run.preciseCalls,1);assert.equal(t.result.modules.length,1);
+  });
   for(const single of[true,false])fixture(`mixed-fp-values-${single?'pc24':'pc53'}-128-ordered-rounding-points`,{
     segments:[[ROOT,code]],registers,initialFlags:FLAGS,initialFp,
     control:single?0x7f:0x27f,stateWitness:true,

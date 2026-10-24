@@ -136,6 +136,24 @@ pub(super) fn emit(out: &mut Output<'_>, next: u32) {
         .find(|instruction| instruction.pc == out.pc)
         .unwrap()
         .operation;
+    let canonical_barrier = out.active_effect.is_some_and(|id| {
+        let effect = out.executable.effect(id);
+        matches!(
+            effect.kind,
+            crate::cpu::core::region::values::executable::EffectKind::Exact(_)
+        ) && matches!(
+            effect.contract.fp,
+            crate::cpu::core::region::values::executable::FpEffectClass::Barrier
+        )
+    });
+    if canonical_barrier {
+        // A fresh post-barrier input is licensed only by the canonical service:
+        // its common spine commits the real SSA prefix before invoking the
+        // selected operation. No legacy inline success may discard dirty locals
+        // while leaving an older physical pool authoritative.
+        service::request(out, next, true);
+        return;
+    }
     if direct::state(out, operation) {
         out.exit(super::StopReason::ExactPrefix, Some(out.pc), out.prefix);
         out.c().end();

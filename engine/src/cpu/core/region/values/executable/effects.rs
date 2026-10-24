@@ -134,7 +134,11 @@ fn branch(target: BranchTarget) -> u8 {
 
 fn opaque_for(operation: Operation) -> ExactDefUse {
     let mut result = ExactDefUse::opaque();
-    if effects::numeric_preserves_fp(operation)
+    // Unknown GPR/FLAGS definitions do not make an integer/control/string
+    // kernel an x87 writer. Only the numerical namespace can change that
+    // architectural bank; scalar fault/partial-progress contracts stay opaque.
+    if !crate::cpu::core::emitter::is_native(&operation)
+        || effects::numeric_preserves_fp(operation)
         || crate::cpu::core::emitter::preserves_fp_success(&operation)
     {
         result.fp = FpEffectClass::Preserve;
