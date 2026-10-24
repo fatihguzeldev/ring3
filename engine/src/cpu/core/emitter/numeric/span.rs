@@ -183,6 +183,12 @@ pub(in crate::cpu::core::emitter) fn materialize(out: &mut Output<'_>) {
 
 pub(super) fn invalidate(out: &mut Output<'_>) {
     materialize(out);
+    forget_view(out);
+}
+
+/// Completed physical writes have already committed before a scalar callback.
+/// Relinquish its local view without observing or invalidating the shared pool.
+pub(super) fn forget_view(out: &mut Output<'_>) {
     for local in [
         ACTIVE,
         VALID,

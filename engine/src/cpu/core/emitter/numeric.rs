@@ -28,8 +28,9 @@ pub(super) use service::emit as emit_service;
 pub(super) fn enter_port(out: &mut Output<'_>) {
     // An interior port imports the actual identity state, never the skipped
     // prefix's aliases, stack shape, or historical metadata.
-    // A canonical service continuation already relinquished the entire pool.
-    // Fresh external/planned ports still publish their actual identity first.
+    // A service continuation already relinquished its local view. Pure scalar
+    // services can retain the pool; a later canonical callback observes it then.
+    // Fresh external/planned interior ports still publish their identity first.
     out.c()
         .local_get(frame::EXACT_SUFFIX)
         .i32_eqz()

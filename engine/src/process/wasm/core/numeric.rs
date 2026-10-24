@@ -209,10 +209,11 @@ impl NumericBank {
             return StopReason::Infrastructure as u32;
         };
         let before = memory.code_validation_version();
-        // Compiled helpers arrive after materializing the physical pool. A
-        // canonical operation may replace any payload or control/status fact,
-        // including on a fault, so the next compiled owner must import afresh.
-        self.pool = Default::default();
+        // Only explicitly audited scalar callbacks preserve the physical pool,
+        // including faults. Other callbacks arrive with canonical x87 ownership.
+        if !crate::cpu::core::numeric_preserves_fp(instruction.operation) {
+            self.pool = Default::default();
+        }
         let result = match instruction.operation {
             Operation::X87 {
                 operation,
@@ -313,6 +314,10 @@ impl NumericBank {
 #[cfg(test)]
 #[path = "numeric/tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "numeric/pool_tests.rs"]
+mod pool_tests;
 
 const _: () = {
     assert!(core::mem::size_of::<X87State>() == 100);

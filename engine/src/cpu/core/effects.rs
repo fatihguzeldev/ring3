@@ -11,6 +11,19 @@ pub(crate) struct FlagEffects {
     pub(crate) undefined: u32,
 }
 
+/// These numeric callbacks neither observe nor mutate x87 state on any outcome.
+/// All other callbacks require canonical x87 ownership before entering Rust.
+pub(crate) fn numeric_preserves_fp(operation: Operation) -> bool {
+    matches!(
+        operation,
+        Operation::StackFrame { .. }
+            | Operation::CpuId
+            | Operation::VirtualTimestamp
+            | Operation::VirtualTimestampAux
+            | Operation::ReadProcessorId { .. }
+    )
+}
+
 pub(crate) fn condition_mask(condition: Condition) -> u32 {
     match condition {
         Condition::Overflow | Condition::NotOverflow => OF,

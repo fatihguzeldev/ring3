@@ -156,7 +156,21 @@ impl Emitter<'_, '_> {
             self.out.c().local_get(super::FRESH_OWNER_ENTRY).i32_or();
         }
         self.out.c().if_(BlockType::Empty);
-        super::numeric::enter_port(self.out);
+        if self.out.family {
+            self.out
+                .c()
+                .local_get(super::ENTRY_OFFSET)
+                .i32_eqz()
+                .if_(BlockType::Empty);
+            // A true block start has fresh identity cells and inherited metadata.
+            // Its guarded first uses can consume the actual physical pool.
+            super::numeric::enter_block(self.out, id);
+            self.out.c().else_();
+            super::numeric::enter_port(self.out);
+            self.out.c().end();
+        } else {
+            super::numeric::enter_port(self.out);
+        }
         self.out.c().i32_const(0).local_set(super::FULL_BLOCK);
         self.out
             .c()

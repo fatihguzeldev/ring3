@@ -15,6 +15,7 @@ pub(crate) const STOP_MARK: u32 = 0x8000_0000;
 
 pub use abi::{CONTEXT_SIZE, Context32, StopReason};
 pub use dispatch::emit_dispatch;
+pub(crate) use effects::numeric_preserves_fp;
 pub use program::{
     CompileError, CompileOptions, CompiledCode, NativeInstruction, compile, compile_with_frontier,
     compile_with_frontier_query, compile_with_gates,

@@ -12,6 +12,7 @@ use wasm_encoder::BlockType;
 const CANONICAL: i32 = 2;
 const FLAGS_OUTPUT: i32 = 1 << 28;
 const GENERIC: i32 = 1 << 29;
+const PRESERVES_FP: i32 = 1 << 30;
 
 fn transfer(operation: crate::cpu::x86::ir::Operation) -> u32 {
     let (transfer, generic) = match X87Transfer::for_operation(operation) {
@@ -31,6 +32,7 @@ fn transfer(operation: crate::cpu::x86::ir::Operation) -> u32 {
         | transfer.flags << 16
         | u32::from(transfer.flags_output) << 28
         | u32::from(generic) << 29
+        | u32::from(crate::cpu::core::numeric_preserves_fp(operation)) << 30
 }
 
 pub(super) fn request(out: &mut Output<'_>, next: u32, planned: bool) {
@@ -157,7 +159,12 @@ pub(in crate::cpu::core::emitter) fn emit(out: &mut Output<'_>) {
         .i32_const(CANONICAL)
         .i32_eq()
         .if_(BlockType::Empty);
+    test(out, PRESERVES_FP);
+    out.c().if_(BlockType::Empty);
+    span::forget_view(out);
+    out.c().else_();
     span::invalidate(out);
+    out.c().end();
     out.c()
         .i32_const(1)
         .local_set(frame::EXACT_SUFFIX)
