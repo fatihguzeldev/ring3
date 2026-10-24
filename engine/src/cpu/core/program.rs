@@ -265,6 +265,14 @@ impl CompiledCode {
         self.instruction_pcs.len()
     }
     pub(crate) fn supports_entry(&self, pc: u32) -> bool {
+        if self.is_execution_window() {
+            // Public window capabilities are complete certified block entries.
+            // Private instruction geometry remains available only for exact deopt.
+            return self
+                .entries
+                .binary_search_by_key(&pc, |entry| entry.0)
+                .is_ok();
+        }
         if self.observed.is_some() {
             return self.instruction_pcs.binary_search(&pc).is_ok();
         }

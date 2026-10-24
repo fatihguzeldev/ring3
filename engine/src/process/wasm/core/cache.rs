@@ -87,6 +87,7 @@ struct ObservedRefusal {
 pub(super) struct WindowAdmission {
     ownership_epoch: u64,
     anchor: u32,
+    ports: Vec<crate::cpu::core::HotSpan>,
     fingerprint: WindowFingerprint,
     replace: Vec<RegionKey>,
     stale: Vec<RegionKey>,
@@ -921,10 +922,18 @@ impl CoreCache32 {
         memory: &AddressSpace,
         plan: &WindowPlan,
     ) -> Option<WindowAdmission> {
+        let ports = plan.hot_ports();
         if !plan.is_current(memory)
             || !plan.has_executable_gain()
             || plan.cross_owner_edge_count() == 0
-            || plan.entrypoints() != [GuestAddress(plan.anchor())]
+            || ports.is_empty()
+            || !ports.windows(2).all(|pair| pair[0].entry < pair[1].entry)
+            || !ports.iter().any(|port| port.entry == plan.anchor())
+            || !plan
+                .entrypoints()
+                .iter()
+                .map(|entry| entry.0)
+                .eq(ports.iter().map(|port| port.entry))
             || self
                 .window_refusals
                 .iter()
@@ -936,6 +945,7 @@ impl CoreCache32 {
         Some(WindowAdmission {
             ownership_epoch: self.ownership_epoch,
             anchor: plan.anchor(),
+            ports,
             fingerprint: plan.fingerprint().clone(),
             replace,
             stale,
@@ -949,9 +959,19 @@ impl CoreCache32 {
     ) -> Option<(Vec<RegionKey>, Vec<RegionKey>)> {
         let mut replace = Vec::new();
         let mut stale = Vec::new();
-        for &key in self.window_entries.values() {
-            let entry = self.region(key)?;
-            let old = entry.code.window_fingerprint()?;
+        // A window has many public aliases but one lifetime. Inspect each
+        // retained artifact once, without rescanning its graph for every port.
+        for (index, entry) in self.regions.iter().enumerate() {
+            let Some(entry) = entry else {
+                continue;
+            };
+            let Some(old) = entry.code.window_fingerprint() else {
+                continue;
+            };
+            let key = RegionKey {
+                index,
+                identity: entry.code.identity(),
+            };
             if entry.code.is_current(memory) {
                 if old.same_graph(fingerprint) {
                     return None;
@@ -981,7 +1001,12 @@ impl CoreCache32 {
             || !code.is_execution_window()
             || !code.is_current(memory)
             || code.trace_root() != Some(admission.anchor)
-            || code.entrypoints() != [GuestAddress(admission.anchor)]
+            || !code
+                .entrypoints()
+                .iter()
+                .map(|entry| entry.0)
+                .eq(admission.ports.iter().map(|port| port.entry))
+            || !code.hot_spans().eq(admission.ports.iter().copied())
             || !code.supports_entry(admission.anchor)
             || code.window_fingerprint() != Some(&admission.fingerprint)
         {
@@ -1982,6 +2007,10 @@ impl CoreCache32 {
         TraceHeat::visit_weight(&mut entry.trace_heat, pc, 1024)
     }
 }
+
+#[cfg(test)]
+#[path = "cache/window_multientry_tests.rs"]
+mod window_multientry_tests;
 
 #[cfg(test)]
 #[path = "cache/window_lifetime_tests.rs"]

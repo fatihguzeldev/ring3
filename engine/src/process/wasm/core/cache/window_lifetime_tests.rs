@@ -141,7 +141,7 @@ fn strictly_covering_actual_window_replaces_only_the_old_execution_tier() {
         before[3..5],
         "supersession is neither byte eviction nor SMC"
     );
-    assert_eq!(cache.window_entries.len(), 1);
+    assert_eq!(cache.window_entries.len(), replacement.entrypoints().len());
     assert!(cache.region(old.key).is_none());
     assert_eq!(cache.link_owners[9], 0);
     assert!(cache.slot_generations[9] > old_generation);
@@ -153,8 +153,8 @@ fn strictly_covering_actual_window_replaces_only_the_old_execution_tier() {
     }
     assert_eq!(
         cache.lookup_executable(&memory, A).unwrap().identity(),
-        owners[0].identity(),
-        "the retired window root falls back to its original immutable owner"
+        replacement.identity(),
+        "replacement preserves every previously public window entry"
     );
     assert_eq!(
         cache.lookup_executable(&memory, C).unwrap().identity(),

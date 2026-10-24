@@ -141,7 +141,37 @@ fn short_cross_owner_window_does_not_inherit_or_replace_family_history() {
         plan.instruction_pcs().collect::<Vec<_>>(),
         [0x1000, 0x1002, 0x1003, 0x1010, 0x1011]
     );
-    assert_eq!(plan.entrypoints(), [GuestAddress(0x1000)]);
+    assert_eq!(
+        plan.entrypoints(),
+        [
+            GuestAddress(0x1000),
+            GuestAddress(0x1002),
+            GuestAddress(0x1010)
+        ]
+    );
+    assert_eq!(
+        plan.hot_ports(),
+        [
+            HotSpan {
+                entry: 0x1000,
+                end: 0x1002,
+                instructions: 1,
+                port: 0
+            },
+            HotSpan {
+                entry: 0x1002,
+                end: 0x1005,
+                instructions: 2,
+                port: 1
+            },
+            HotSpan {
+                entry: 0x1010,
+                end: 0x1013,
+                instructions: 2,
+                port: 2
+            },
+        ]
+    );
     assert_eq!(a.instruction_count() + b.instruction_count(), 7);
     let code = emit_hot_window(&memory, plan).unwrap().unwrap();
     assert!(code.is_execution_window());
@@ -149,10 +179,18 @@ fn short_cross_owner_window_does_not_inherit_or_replace_family_history() {
     assert!(code.observed_fingerprint().is_none());
     assert!(code.window_fingerprint().is_some());
     assert!(code.supports_entry(0x1000));
-    assert!(!code.supports_entry(0x1002));
-    assert!(!code.supports_entry(0x1010));
+    assert!(code.supports_entry(0x1002));
+    assert!(code.supports_entry(0x1010));
+    assert!(!code.supports_entry(0x1003));
     assert!(code.instruction_pcs().any(|pc| pc == 0x1010));
-    assert_eq!(code.entrypoints(), [GuestAddress(0x1000)]);
+    assert_eq!(
+        code.entrypoints(),
+        [
+            GuestAddress(0x1000),
+            GuestAddress(0x1002),
+            GuestAddress(0x1010)
+        ]
+    );
     assert_eq!(a.wasm(), original_a);
     assert_eq!(b.wasm(), original_b);
     assert!(a.supports_entry(0x1030) && b.supports_entry(0x1011));
@@ -202,7 +240,7 @@ fn window_fingerprint_ignores_owner_ids_and_only_root_for_rotated_graphs() {
 }
 
 #[test]
-fn interior_root_partition_is_neutral_for_window_dedup() {
+fn interior_root_partition_is_exact_monotone_public_entry_growth() {
     let memory = memory();
     let (a, b) = parents(&memory);
     let original = prepare(
@@ -249,7 +287,50 @@ fn interior_root_partition_is_neutral_for_window_dedup() {
         rotated.fingerprint.graph.starts
     );
     assert_ne!(original.fingerprint(), rotated.fingerprint());
-    assert!(original.fingerprint().same_graph(rotated.fingerprint()));
+    assert!(!original.fingerprint().same_graph(rotated.fingerprint()));
+    assert!(
+        rotated
+            .fingerprint()
+            .strictly_covers(original.fingerprint())
+    );
+    assert!(
+        !original
+            .fingerprint()
+            .strictly_covers(rotated.fingerprint())
+    );
+    assert_eq!(
+        rotated.entrypoints(),
+        [
+            GuestAddress(0x1000),
+            GuestAddress(0x1002),
+            GuestAddress(0x1003),
+            GuestAddress(0x1010)
+        ]
+    );
+    let original_span = original
+        .hot_ports()
+        .into_iter()
+        .find(|port| port.entry == 0x1002)
+        .unwrap();
+    let split_span = rotated
+        .hot_ports()
+        .into_iter()
+        .find(|port| port.entry == 0x1002)
+        .unwrap();
+    assert_eq!((original_span.end, original_span.instructions), (0x1005, 2));
+    assert_eq!((split_span.end, split_span.instructions), (0x1003, 1));
+
+    let mut lost = rotated.fingerprint().clone();
+    lost.ports.retain(|port| port.entry != 0x1002);
+    assert!(!lost.strictly_covers(original.fingerprint()));
+    let mut increased_quota = rotated.fingerprint().clone();
+    increased_quota
+        .ports
+        .iter_mut()
+        .find(|port| port.entry == 0x1002)
+        .unwrap()
+        .instructions = 3;
+    assert!(!increased_quota.strictly_covers(original.fingerprint()));
 }
 
 #[test]

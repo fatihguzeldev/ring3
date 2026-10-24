@@ -300,11 +300,15 @@ fn continuation_window_ticket_keeps_public_root_and_parent_aliases() {
         source(&cache, &memory, &caller).unwrap().identity(),
         window.identity()
     );
-    // Private retained PCs remain valid for canonical ordinals/deoptimization,
-    // but cannot manufacture a new public root ticket for this window.
-    cache.continuation_header_mut().current_entry = 0x2000;
+    // The complete callee block is another public capability on the same
+    // owner. Its private RET instruction still cannot forge a public ticket.
+    assert!(cache.bind_continuation(&memory, &window, 0x2000));
+    assert_eq!(source(&cache, &memory, &caller).unwrap().identity(), window.identity());
+    assert!(window.contains_instruction(0x2001));
+    assert!(!window.supports_entry(0x2001));
+    cache.continuation_header_mut().current_entry = 0x2001;
     assert!(source(&cache, &memory, &caller).is_none());
-    cache.continuation_header_mut().current_entry = root;
+    assert!(cache.bind_continuation(&memory, &window, root));
     assert_eq!(
         source(&cache, &memory, &caller).unwrap().identity(),
         window.identity()

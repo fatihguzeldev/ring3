@@ -192,7 +192,14 @@ pub(super) fn resources(cache: &CoreCache32) {
     for (&root, &key) in &cache.window_entries {
         let entry = cache.region(key).unwrap();
         assert!(entry.code.is_execution_window());
-        assert_eq!(entry.admitted_entries, [GuestAddress(root)]);
+        assert_eq!(entry.admitted_entries, entry.code.entrypoints());
+        assert!(
+            entry
+                .admitted_entries
+                .binary_search_by_key(&root, |entry| entry.0)
+                .is_ok()
+        );
+        assert!(entry.code.hot_span(root).is_some());
     }
 }
 
@@ -230,7 +237,10 @@ fn hot_window_root_priority_keeps_family_aliases_and_refreshes_cached_link_resol
     assert!(window.is_execution_window());
     assert!(!window.is_observed_family());
     assert!(window.supports_entry(ROOT));
-    assert!(!window.supports_entry(CALLEE));
+    assert!(window.supports_entry(CALLEE));
+    assert!(window.supports_entry(ROOT + 5));
+    assert!(!window.supports_entry(CALLEE + 1));
+    assert!(!window.supports_entry(ROOT + 6));
     assert_eq!(window.instruction_count(), 5);
     // an unbound window cannot displace the executable family target.
     assert_eq!(
@@ -251,9 +261,9 @@ fn hot_window_root_priority_keeps_family_aliases_and_refreshes_cached_link_resol
         window.identity()
     );
     for (pc, identity, slot) in [
-        (ROOT + 5, caller.identity(), 7),
+        (ROOT + 5, window.identity(), 9),
         (ROOT + 6, caller.identity(), 7),
-        (CALLEE, callee.identity(), 8),
+        (CALLEE, window.identity(), 9),
         (CALLEE + 1, callee.identity(), 8),
     ] {
         let (selected, actual_slot) = cache.lookup_linked(&memory, pc).unwrap();

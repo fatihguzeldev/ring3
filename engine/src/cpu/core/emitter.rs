@@ -23,6 +23,7 @@ use crate::cpu::x86::{
     ControlOperation,
     ir::{BranchTarget, Condition, Location32, Operation},
 };
+use crate::memory::GuestAddress;
 use wasm_encoder::{
     BlockType, CodeSection, CustomSection, EntityType, ExportKind, ExportSection, Function,
     FunctionSection, GlobalType, ImportSection, MemArg, MemoryType, Module, NameMap, NameSection,
@@ -126,7 +127,7 @@ pub(super) fn emit(
     let blocks: Vec<_> = spans.iter().map(|span| span.block.clone()).collect();
     let graph = super::region::Region::from_blocks(&blocks, entry)
         .expect("decoded executable spans form a region");
-    emit_graph(&spans, entry, identity, native, graph, false)
+    emit_graph(&spans, entry, identity, native, graph, false, None)
 }
 
 pub(super) fn emit_observed(
@@ -140,7 +141,31 @@ pub(super) fn emit_observed(
     let blocks: Vec<_> = spans.iter().map(|span| span.block.clone()).collect();
     let graph = super::region::Region::from_observed(&blocks, entry, observed_edges)
         .expect("recorded blocks and edges form an observed region");
-    emit_graph(&spans, entry, identity, native, graph, false)
+    emit_graph(&spans, entry, identity, native, graph, false, None)
+}
+
+pub(super) fn emit_observed_window(
+    blocks: &[Block],
+    entry: u32,
+    identity: u64,
+    native: &[NativeInstruction],
+    observed_edges: &[(u32, u32)],
+    entries: &[GuestAddress],
+) -> Vec<u8> {
+    let spans = super::program::spans::partition(blocks);
+    let mut complete: Vec<_> = spans
+        .iter()
+        .map(|span| GuestAddress(span.block.entry))
+        .collect();
+    complete.sort_unstable_by_key(|pc| pc.0);
+    assert_eq!(
+        entries, complete,
+        "window ingress is exactly its complete executable spans"
+    );
+    let blocks: Vec<_> = spans.iter().map(|span| span.block.clone()).collect();
+    let graph = super::region::Region::from_observed(&blocks, entry, observed_edges)
+        .expect("recorded window forms an observed region");
+    emit_graph(&spans, entry, identity, native, graph, false, Some(entries))
 }
 
 pub(super) fn emit_observed_family(
@@ -154,7 +179,7 @@ pub(super) fn emit_observed_family(
     let blocks: Vec<_> = spans.iter().map(|span| span.block.clone()).collect();
     let graph = super::region::Region::from_observed(&blocks, entry, observed_edges)
         .expect("recorded family forms an observed region");
-    emit_graph(&spans, entry, identity, native, graph, true)
+    emit_graph(&spans, entry, identity, native, graph, true, None)
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -187,11 +212,19 @@ fn emit_graph(
     native: &[NativeInstruction],
     graph: super::region::Region,
     family: bool,
+    public_entries: Option<&[GuestAddress]>,
 ) -> Vec<u8> {
     let plan = super::region::values::RegionPlan::analyze(&graph);
     let numeric = !native.is_empty();
-    let (body, recovery_data, numeric_kernels) =
-        run(&graph, &plan, identity, native, family, spans);
+    let (body, recovery_data, numeric_kernels) = run(
+        &graph,
+        &plan,
+        identity,
+        native,
+        family,
+        spans,
+        public_entries.is_some(),
+    );
     let has_arithmetic = numeric_kernels
         .iter()
         .any(|kernel| matches!(kernel, PrivateKernel::Arithmetic(_)));
@@ -367,10 +400,10 @@ fn emit_graph(
         support::owner_internal(7, numeric),
         support::owner_internal(8, numeric),
     ));
-    code.function(&hot_entry(
-        spans,
-        (graph.is_observed && !family).then_some(entry),
-    ));
+    let root_entry = [GuestAddress(entry)];
+    let allowed =
+        public_entries.or_else(|| (graph.is_observed && !family).then_some(root_entry.as_slice()));
+    code.function(&hot_entry(spans, allowed));
     code.function(&recovery_getter);
     for kernel in &numeric_kernels {
         match kernel {
@@ -484,7 +517,10 @@ fn lookup(spans: &[super::program::spans::ExecutableSpan]) -> Function {
     function
 }
 
-fn hot_entry(spans: &[super::program::spans::ExecutableSpan], root: Option<u32>) -> Function {
+fn hot_entry(
+    spans: &[super::program::spans::ExecutableSpan],
+    allowed: Option<&[GuestAddress]>,
+) -> Function {
     fn count(c: &mut wasm_encoder::InstructionSink<'_>, entries: &[(u32, u32)]) {
         if entries.is_empty() {
             c.i32_const(0);
@@ -509,7 +545,13 @@ fn hot_entry(spans: &[super::program::spans::ExecutableSpan], root: Option<u32>)
     }
     let mut entries: Vec<_> = spans
         .iter()
-        .filter(|span| root.is_none_or(|pc| span.block.entry == pc))
+        .filter(|span| {
+            allowed.is_none_or(|entries| {
+                entries
+                    .binary_search_by_key(&span.block.entry, |pc| pc.0)
+                    .is_ok()
+            })
+        })
         .map(|span| (span.block.entry, span.work().minimum_work()))
         .collect();
     entries.sort_unstable();
@@ -534,6 +576,7 @@ fn run(
     native: &[NativeInstruction],
     family: bool,
     spans: &[super::program::spans::ExecutableSpan],
+    window_entries: bool,
 ) -> (Vec<u8>, Vec<i64>, Vec<PrivateKernel>) {
     let execution = super::region::values::ExecutionPlan::analyze(graph, plan);
     let expression_base = SCALAR_CACHE_BASE + execution.scalar.cache_count();
@@ -680,11 +723,20 @@ fn run(
         out.c().i32_const(1).local_set(FRESH_OWNER_ENTRY);
     }
     if graph.is_observed && !family {
-        out.c()
-            .local_get(EIP)
-            .i32_const(graph.blocks[graph.entry.0].entry as i32)
-            .i32_ne()
-            .if_(BlockType::Empty);
+        out.c().local_get(EIP);
+        if window_entries {
+            // membership ignores the current quota; the selected span's own
+            // eligibility guard retains exact zero/partial-work semantics.
+            out.c()
+                .i32_const(-1)
+                .call(support::owner_defined(8, !native.is_empty()))
+                .i32_eqz();
+        } else {
+            out.c()
+                .i32_const(graph.blocks[graph.entry.0].entry as i32)
+                .i32_ne();
+        }
+        out.c().if_(BlockType::Empty);
         out.exit(StopReason::NeedCode, None, 0);
         out.c().end();
     }

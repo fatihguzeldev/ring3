@@ -49,6 +49,7 @@ pub(crate) struct WindowFingerprint {
     options: CompileOptions,
     graph: Arc<ObservedHistory>,
     sources: Vec<SourceAuthority>,
+    ports: Vec<HotSpan>,
 }
 
 pub(crate) struct WindowPlan {
@@ -69,6 +70,7 @@ impl WindowFingerprint {
             && self.graph.edges == other.graph.edges
             && self.graph.ports == other.graph.ports
             && self.sources == other.sources
+            && self.ports == other.ports
     }
 
     /// a replacement executor must contain the previous actual graph and its
@@ -82,11 +84,23 @@ impl WindowFingerprint {
                 .iter()
                 .all(|source| self.sources.binary_search(source).is_ok())
             && self.graph.preserves(&previous.graph)
+            && previous.ports.iter().all(|old| {
+                self.ports
+                    .binary_search_by_key(&old.entry, |port| port.entry)
+                    .ok()
+                    .is_some_and(|index| self.ports[index].instructions <= old.instructions)
+            })
             && (self.graph.nodes.len() > previous.graph.nodes.len()
                 || self.graph.edges.iter().any(|edge| {
                     previous.graph.edges.binary_search(edge).is_err()
                         && self.graph.contains_node(edge.0)
                         && self.graph.contains_node(edge.1)
+                })
+                || self.ports.iter().any(|port| {
+                    previous
+                        .ports
+                        .binary_search_by_key(&port.entry, |old| old.entry)
+                        .is_err()
                 }))
     }
 
@@ -103,7 +117,8 @@ impl WindowFingerprint {
     }
 
     pub(crate) fn metadata_charge(&self) -> usize {
-        self.sources.capacity() * std::mem::size_of::<SourceAuthority>()
+        self.ports.capacity() * std::mem::size_of::<HotSpan>()
+            + self.sources.capacity() * std::mem::size_of::<SourceAuthority>()
             + self
                 .sources
                 .iter()
@@ -117,6 +132,10 @@ impl WindowFingerprint {
 
     pub(crate) fn resident_charge(&self) -> usize {
         std::mem::size_of::<Self>() + self.metadata_charge() + self.graph_charge()
+    }
+
+    pub(crate) fn hot_ports(&self) -> &[HotSpan] {
+        &self.ports
     }
 }
 
@@ -132,6 +151,9 @@ impl WindowPlan {
     }
     pub(crate) fn entrypoints(&self) -> &[GuestAddress] {
         &self.entries
+    }
+    pub(crate) fn hot_ports(&self) -> Vec<HotSpan> {
+        self.fingerprint.ports.clone()
     }
     pub(crate) fn has_executable_gain(&self) -> bool {
         self.completed_cycles >= 2 && self.cross_owner_edges != 0
@@ -360,6 +382,10 @@ fn prepare_root_window(
         blocks,
         ..
     } = plan;
+    // every source-confirmed complete executable span has its own external
+    // adapter. arbitrary instruction prefixes remain private precise ports.
+    let ports = super::super::executable_hot_spans(&blocks);
+    let entries = ports.iter().map(|port| GuestAddress(port.entry)).collect();
     Ok(Some(WindowPlan {
         fingerprint: WindowFingerprint {
             memory_identity: fingerprint.memory_identity,
@@ -367,10 +393,11 @@ fn prepare_root_window(
             options,
             graph: fingerprint.graph,
             sources: fingerprint.sources,
+            ports,
         },
         sources,
         blocks,
-        entries: vec![root],
+        entries,
         cross_owner_edges: recurrence.transfers,
         completed_cycles: recurrence.completed,
         cycle_instructions: recurrence.word.len(),
@@ -404,12 +431,13 @@ pub(crate) fn emit_hot_window(
             .count(),
     };
     let identity = next_identity()?;
-    let wasm = super::super::super::emitter::emit_observed(
+    let wasm = super::super::super::emitter::emit_observed_window(
         &blocks,
         fingerprint.anchor,
         identity,
         &native,
         &fingerprint.graph.edges,
+        &entries,
     );
     if wasm.len() > fingerprint.options.wasm_bytes
         || sources.iter().any(|source| !memory.is_code_current(source))

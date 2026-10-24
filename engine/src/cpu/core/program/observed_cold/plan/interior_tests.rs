@@ -130,7 +130,8 @@ fn one_shot_prefix_selects_only_the_first_certified_interior_cycle() {
     );
     let code = emit_hot_window(&memory, selected).unwrap().unwrap();
     assert!(code.is_execution_window() && code.supports_entry(A));
-    assert!(!code.supports_entry(P) && !code.supports_entry(B));
+    assert!(!code.supports_entry(P) && code.supports_entry(B));
+    assert!(!code.supports_entry(A + 1));
     for (parent, bytes) in parents.iter().zip(bytes) {
         assert_eq!(parent.wasm(), bytes);
         assert!(parent.is_current(&memory));
@@ -217,7 +218,7 @@ fn outer_geometry_source_epoch_and_same_owner_cycles_are_still_required() {
 }
 
 #[test]
-fn interior_offset_is_the_candidate_pc_and_remains_root_only() {
+fn interior_offset_is_a_certified_complete_entry_without_importing_skipped_prefix() {
     let mut memory = memory();
     memory.write(GuestAddress(P), &[0xff, 0xe7]).unwrap();
     memory.write(GuestAddress(A), &[0x90, 0xff, 0xe6]).unwrap();
@@ -240,7 +241,7 @@ fn interior_offset_is_the_candidate_pc_and_remains_root_only() {
     assert_eq!(plan.instruction_pcs().collect::<Vec<_>>(), [A + 1, B]);
     let code = emit_hot_window(&memory, plan).unwrap().unwrap();
     assert!(code.supports_entry(A + 1));
-    assert!(!code.supports_entry(A) && !code.supports_entry(B));
+    assert!(!code.supports_entry(A) && code.supports_entry(B));
 }
 
 #[test]
@@ -338,5 +339,6 @@ fn internal_recurrent_site_is_skipped_for_the_first_actual_owner_entry() {
     assert!(selected.fingerprint().same_graph(internal.fingerprint()));
     let code = emit_hot_window(&memory, selected).unwrap().unwrap();
     assert!(code.supports_entry(B));
-    assert!(!code.supports_entry(P + 6));
+    assert!(code.supports_entry(P + 6));
+    assert!(!code.supports_entry(P + 2));
 }
