@@ -5,7 +5,7 @@ use crate::cpu::{
         region::{Region, values::RegionPlan},
     },
     x86::{
-        Register32, X87Format, X87Operation,
+        Register32, X87Binary, X87Format, X87Operation,
         ir::{EffectiveAddress, Location32, Operation, UnaryKind, Value32},
     },
 };
@@ -372,6 +372,95 @@ fn tagged_sign_outputs_cannot_overwrite_old_inputs_or_before_fault_recovery() {
                     layout.values[definition.0], layout.values[input.0],
                     "a tagged sign may define validity before reading old raw limbs and can still fail"
                 );
+            }
+        }
+    }
+}
+
+#[test]
+fn repeated_fp_metadata_inputs_begin_at_their_effect_and_reuse_typed_storage() {
+    let mut operations = vec![fp(X87Operation::Load(X87Format::Float32), true)];
+    operations.extend(
+        [fp(
+            X87Operation::BinaryMemory {
+                kind: X87Binary::Add,
+                format: X87Format::Float32,
+            },
+            true,
+        ); 128],
+    );
+    let program = program(&[block(0x1000, &operations)]);
+    let layout = Layout::build(&program, 1, true, BASE);
+    let (values, _) = memberships(&program, 1, true);
+    let selectors: Vec<_> = (0..program.value_count())
+        .filter_map(|index| match program.value(ExecValueId(index)).node {
+            ValueNode::Fp(FpValueNode::Input {
+                point,
+                field: crate::cpu::core::region::values::executable::fp::FpInput::Selector(_),
+            }) => Some((index, point)),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        selectors.len(),
+        258,
+        "each load/add has actual CS and DS metadata inputs"
+    );
+    for &(id, point) in &selectors {
+        assert_eq!(values[id].len(), 1);
+        assert_eq!(values[id][0].interval.first, point.prefix * 2);
+        assert!(layout.live_at(ExecValueId(id), BlockId(0), point.prefix * 2 + 1));
+        if point.prefix != 0 {
+            assert!(!layout.live_at(ExecValueId(id), BlockId(0), 0));
+        }
+    }
+    let colors: BTreeSet<_> = selectors
+        .iter()
+        .map(|&(id, _)| layout.values[id].unwrap())
+        .collect();
+    assert!(
+        colors.len() <= 8,
+        "metadata storage depends on overlapping before/after recoveries, not instruction count"
+    );
+    for pair in selectors.chunks_exact(2) {
+        assert_ne!(layout.values[pair[0].0], layout.values[pair[1].0]);
+    }
+}
+
+#[test]
+fn fresh_post_barrier_inputs_are_live_in_the_successful_after_recovery() {
+    let program = program(&[block(
+        0x1000,
+        &[
+            fp(X87Operation::Load(X87Format::Float32), true),
+            fp(X87Operation::LoadControl, true),
+            fp(X87Operation::ChangeSign, false),
+        ],
+    )]);
+    let barrier = program.block(BlockId(0)).effects().nth(1).unwrap();
+    let definition = barrier.point.prefix * 2 + 1;
+    let (values, _) = memberships(&program, 1, true);
+    let layout = Layout::build(&program, 1, true, BASE);
+    let fresh = program.dependency_order(&barrier.after.fp.roots());
+    let mut inputs = 0;
+    for id in fresh {
+        if let ValueNode::Fp(FpValueNode::Input { point, .. }) = program.value(id).node {
+            assert_eq!(point.prefix, barrier.point.prefix + 1);
+            assert_eq!(values[id.0][0].interval.first, definition);
+            assert!(layout.live_at(id, BlockId(0), definition));
+            assert!(!layout.live_at(id, BlockId(0), definition - 1));
+            inputs += 1;
+        }
+    }
+    assert!(
+        inputs > 8,
+        "the barrier creates a genuine fresh FP input state"
+    );
+    let before = program.dependency_order(&barrier.before.fp.roots());
+    for after in program.dependency_order(&barrier.after.fp.roots()) {
+        for &old in &before {
+            if after != old {
+                assert_ne!(layout.values[after.0], layout.values[old.0]);
             }
         }
     }

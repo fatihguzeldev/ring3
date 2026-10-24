@@ -182,8 +182,16 @@ fn expand(program: &ExecutableProgram, block: BlockId, intervals: &mut BTreeMap<
         let id = ExecValueId(index);
         let interval = intervals.get_mut(&index).unwrap();
         match &program.value(id).node {
-            ValueNode::Scalar(Expr32::Input { .. }) | ValueNode::Fp(FpValueNode::Input { .. }) => {
-                interval.first = 0
+            ValueNode::Scalar(Expr32::Input { .. }) => interval.first = 0,
+            ValueNode::Fp(FpValueNode::Input { point, .. }) => {
+                assert_eq!(point.block, block, "FP inputs are block-local parameters");
+                // Only prefix-zero inputs belong to external ingress. Typed
+                // effects also create immutable selector inputs at their own
+                // prefix; keeping every such value from zero prevents their
+                // storage from being reused. A canonical barrier's fresh
+                // inputs name the following prefix, but its successful after
+                // recovery can already use them at the preceding odd time.
+                interval.first = (point.prefix * 2).min(interval.first);
             }
             ValueNode::Scalar(Expr32::EffectResult { effect, .. })
             | ValueNode::Fp(FpValueNode::EffectResult { effect, .. }) => {
