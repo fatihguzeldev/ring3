@@ -37,22 +37,33 @@ fn transfer(operation: crate::cpu::x86::ir::Operation) -> u32 {
 
 pub(super) fn request(out: &mut Output<'_>, next: u32, planned: bool) {
     out.address_fact = None;
-    if let Some(recovery) = out.active_recovery.clone() {
-        out.recover_scalar(&recovery, 0, false);
-        super::executable::recover(out, &recovery.fp);
-    }
+    let recovery = out.active_recovery.clone();
     let marker = out.fp_entry_marker;
     out.c().i32_const(0).local_set(marker);
-    if planned {
+    let frame = if planned {
         let before = out
             .before_frame
             .expect("canonical request has an exact input frame");
-        frame::emit_frame(out, before);
+        crate::cpu::core::emitter::recovery::FrameAction::Select(before)
     } else {
         // A prior canonical instruction owns the actual bank. Its successor
         // cannot publish a predicted fast-success frame or stale aliases.
-        out.c().i32_const(0).local_set(frame::SELECTED);
-    }
+        crate::cpu::core::emitter::recovery::FrameAction::Clear
+    };
+    crate::cpu::core::emitter::recovery::request(
+        out,
+        recovery.as_ref(),
+        recovery.as_ref().map(|r| &r.fp),
+        frame,
+        crate::cpu::core::emitter::recovery::program::KernelMasks {
+            gpr: 0,
+            flags: false,
+        },
+        crate::cpu::core::emitter::recovery::ExitAction {
+            pc: None,
+            retired: out.prefix,
+        },
+    );
     let ordinal = out
         .native
         .iter()
@@ -69,7 +80,6 @@ pub(super) fn request(out: &mut Output<'_>, next: u32, planned: bool) {
     }
     // The helper itself does not retire. Consume only the already completed
     // prefix, accounting for an arbitrary port's existing PREFIX_BASE.
-    out.count(out.prefix);
     out.c()
         .i32_const(CANONICAL)
         .local_set(SERVICE_RESUME)

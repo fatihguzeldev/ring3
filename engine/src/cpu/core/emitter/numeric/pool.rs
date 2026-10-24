@@ -5,14 +5,14 @@ use crate::cpu::core::{
 };
 use wasm_encoder::{BlockType, Function, ValType};
 
-pub(super) const POINTER: u32 = 152;
+pub(in crate::cpu::core::emitter) const POINTER: u32 = 152;
 pub(super) const LOADED: u32 = 153;
 // The environment tokens have the same actual CW until a canonical barrier.
 // Payload and tag obligations are independent locals, never raw VALID bits.
 pub(super) const ADMITTED: u32 = 154;
 pub(super) const ENTERED: i32 = 512;
-pub(super) const TOKEN_BITS: u32 = 5;
-pub(super) const FORMAT_TOKEN: i64 = 16;
+pub(in crate::cpu::core::emitter) const TOKEN_BITS: u32 = 5;
+pub(in crate::cpu::core::emitter) const FORMAT_TOKEN: i64 = 16;
 
 fn obligation(kind: ProofKind) -> i64 {
     i64::from(proof_bit(kind))

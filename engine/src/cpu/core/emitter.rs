@@ -6,6 +6,7 @@ mod exits;
 mod integer;
 pub(super) mod link;
 mod numeric;
+mod recovery;
 mod region;
 mod scalar;
 mod strings;
@@ -165,7 +166,12 @@ fn emit_graph(
 ) -> Vec<u8> {
     let plan = super::region::values::RegionPlan::analyze(&graph);
     let numeric = !native.is_empty();
-    let body = run(&graph, &plan, identity, native, family, spans);
+    let (body, recovery_data, arithmetic_kernels) =
+        run(&graph, &plan, identity, native, family, spans);
+    let has_arithmetic = !arithmetic_kernels.is_empty();
+    let arithmetic_helpers = arithmetic_kernels.len() + usize::from(has_arithmetic);
+    let status_resolver = support::owner_defined(10 + arithmetic_kernels.len() as u32, numeric);
+    let recovery_functions = recovery::functions(&recovery_data, numeric, arithmetic_helpers);
     let mut module = Module::new();
     let mut types = TypeSection::new();
     types.ty().function([ValType::I32; 2], [ValType::I32]);
@@ -239,6 +245,11 @@ fn emit_graph(
         [],
     );
     types.ty().function([ValType::I32; 3], [ValType::I32]);
+    types.ty().function([ValType::I32], [ValType::I64]);
+    types.ty().function(
+        [ValType::F64, ValType::F64, ValType::I32, ValType::I32],
+        [ValType::F64, ValType::I32, ValType::I32, ValType::I32],
+    );
     module.section(&types);
     let mut imports = ImportSection::new();
     imports.import(
@@ -264,6 +275,16 @@ fn emit_graph(
     let mut functions = FunctionSection::new();
     for kind in [0, 4, 5, 11, 16, 0, 0, 8, 0] {
         functions.function(kind);
+    }
+    functions.function(19);
+    for _ in &arithmetic_kernels {
+        functions.function(20);
+    }
+    if has_arithmetic {
+        functions.function(9);
+    }
+    for _ in recovery_functions.iter().skip(1) {
+        functions.function(19);
     }
     module.section(&functions);
     let mut exports = ExportSection::new();
@@ -307,6 +328,19 @@ fn emit_graph(
         spans,
         (graph.is_observed && !family).then_some(entry),
     ));
+    code.function(&recovery_functions[0]);
+    for kernel in &arithmetic_kernels {
+        code.function(&numeric::executable::primitive::emit(
+            kernel,
+            status_resolver,
+        ));
+    }
+    if has_arithmetic {
+        code.function(&numeric::executable::primitive::emit_status());
+    }
+    for function in recovery_functions.iter().skip(1) {
+        code.function(function);
+    }
     module.section(&code);
     let mut names = NameSection::new();
     names.module(&format!("ring3.guest.{entry:08x}.{identity}"));
@@ -337,6 +371,23 @@ fn emit_graph(
         functions.append(wrappers + offset as u32, name);
     }
     functions.append(support::owner_defined(8, numeric), "guest.hot_entry");
+    functions.append(support::owner_defined(9, numeric), "guest.recovery_data");
+    for (index, kernel) in arithmetic_kernels.iter().enumerate() {
+        functions.append(
+            support::owner_defined(10 + index as u32, numeric),
+            kernel.name(),
+        );
+    }
+    if has_arithmetic {
+        functions.append(status_resolver, "guest.fp.status");
+    }
+    for index in 1..recovery_functions.len() {
+        let name = format!("guest.recovery_data.{}", index - 1);
+        functions.append(
+            support::owner_defined(9 + arithmetic_helpers as u32 + index as u32, numeric),
+            &name,
+        );
+    }
     names.functions(&functions);
     module.section(&names);
     module.finish()
@@ -437,7 +488,11 @@ fn run(
     native: &[NativeInstruction],
     family: bool,
     spans: &[super::program::spans::ExecutableSpan],
-) -> Vec<u8> {
+) -> (
+    Vec<u8>,
+    Vec<i64>,
+    Vec<numeric::executable::primitive::Kernel>,
+) {
     let execution = super::region::values::ExecutionPlan::analyze(graph, plan);
     let expression_base = SCALAR_CACHE_BASE + execution.scalar.cache_count();
     let local_layout = executable::locals::Layout::build(
@@ -482,6 +537,24 @@ fn run(
     locals.extend(local_layout.declarations.iter().copied());
     let fp_entry_marker = local_layout.next;
     locals.push((1, ValType::I32));
+    let recovery_locals = recovery::Locals {
+        base: fp_entry_marker + 1,
+        colors: local_layout.next - expression_base,
+        expression_base,
+    };
+    locals.push((16 + recovery_locals.colors, ValType::I32));
+    locals.push((3, ValType::I64));
+    locals.push((1, ValType::F64));
+    let points = graph
+        .blocks
+        .iter()
+        .map(|block| block.instructions.len() + 1)
+        .sum::<usize>();
+    let recovery_limit = execution
+        .executable
+        .value_count()
+        .saturating_mul(points + 8)
+        .saturating_add(recovery_locals.colors as usize);
     let mut function = Function::new(locals);
     let mut out = Output {
         function: &mut function,
@@ -497,6 +570,8 @@ fn run(
         executable: &execution.executable,
         local_layout: &local_layout,
         fp_entry_marker,
+        recovery: recovery::State::new(recovery_limit, recovery_locals),
+        arithmetic_kernels: Vec::new(),
         available: std::collections::BTreeSet::new(),
         physical_gpr: None,
         physical_flags: None,
@@ -621,6 +696,7 @@ fn run(
     out.guarded_control = false;
     out.c().end();
     out.return_target = Some(1);
+    recovery::emit(&mut out);
     numeric::emit_inline_commit(&mut out);
     out.c().local_get(SERVICE_RESUME).if_(BlockType::Empty);
     // Ordinary exits retain the existing single mode test. The helper spine is
@@ -636,10 +712,16 @@ fn run(
         .end()
         .end();
     assert_eq!(out.depth, 0, "the region exit wrapper is closed");
-    exits::finish(
-        function,
-        !native.is_empty(),
-        graph.is_observed.then_some(identity),
+    let recovery_data = out.recovery.finish_data();
+    let arithmetic_kernels = std::mem::take(&mut out.arithmetic_kernels);
+    (
+        exits::finish(
+            function,
+            !native.is_empty(),
+            graph.is_observed.then_some(identity),
+        ),
+        recovery_data,
+        arithmetic_kernels,
     )
 }
 
@@ -657,6 +739,8 @@ pub(super) struct Output<'a> {
     executable: &'a super::region::values::executable::ExecutablePlan,
     local_layout: &'a executable::locals::Layout,
     fp_entry_marker: u32,
+    recovery: recovery::State,
+    arithmetic_kernels: Vec<numeric::executable::primitive::Kernel>,
     available: std::collections::BTreeSet<super::region::values::executable::ExecValueId>,
     physical_gpr: Option<[super::region::values::executable::ExecValueId; 8]>,
     physical_flags: Option<super::region::values::executable::FlagsState>,
@@ -874,26 +958,49 @@ impl Output<'_> {
             self.c()
                 .i32_const(StopReason::Budget as i32)
                 .i32_const(reason as i32)
-                .local_get(REMAIN)
-                .i32_eqz()
-                .select()
-                .return_();
+                .local_get(REMAIN);
+            if retired != 0 {
+                self.c()
+                    .i32_const(retired as i32)
+                    .local_get(PREFIX_BASE)
+                    .i32_sub()
+                    .i32_sub();
+            }
+            self.c().i32_eqz().select().return_();
         } else {
             self.c().i32_const(reason as i32).return_();
         }
     }
 
     fn publish_exit(&mut self, pc: Option<u32>, retired: u32) {
-        let available = self.available.clone();
-        let physical_gpr = self.physical_gpr;
-        let physical_flags = self.physical_flags;
+        let frame = if retired != 0 && retired == self.prefix + 1 {
+            self.after_frame
+        } else {
+            self.frame
+        };
+        let action = frame.map_or(recovery::FrameAction::None, recovery::FrameAction::Select);
+        let exit = recovery::ExitAction { pc, retired };
         if let Some(mut recovery) = self.active_recovery.clone() {
             let after = retired != 0 && retired == self.prefix + 1;
             let mut kernel_gpr = 0;
             let mut kernel_flags = false;
+            let mut branch_capture = None;
             if let Some(id) = self.active_effect {
                 let effect = self.executable.effect(id).clone();
                 if after {
+                    if self.captured_effect != Some(id) {
+                        // An exact kernel can report a completed stop before
+                        // its ordinary fallthrough capture (POPF's Debug arm).
+                        // Capture the real successful definitions on this arm,
+                        // without granting them to the separately emitted arm.
+                        branch_capture = Some((
+                            self.available.clone(),
+                            self.physical_gpr,
+                            self.physical_flags,
+                            self.captured_effect,
+                        ));
+                        self.capture_effect(&effect);
+                    }
                     recovery = effect.after;
                 } else if matches!(
                     effect.contract.fault_recovery,
@@ -903,29 +1010,49 @@ impl Output<'_> {
                     kernel_flags = effect.contract.flags_write != 0;
                 }
             }
-            self.recover_scalar(&recovery, kernel_gpr, kernel_flags);
-            let previous_frame = self.frame;
-            self.frame = Some(recovery.frame);
-            numeric::executable::recover(self, &recovery.fp);
-            self.frame = previous_frame;
+            recovery::request(
+                self,
+                Some(&recovery),
+                Some(&recovery.fp),
+                action,
+                recovery::program::KernelMasks {
+                    gpr: kernel_gpr,
+                    flags: kernel_flags,
+                },
+                exit,
+            );
+            if let Some((available, physical_gpr, physical_flags, captured_effect)) = branch_capture
+            {
+                self.available = available;
+                self.physical_gpr = physical_gpr;
+                self.physical_flags = physical_flags;
+                self.captured_effect = captured_effect;
+            }
         } else if let Some(recovery) = self.active_fp_recovery.clone() {
-            numeric::executable::recover(self, &recovery);
-        }
-        let frame = if retired != 0 && retired == self.prefix + 1 {
-            self.after_frame
+            recovery::request(
+                self,
+                None,
+                Some(&recovery),
+                action,
+                recovery::program::KernelMasks {
+                    gpr: 0,
+                    flags: false,
+                },
+                exit,
+            );
         } else {
-            self.frame
-        };
-        if let Some(frame) = frame {
-            numeric::emit_frame(self, frame);
+            recovery::request(
+                self,
+                None,
+                None,
+                action,
+                recovery::program::KernelMasks {
+                    gpr: 0,
+                    flags: false,
+                },
+                exit,
+            );
         }
-        if let Some(pc) = pc {
-            self.c().i32_const(pc as i32).local_set(EIP);
-        }
-        self.count(retired);
-        self.available = available;
-        self.physical_gpr = physical_gpr;
-        self.physical_flags = physical_flags;
     }
 
     fn publish_operands(&mut self) {

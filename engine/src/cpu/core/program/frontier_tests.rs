@@ -136,6 +136,46 @@ fn a_frontier_target_has_its_own_source_authority() {
 }
 
 #[test]
+fn completed_pop_flags_debug_exits_capture_results_and_keep_fallthrough_validation() {
+    use std::{fmt::Write, process::Command};
+
+    let mut script = String::from("const modules=[");
+    for (name, bytes) in [
+        ("popf16", &[0x66, 0x9d, 0x83, 0xd0, 0, 0x0f, 0x0b][..]),
+        ("popf32", &[0x9d, 0x83, 0xd0, 0, 0x0f, 0x0b][..]),
+    ] {
+        let mut memory = memory();
+        memory.write(GuestAddress(0x1000), bytes).unwrap();
+        // The first operation has a conditional completed Debug exit; ADC on
+        // its normal arm still consumes the newly popped carry/flags tuple.
+        let code = compile(&memory, GuestAddress(0x1000), options()).unwrap();
+        assert_eq!(code.instruction_count(), 3, "{name} retains the normal arm");
+        assert!(code.native_instructions().is_empty());
+        assert!(code.is_current(&memory));
+        write!(&mut script, "{{name:{name:?},hex:\"").unwrap();
+        for byte in code.wasm() {
+            write!(&mut script, "{byte:02x}").unwrap();
+        }
+        script.push_str("\"},");
+    }
+    script.push_str(
+        "];const assert=require('node:assert/strict');for(const item of modules){\
+         const bytes=Buffer.from(item.hex,'hex');\
+         assert(WebAssembly.validate(bytes),item.name);\
+         new WebAssembly.Module(bytes);}",
+    );
+    let result = Command::new("node")
+        .args(["-e", &script])
+        .output()
+        .expect("validate completed POPF exits and their normal continuation");
+    assert!(
+        result.status.success(),
+        "{}",
+        String::from_utf8_lossy(&result.stderr)
+    );
+}
+
+#[test]
 fn generated_frontier_modules_preserve_exact_prefixes_and_faults() {
     use std::{
         fmt::Write,

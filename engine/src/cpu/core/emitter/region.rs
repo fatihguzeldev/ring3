@@ -136,7 +136,6 @@ impl Emitter<'_, '_> {
         self.current = id;
         let block = &self.graph.blocks[id.0];
         let fixed_work = self.out.spans[id.0].fixed_work;
-        let entry_frame = self.out.plan.block(id).entry;
         self.out.guarded_control = block.terminator == Terminator::GuardedIndirect;
         self.out.address_fact = None;
         // Eligibility precedes predicted entry state and trace recording. A
@@ -161,7 +160,6 @@ impl Emitter<'_, '_> {
         // Fresh external state has no active local FP view to commit here.
         let entry_fp = self.out.executable.block(id).entry.fp.clone();
         super::numeric::executable::recover_ingress(self.out, &entry_fp, id);
-        super::numeric::emit_frame(self.out, entry_frame);
         self.out
             .c()
             .i32_const(block.entry as i32)
@@ -365,9 +363,6 @@ impl Emitter<'_, '_> {
         self.out.c().end();
         if let Some(recovery) = self.out.active_fp_recovery.clone() {
             super::numeric::executable::recover(self.out, &recovery);
-        }
-        if let Some(frame) = self.out.frame {
-            super::numeric::emit_frame(self.out, frame);
         }
         // An unproved computed predecessor commits through the same in-body
         // service as a terminal prefix, then reimports the pool identity frame.

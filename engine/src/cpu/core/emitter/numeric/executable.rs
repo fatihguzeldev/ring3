@@ -1,20 +1,25 @@
 //! Consume typed FP values/effects. Architectural cell publication is confined
 //! to recovery; successful native producers define F64 SSA values directly.
+pub(in crate::cpu::core::emitter) mod primitive;
 use super::super::{CTX, Output, mem};
-use super::{direct, double, frame, ieee, memory, pool, span};
+use super::{direct, double, frame, ieee, memory, pool};
 use crate::cpu::core::region::values::executable::fp::{
     FpEffect, FpEffectKind, FpInput, FpObligation, FpOperand, FpPayload, FpRecovery, FpStatus,
     FpValueNode, NativeDomain, StatusEffect,
 };
 use crate::cpu::core::region::values::executable::{
-    EffectKind, ExecValueId, FpEffectClass, OrderedEffect,
+    EffectKind, ExecValueId, FpEffectClass, OrderedEffect, ValueNode,
 };
 use crate::cpu::core::{StopReason, fp_pool as p};
-use crate::cpu::x86::X87Format;
+use crate::cpu::x86::{X87Binary, X87Format, X87Operation, ir::Operation};
 use std::collections::BTreeSet;
 use wasm_encoder::{BlockType, ValType};
 
 type Availability = BTreeSet<ExecValueId>;
+
+fn occupied_by_definition(node: &FpValueNode) -> bool {
+    matches!(node, FpValueNode::I32(0..=2) | FpValueNode::Classify(_))
+}
 fn otherwise(out: &mut Output<'_>, before: &Availability) -> Availability {
     let first = out.available.clone();
     out.available = before.clone();
@@ -628,6 +633,53 @@ fn admit_parameter(
     put(out, value, LEFT);
 }
 
+fn arithmetic(out: &mut Output<'_>, kind: X87Binary, exact_product: bool) {
+    let kernel = primitive::Kernel {
+        kind,
+        exact_product: exact_product && kind == X87Binary::Multiply,
+    };
+    let position =
+        if let Some(position) = out.arithmetic_kernels.iter().position(|old| *old == kernel) {
+            position
+        } else {
+            out.arithmetic_kernels.push(kernel);
+            out.arithmetic_kernels.len() - 1
+        };
+    let function = super::super::support::owner_defined(10 + position as u32, true);
+    out.c()
+        .local_get(LEFT)
+        .local_get(RIGHT)
+        .local_get(54)
+        .local_get(STATUS)
+        .call(function)
+        .local_set(EXP)
+        .local_set(BITS)
+        .local_set(HIGH)
+        .local_set(double::RESULT)
+        .local_get(EXP)
+        .i32_eqz()
+        .br_if(0)
+        .local_get(HIGH)
+        .local_set(STATUS)
+        .local_get(BITS)
+        .local_set(100)
+        .local_get(BITS)
+        .if_(BlockType::Empty);
+    let reverse = matches!(kind, X87Binary::ReverseSubtract | X87Binary::ReverseDivide);
+    out.c()
+        .local_get(if reverse { RIGHT } else { LEFT })
+        .local_set(73)
+        .local_get(if reverse { LEFT } else { RIGHT });
+    if matches!(kind, X87Binary::Subtract | X87Binary::ReverseSubtract) {
+        out.c().f64_neg();
+    }
+    out.c().local_set(74);
+    for (source, target) in [(73, 101), (74, 102), (double::RESULT, 103)] {
+        out.c().local_get(source).local_set(target);
+    }
+    out.c().end();
+}
+
 /// The sole supported-operation consumer. It never switches on original IR
 /// Operation and never publishes a producer through VALID/LOADED/token masks.
 pub(in crate::cpu::core::emitter) fn emit_effect(out: &mut Output<'_>, effect: &FpEffect) {
@@ -638,6 +690,11 @@ pub(in crate::cpu::core::emitter) fn emit_effect(out: &mut Output<'_>, effect: &
     take(out, effect.mode, 54);
     load_status(out, effect.status_before);
     for (_, tag) in &effect.occupied {
+        if matches!(&out.executable.value(*tag).node,
+            ValueNode::Fp(node) if occupied_by_definition(node))
+        {
+            continue;
+        }
         out.demand(*tag);
         out.c().i32_const(3).i32_eq().br_if(0);
     }
@@ -695,7 +752,7 @@ pub(in crate::cpu::core::emitter) fn emit_effect(out: &mut Output<'_>, effect: &
                 }
             }
             out.c().local_get(73).local_set(LEFT);
-            direct::arithmetic_plan(out, *kind, *exact_product);
+            arithmetic(out, *kind, *exact_product);
             put(out, *result, double::RESULT);
         }
         FpEffectKind::Transfer { source } => format_guard(out, *source, 0),
@@ -868,6 +925,87 @@ pub(in crate::cpu::core::emitter) fn emit_effect(out: &mut Output<'_>, effect: &
     out.exit(StopReason::ExactPrefix, Some(out.pc), out.prefix);
     out.c().end();
     out.available = success_available;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::cpu::{
+        core::{
+            program,
+            region::{
+                BlockId, Region,
+                values::{RegionPlan, executable::ExecutableProgram},
+            },
+        },
+        x86::{Register32, ir::EffectiveAddress},
+    };
+
+    #[test]
+    fn produced_classification_is_occupied_but_native_empty_ghost_is_not() {
+        let operations = [
+            Operation::X87 {
+                operation: X87Operation::Load(X87Format::Float32),
+                address: Some(EffectiveAddress {
+                    base: Some(Register32::Ebx),
+                    ..Default::default()
+                }),
+                opcode: 0x103,
+                waiting: true,
+            },
+            Operation::X87 {
+                operation: X87Operation::StoreRegister {
+                    index: 0,
+                    pop: true,
+                },
+                address: None,
+                opcode: 0x5d8,
+                waiting: true,
+            },
+        ];
+        let block = program::Block {
+            entry: 0x1000,
+            instructions: operations
+                .into_iter()
+                .enumerate()
+                .map(|(i, operation)| program::Instruction {
+                    pc: 0x1000 + i as u32,
+                    next: 0x1001 + i as u32,
+                    operation: Some(operation),
+                    gate: None,
+                })
+                .collect(),
+        };
+        let region = Region::from_blocks(&[block], 0x1000).unwrap();
+        let plan = RegionPlan::analyze(&region);
+        let executable = ExecutableProgram::analyze(&region, &plan);
+        let body = executable.block(BlockId(0));
+        let effects: Vec<_> = body.effects().collect();
+        let is_proven = |id| match &executable.value(id).node {
+            ValueNode::Fp(node) => occupied_by_definition(node),
+            _ => false,
+        };
+        assert!(
+            !is_proven(body.entry.fp.tags[0]),
+            "actual incoming occupancy remains a guard"
+        );
+        assert!(
+            is_proven(effects[0].after.fp.tags[0]),
+            "successful FLD publishes a real classification"
+        );
+        assert!(
+            !is_proven(effects[0].after.fp.tags[1]),
+            "the independent incoming tag is not a payload fact"
+        );
+        assert!(matches!(
+            effects[1].after.fp.payload[7],
+            FpPayload::Native { .. }
+        ));
+        assert!(
+            !is_proven(effects[1].after.fp.tags[7]),
+            "a popped native ghost remains architecturally empty"
+        );
+    }
 }
 
 /// External adapter. Native block parameters are validated from their complete
@@ -1164,7 +1302,6 @@ pub(in crate::cpu::core::emitter) fn emit_edge(
     let source_frame = out.plan.block(out.current_block.unwrap()).exit;
     out.frame = Some(source_frame);
     recover(out, source);
-    frame::emit_frame(out, source_frame);
     let pc = match out.plan.frame(out.plan.block(target_block).entry).pc {
         crate::cpu::core::region::ResumePc::Exact(pc) => pc,
         _ => unreachable!(),
@@ -1174,128 +1311,171 @@ pub(in crate::cpu::core::emitter) fn emit_edge(
     out.available = before;
 }
 
-/// Side-exit/publication projection only. Known native lanes get one constant
-/// validity mask here, rather than generic bookkeeping after every producer.
+/// full projection is emitted once by the shared recovery executor.
 pub(in crate::cpu::core::emitter) fn recover(out: &mut Output<'_>, recovery: &FpRecovery) {
     if out.native.is_empty() {
         return;
     }
-    let available = out.available.clone();
-    out.c().local_get(84).if_(BlockType::Empty);
-    let shape = out
-        .plan
-        .shape(out.frame.expect("FP recovery has an architectural frame"))
-        .clone();
-    let mut certificates = 0i64;
-    for logical in 0..8 {
-        if let FpPayload::Native { domain, .. } = recovery.payload[logical] {
-            let bits = pool::FORMAT_TOKEN | i64::from(domain.certificate_bits());
-            certificates |= bits << (u32::from(shape.cells[logical].0) * pool::TOKEN_BITS);
-        }
+    super::super::recovery::request_fp(out, recovery);
+}
+
+/// status observers consume no payload or tag projection.
+pub(in crate::cpu::core::emitter) fn emit_observe(
+    out: &mut Output<'_>,
+    operation: Operation,
+) -> bool {
+    let waiting = match operation {
+        Operation::X87StatusToAx => false,
+        Operation::X87 {
+            operation: X87Operation::Wait,
+            address: None,
+            waiting: true,
+            ..
+        } => true,
+        _ => return false,
+    };
+    let Some(effect) = out
+        .active_effect
+        .map(|id| out.executable.effect(id).clone())
+    else {
+        return false;
+    };
+    if !matches!(effect.kind, EffectKind::Exact(_))
+        || !matches!(effect.contract.fp, FpEffectClass::Observe)
+    {
+        return false;
     }
-    // Actual domains attach to the full projected value and actual CW only at
-    // this publication boundary. Native producers need no runtime token writes.
+    let before = out.available.clone();
     out.c()
-        .i64_const(certificates)
-        .local_set(super::super::FP_PAYLOAD_TOKENS);
-    out.c().i32_const(0).local_set(85);
-    let delta = i32::from(recovery.top_delta).rem_euclid(8);
-    if delta != 0 {
-        out.c()
-            .local_get(86)
-            .i32_const(delta)
-            .i32_shr_u()
-            .local_get(86)
-            .i32_const(8 - delta)
-            .i32_shl()
-            .i32_or()
-            .i32_const(255)
-            .i32_and();
-    } else {
-        out.c().local_get(86);
-    }
+        .block(BlockType::Empty)
+        .block(BlockType::Empty)
+        .local_get(CTX)
+        .i32_load(mem(super::BANK_POINTER, 2))
+        .local_tee(BANK)
+        .i32_eqz()
+        .br_if(0)
+        .local_get(84)
+        .if_(BlockType::Empty);
+    load_status(out, effect.before.fp.status);
+    out.c().local_get(STATUS).local_set(88);
+    take(out, effect.before.fp.control, 87);
+    out.demand(effect.before.fp.top);
     out.c()
-        .i32_const(i32::from(recovery.written))
-        .i32_or()
-        .local_set(158);
-    let mut seen = 0u8;
-    for logical in 0..8 {
-        let cell = shape.cells[logical].0;
-        if seen & (1 << cell) != 0 {
-            continue;
-        }
-        seen |= 1 << cell;
-        let aliases = (0..8)
-            .filter(|&i| shape.cells[i].0 == cell)
-            .fold(0u8, |mask, i| mask | (1 << i));
-        for alias in 0..8 {
-            if aliases & (1 << alias) != 0 {
-                debug_assert_eq!(recovery.payload[logical], recovery.payload[alias]);
-            }
-        }
-        out.c()
-            .local_get(158)
-            .i32_const(i32::from(aliases))
-            .i32_and()
-            .if_(BlockType::Empty);
-        let before = out.available.clone();
-        match recovery.payload[logical] {
-            FpPayload::Native { value, .. } => {
-                take(out, value, 76 + u32::from(cell));
-                out.c()
-                    .local_get(85)
-                    .i32_const(1 << cell)
-                    .i32_or()
-                    .local_set(85);
-            }
-            FpPayload::Opaque { low, high } => {
-                take(out, low, frame::LOW + u32::from(cell));
-                take(out, high, frame::HIGH + u32::from(cell));
-            }
-            FpPayload::Tagged {
-                low,
-                high,
-                native,
-                valid,
-                ..
-            } => {
-                out.demand(valid);
-                out.c().if_(BlockType::Empty);
-                let branch = out.available.clone();
-                take(out, native, 76 + u32::from(cell));
-                out.c()
-                    .local_get(85)
-                    .i32_const(1 << cell)
-                    .i32_or()
-                    .local_set(85);
-                let first = otherwise(out, &branch);
-                take(out, low, frame::LOW + u32::from(cell));
-                take(out, high, frame::HIGH + u32::from(cell));
-                joined(out, first);
-            }
-        }
-        out.c().end();
-        out.available = before;
-    }
-    for (value, local) in [
-        (recovery.control, 87),
-        (recovery.status.bits, 88),
-        (recovery.top, 90),
-        (recovery.metadata.fip, 91),
-        (recovery.metadata.fdp, 92),
-        (recovery.metadata.opcode, 93),
-        (recovery.metadata.cs, 94),
-        (recovery.metadata.ds, 95),
-        (recovery.status.pending, 100),
-        (recovery.status.left, 101),
-        (recovery.status.right, 102),
-        (recovery.status.result, 103),
+        .i32_const(i32::from(effect.before.fp.top_delta))
+        .i32_add()
+        .i32_const(7)
+        .i32_and()
+        .local_set(BITS);
+    let active = otherwise(out, &before);
+    out.c()
+        .local_get(BANK)
+        .i32_const(p::BANK_OFFSET as i32)
+        .i32_add()
+        .local_set(pool::POINTER)
+        .local_get(pool::POINTER)
+        .i32_load(mem(p::ACTIVE, 2))
+        .if_(BlockType::Empty);
+    for (offset, local) in [
+        (p::CONTROL, 87),
+        (p::STATUS, 88),
+        (p::TOP, BITS),
+        (p::PENDING, 100),
     ] {
-        take(out, value, local);
+        out.c()
+            .local_get(pool::POINTER)
+            .i32_load(mem(offset, 2))
+            .local_set(local);
     }
-    // The existing exact FrameState descriptor owns tag/TOP/ghost publication.
+    for (offset, local) in [
+        (p::PENDING_LEFT, 101),
+        (p::PENDING_RIGHT, 102),
+        (p::PENDING_RESULT, 103),
+    ] {
+        out.c()
+            .local_get(pool::POINTER)
+            .f64_load(mem(offset, 3))
+            .local_set(local);
+    }
+    out.c()
+        .else_()
+        .local_get(BANK)
+        .i32_load16_u(mem(0, 1))
+        .local_set(87)
+        .local_get(BANK)
+        .i32_load16_u(mem(2, 1))
+        .local_tee(88)
+        .i32_const(11)
+        .i32_shr_u()
+        .i32_const(7)
+        .i32_and()
+        .local_set(BITS)
+        .i32_const(0)
+        .local_set(100);
+    for local in [101, 102, 103] {
+        out.c().f64_const(0.0.into()).local_set(local);
+    }
     out.c().end();
-    out.available = available;
+    joined(out, active);
+    out.c().local_get(100).if_(BlockType::Empty);
+    for local in [100, 88, 101, 102, 103] {
+        out.c().local_get(local);
+    }
+    let resolver = out.internal(8);
+    out.c()
+        .call(resolver)
+        .local_set(88)
+        .i32_const(0)
+        .local_set(100)
+        .end()
+        .local_get(84)
+        .i32_eqz()
+        .if_(BlockType::Empty)
+        .local_get(pool::POINTER)
+        .i32_load(mem(p::ACTIVE, 2))
+        .if_(BlockType::Empty);
+    for (offset, local) in [(p::STATUS, 88), (p::PENDING, 100)] {
+        out.c()
+            .local_get(pool::POINTER)
+            .local_get(local)
+            .i32_store(mem(offset, 2));
+    }
+    out.c()
+        .end()
+        .end()
+        .local_get(88)
+        .i32_const(!0x3800)
+        .i32_and()
+        .local_get(BITS)
+        .i32_const(11)
+        .i32_shl()
+        .i32_or()
+        .local_set(STATUS);
+    if waiting {
+        out.c()
+            .local_get(STATUS)
+            .local_get(87)
+            .i32_const(-1)
+            .i32_xor()
+            .i32_and()
+            .i32_const(63)
+            .i32_and()
+            .br_if(0);
+    } else {
+        out.c()
+            .local_get(2)
+            .i32_const(-65536)
+            .i32_and()
+            .local_get(STATUS)
+            .i32_or()
+            .local_set(2);
+    }
+    let success = out.available.clone();
+    out.c().br(1).end();
+    out.available = before;
+    out.exit(StopReason::ExactPrefix, Some(out.pc), out.prefix);
+    out.c().end();
+    out.available = success;
+    true
 }
 
 /// Exact kernels that can observe/canonicalize x87 state receive the real
@@ -1304,15 +1484,8 @@ pub(in crate::cpu::core::emitter) fn prepare_exact(out: &mut Output<'_>, effect:
     if out.native.is_empty() || !matches!(effect.kind, EffectKind::Exact(_)) {
         return;
     }
-    if !matches!(effect.contract.fp, FpEffectClass::Preserve)
-        || effect
-            .operation
-            .as_ref()
-            .is_some_and(super::super::is_native)
-    {
-        recover(out, &effect.before.fp);
-        frame::emit_frame(out, effect.before.frame);
-    }
+    // true barriers and memory observers leave through the canonical service;
+    // inline status observers consume their typed roots directly.
 }
 
 pub(in crate::cpu::core::emitter) fn finish_exact(out: &mut Output<'_>, effect: &OrderedEffect) {

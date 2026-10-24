@@ -154,6 +154,9 @@ pub(super) fn emit(out: &mut Output<'_>, next: u32) {
         service::request(out, next, true);
         return;
     }
+    if executable::emit_observe(out, operation) {
+        return;
+    }
     if direct::state(out, operation) {
         out.exit(super::StopReason::ExactPrefix, Some(out.pc), out.prefix);
         out.c().end();
