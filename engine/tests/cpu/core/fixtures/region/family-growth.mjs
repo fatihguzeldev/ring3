@@ -22,6 +22,7 @@ function retained(world,unit) {
 }
 
 function sameFamily(world,unit,saved,ports) {
+  const admissions=world.cache.admissions,generated=world.cache.generatedModuleBytes,units=world.cache.units.size;
   for(const pc of ports){
     assert.equal(world.cache.select(pc),unit,'every historical and newly observed port selects one family object');
     assert.equal(world.bigint(world.context,120),saved.id,'the family native dictionary accompanies each port');
@@ -32,20 +33,19 @@ function sameFamily(world,unit,saved,ports) {
     assert.equal(world.cache.table.get(saved.slot),saved.link);
     assert.equal(world.cache.publishers.get(saved.slot),saved.publish);
   }
-  assert.equal(world.cache.admissions,saved.admissions);
-  assert.equal(world.cache.generatedModuleBytes,saved.generatedBytes);
-  assert.equal(world.cache.units.size,1);
+  assert.equal(world.cache.admissions,admissions);
+  assert.equal(world.cache.generatedModuleBytes,generated);
+  assert.equal(world.cache.units.size,units);
 }
 
-// Phase A supplies one real cold history. Phase B never executes A's private
-// path: retaining it therefore requires the previous family's actual graph,
-// rather than reconstructing a union from the latest capture alone.
+// Phase B never executes A's private path. Its new cold frontier must leave the
+// original A artifact and every historical port/edge intact.
 export function runFamilyGrowthCases(artifact,report) {
   const code=new Uint8Array(4096);
   code.set(unhex('85d2 751c 40 d8c1 49 75f6 eb34'));
   code.set(unhex('83c003 d8c1 d8c1 49 75d6 eb14'),0x20);
   code.set(unhex('90 0f0b'),0x40);
-  coldFixture(artifact,report,'automatic-cold-family-growth-retains-unvisited-historical-ports-and-edges',
+  coldFixture(artifact,report,'automatic-cold-frontier-keeps-unvisited-history-in-its-original-fragment',
     {code,registers:REGISTERS},world=>{
       const {cache,result}=world,epoch=world.bigint(world.word(world.context,88));
       let before=world.snapshot(),run=world.execute(6*ITERATIONS+2,ROOT);
@@ -80,38 +80,51 @@ export function runFamilyGrowthCases(artifact,report) {
         'the new capture never supplies A-only instructions or their outgoing edges');
       assert.equal(world.bigint(world.word(world.context,88)),epoch,
         'both phases use unchanged executable-source authority');
-      assert.equal(cache.admissions,2,'new executable nodes and internal edges replace the one family exactly once');
-      assert.equal(cache.units.size,1,'historical growth retains one owner rather than a rotated-root clone');
-      assert.equal(cache.units.has(first.id),false);
-      const grown=[...cache.units.values()][0],saved=retained(world,grown);
+      assert.equal(cache.admissions,2,'only newly observed unowned B emits a fragment');
+      assert.equal(cache.units.size,2,'A keeps its independent immutable executable ownership');
+      assert.equal(cache.units.get(first.id),first);
+      const grown=[...cache.units.values()].find(unit=>unit.id!==first.id);
+      assert.equal(cache.select(B),grown);
+      const saved=retained(world,grown);
       assert.notEqual(grown.id,first.id);
       assert.equal(world.moduleRecords.size,2);
       assert.equal(result.modules.filter(module=>module.kind==='guest').length,2);
       result.grownFamily={id:String(grown.id),slot:grown.slot,selectedPort:grown.pc,
         sha256:saved.sourceHash,bytes:saved.sourceBytes};
-      sameFamily(world,grown,saved,[...A_PORTS,...B_PORTS]);
+      sameFamily(world,first,original,A_PORTS);
+      sameFamily(world,grown,saved,B_PORTS);
 
+      const admissions=cache.admissions,generated=cache.generatedModuleBytes;
       for(const test of[
         {name:'historical-A-loop',mode:0,budget:54,pc:0x100a,eax:9,fp:'00000000000000a80340',fip:0x1005},
         {name:'new-B-loop',mode:1,budget:63,pc:0x102a,eax:27,fp:'000000000000009c0440',fip:0x1025},
       ]){
-        world.reset({registers:[0,9,test.mode,...REGISTERS.slice(3)],flags:2,pc:ROOT});
-        before=world.snapshot();run=world.execute(test.budget,ROOT);
-        coldLiteral(world,before,run,{pc:test.pc,retired:test.budget,budget:test.budget,
-          registers:[test.eax,0,test.mode,...REGISTERS.slice(3)],flags:0x46,
-          writes:[],versionWrites:0,fpRegisters:{0:test.fp},fpPc:test.fip});
-        result.runs.at(-1).phase=test.name;
-        assert.equal(run.id,grown.id);assert.equal(run.regions,1,
-          'the retained old/new executable edges stay inside the same actual body');
-        assert.equal(run.chainedColdWork,0);assert.equal(world.helperCalls.length,before.helpers);
+        for(let replay=0;replay<2;replay++) {
+          world.reset({registers:[0,9,test.mode,...REGISTERS.slice(3)],flags:2,pc:ROOT});
+          before=world.snapshot();run=world.execute(test.budget,ROOT);
+          coldLiteral(world,before,run,{pc:test.pc,retired:test.budget,budget:test.budget,
+            registers:[test.eax,0,test.mode,...REGISTERS.slice(3)],flags:0x46,
+            writes:[],versionWrites:0,fpRegisters:{0:test.fp},fpPc:test.fip});
+          result.runs.at(-1).phase=test.name;
+          assert.equal(run.id,test.mode?grown.id:first.id);
+          assert.equal(run.regions,test.mode?18:1,
+            'A remains one body and B crosses the two retained fragments once per iteration');
+          assert.equal(run.chainedColdWork,0);assert.equal(world.helperCalls.length,before.helpers);
+          if(replay)assert.equal(world.resolverCalls,before.resolverCalls,
+            'warm linked fragments execute without native ownership resolution');
+          assert.equal(cache.admissions,admissions);assert.equal(cache.generatedModuleBytes,generated);
+        }
       }
       for(const pc of[...A_PORTS,...B_PORTS]){
         world.reset({registers:REGISTERS,flags:2,pc});before=world.snapshot();run=world.execute(0,pc);
         coldLiteral(world,before,run,{pc,retired:0,budget:0,registers:REGISTERS,flags:2,
           fp:before.fp,writes:[],versionWrites:0});
-        assert.equal(run.id,grown.id,'zero-quota historical and new ports use the same validated owner');
+        assert.equal(run.id,B_PORTS.includes(pc)?grown.id:first.id,
+          'zero-quota ports retain their original source-current fragment');
       }
-      sameFamily(world,grown,saved,[...A_PORTS,...B_PORTS]);
+      sameFamily(world,first,original,A_PORTS);sameFamily(world,grown,saved,B_PORTS);
+      assert.equal(cache.admissions,admissions);assert.equal(cache.generatedModuleBytes,generated);
+      assert.equal(cache.units.size,2);
       assert.equal(cache.transientAdmissions,0);assert.equal(cache.transientRuns,0);
       assert.equal(world.prepares,0);result.semanticComplete=true;
     });

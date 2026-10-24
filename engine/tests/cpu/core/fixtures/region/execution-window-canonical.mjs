@@ -81,7 +81,7 @@ function callbacks(calls,identity,ordinal,count) {
 export function runExecutionWindowCanonicalCases(artifact,report) {
   const code=new Uint8Array(4096);
   program(code,A,'d8c1 ffe6','ffe7');program(code,B,'b8ffffffff 0fa2 ffe7','ffe6');
-  coldFixture(artifact,report,'compiled-window-canonical-ordinal-without-parent-absorption',{
+  coldFixture(artifact,report,'stable-fragment-canonical-ordinal-without-parent-absorption',{
     code,registers:REGS,flags:FLAGS,
   },world=>{
     world.cache.instructions=2048;world.cache.blocks=128;
@@ -112,8 +112,8 @@ export function runExecutionWindowCanonicalCases(artifact,report) {
       instructions:[129,129],limitBlocks:128,
       parents:parents.map(parent=>({id:String(parent.id),pc:parent.pc,slot:parent.slot,bytes:parent.bytes,sha256:parent.sha256}))};
 
-    // All 1100 CPUID callbacks execute in the original B module. Automatic
-    // installation happens only after this completed lease, never midway.
+    // All 1100 CPUID callbacks execute in the original B dictionary. Learning
+    // generated connectivity does not replace either immutable fragment.
     world.reset({pc:B,registers:REGS,flags:FLAGS,fp:initial});
     const before=world.snapshot(),helpers=world.helperCalls.length,formed=world.execute(5500,B);
     coldLiteral(world,before,formed,{pc:B,retired:5500,budget:5500,registers:ZEROED,flags:FLAGS,
@@ -122,48 +122,66 @@ export function runExecutionWindowCanonicalCases(artifact,report) {
     assert.equal(formed.id,parentA.id);assert.equal(formed.regions,2200);
     assert.equal(formed.chainedColdWork,0);assert.equal(formed.chainedColdRetired,0);
     callbacks(world.helperCalls.slice(helpers),parentB.id,0,1100);
-    const recording=world.recording();world.result.recording=recording;
-    assert.equal(recording.active,0);assert.equal(recording.overflow,0);assert.equal(recording.used,129);
-    assert(recording.events.every(event=>event.kind===1||event.kind===2));
-    assert(recording.events.some(event=>event.kind===2&&event.pc===B+5));
-    assert.deepEqual([...new Set(recording.events.map(event=>event.owner))].sort(),[String(parentA.id),String(parentB.id)].sort());
-
-    world.reset({pc:A,registers:REGS,flags:FLAGS,fp:initial});
-    const warmBefore=world.snapshot(),warmHelpers=world.helperCalls.length,warm=world.execute(45,A);
-    coldLiteral(world,warmBefore,warm,{pc:A,retired:45,budget:45,registers:ZEROED,flags:FLAGS,
-      fp:fp(initial,{value:VALUE.twentyOne,fip:A}),writes:[],versionWrites:0});
-    world.result.semanticComplete=true;
-    world.result.windowWitness={regions:warm.regions,id:String(warm.id),coldWork:warm.chainedColdWork,
-      callbacks:world.helperCalls.slice(warmHelpers),admissions:world.cache.admissions};
-    assert.equal(warm.regions,1,'one real window body continues across its canonical service and both former owner edges');
-    assert.equal(warm.chainedColdWork,0);assert.equal(warm.chainedColdRetired,0);
-    const window=world.cache.units.get(warm.id);assert(window&&window.id!==parentA.id&&window.id!==parentB.id);
-    assert.equal(window.pc,A);assert.equal(world.cache.admissions,3);assert.equal(world.cache.units.size,3);
-    callbacks(world.helperCalls.slice(warmHelpers),window.id,1,9);
-    const record=world.moduleRecords.get(window.id),decoded=lookup(record.source);
-    assert.deepEqual(decoded.entries,[{pc:A,block:0,prefix:0},{pc:A+2,block:0,prefix:1},
-      {pc:B,block:1,prefix:0},{pc:B+5,block:2,prefix:0},{pc:B+7,block:3,prefix:0}]);
-    // The actual NUMERIC event and its continuation split B before and after
-    // CPUID; this preserves the shared service's exact private resume ports.
-    assert.equal(decoded.blocks,4);
-    stable(world,parentA,{skip:[A]});stable(world,parentB);
-    world.result.window={id:String(window.id),root:window.pc,slot:window.slot,bytes:window.bytes,sha256:record.sha256,
-      instructionPcs:decoded.entries.map(entry=>entry.pc)};
     const admissions=world.cache.admissions,generated=world.cache.generatedModuleBytes;
-
-    // Stop immediately before and after the real canonical callback. The
-    // arithmetic prefix and all four CPUID GPR outputs remain literal oracles.
+    assert.equal(admissions,2);assert.equal(world.cache.units.size,2);
+    for(let replay=0;replay<2;replay++) {
+      world.reset({pc:A,registers:REGS,flags:FLAGS,fp:initial});
+      const warmBefore=world.snapshot(),warmHelpers=world.helperCalls.length,warm=world.execute(45,A);
+      coldLiteral(world,warmBefore,warm,{pc:A,retired:45,budget:45,registers:ZEROED,flags:FLAGS,
+        fp:fp(initial,{value:VALUE.twentyOne,fip:A}),writes:[],versionWrites:0});
+      assert.equal(warm.id,parentB.id);assert.equal(warm.regions,18);
+      assert.equal(warm.chainedColdWork,0);assert.equal(warm.chainedColdRetired,0);
+      callbacks(world.helperCalls.slice(warmHelpers),parentB.id,0,9);
+      assert.equal(world.resolverCalls,warmBefore.resolverCalls,
+        'canonical callbacks adopt the current ticket without per-edge native resolution');
+    }
+    world.result.semanticComplete=true;
     for(const budget of[3,4]) {
       world.reset({pc:A,registers:REGS,flags:FLAGS,fp:initial});
       const prefixBefore=world.snapshot(),prefixHelpers=world.helperCalls.length,run=world.execute(budget,A);
       coldLiteral(world,prefixBefore,run,{pc:B+(budget===3?5:7),retired:budget,budget,
         registers:budget===3?[0xffffffff,...REGS.slice(1)]:ZEROED,flags:FLAGS,
         fp:fp(initial,{value:VALUE.five,fip:A}),writes:[],versionWrites:0});
-      assert.equal(run.id,window.id);assert.equal(run.regions,1);
-      callbacks(world.helperCalls.slice(prefixHelpers),window.id,1,budget===3?0:1);
+      assert.equal(run.id,parentB.id);assert.equal(run.regions,2);
+      callbacks(world.helperCalls.slice(prefixHelpers),parentB.id,0,budget===3?0:1);
     }
-    stable(world,parentA,{skip:[A]});stable(world,parentB);
+    stable(world,parentA);stable(world,parentB);
     assert.equal(world.cache.admissions,admissions);assert.equal(world.cache.generatedModuleBytes,generated);
-    assert.equal(world.cache.units.size,3);world.result.windowSemanticComplete=true;
+    assert.equal(world.cache.units.size,2);world.result.windowSemanticComplete=true;
+  });
+
+  coldFixture(artifact,report,'manual-root-only-canonical-trace-rebases-its-own-ordinal-and-exact-prefixes',{
+    code,registers:REGS,flags:FLAGS,referencePrepared:true,
+  },world=>{
+    const initial=fp(world.initialFp,{status:0x220});
+    const parents=[A,B].map(base=>{
+      const unit=world.cache.entry(base);world.cache.entry(base+(base===A?2:7));
+      return retain(world,unit,[base,base+(base===A?2:7)]);
+    });
+    world.reset({pc:A,registers:REGS,flags:FLAGS,fp:initial});world.cache.select(A);
+    assert.equal(world.raw.core_trace_start(A),0);
+    const before=world.snapshot(),helpers=world.helperCalls.length,train=world.execute(5500,A);
+    coldLiteral(world,before,train,{pc:A,retired:5500,budget:5500,registers:ZEROED,flags:FLAGS,
+      fp:fp(initial,{value:VALUE.twoTwoZeroThree,fip:A}),writes:[],versionWrites:0});
+    callbacks(world.helperCalls.slice(helpers),parents[1].id,0,1100);
+    assert.equal(world.raw.core_trace_finish(A,128,32),0);
+    const trace=world.cache.select(A);assert(trace&&!parents.some(parent=>parent.id===trace.id));
+    const decoded=lookup(world.moduleRecords.get(trace.id).source);
+    assert.deepEqual(decoded.entries,[{pc:A,block:0,prefix:0},{pc:A+2,block:0,prefix:1},
+      {pc:B,block:1,prefix:0},{pc:B+5,block:2,prefix:0},{pc:B+7,block:3,prefix:0}]);
+    assert.equal(decoded.blocks,4);
+    const admissions=world.cache.admissions,generated=world.cache.generatedModuleBytes;
+    for(const budget of[3,4,45]) {
+      world.reset({pc:A,registers:REGS,flags:FLAGS,fp:initial});
+      const prefixBefore=world.snapshot(),prefixHelpers=world.helperCalls.length,run=world.execute(budget,A);
+      coldLiteral(world,prefixBefore,run,{pc:budget===45?A:B+(budget===3?5:7),retired:budget,budget,
+        registers:budget===3?[0xffffffff,...REGS.slice(1)]:ZEROED,flags:FLAGS,
+        fp:fp(initial,{value:budget===45?VALUE.twentyOne:VALUE.five,fip:A}),writes:[],versionWrites:0});
+      assert.equal(run.id,trace.id);assert.equal(run.regions,1);
+      callbacks(world.helperCalls.slice(prefixHelpers),trace.id,1,budget===3?0:budget===4?1:9);
+    }
+    stable(world,parents[0],{skip:[A]});stable(world,parents[1]);
+    assert.equal(world.cache.admissions,admissions);assert.equal(world.cache.generatedModuleBytes,generated);
+    assert.equal(world.cache.units.size,3);world.result.semanticComplete=true;
   });
 }

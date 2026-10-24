@@ -77,7 +77,7 @@ function stable(world,parent,{skip=[]}={}) {
 
 export function runExecutionWindowCases(artifact,report) {
   const code=new Uint8Array(4096);program(code,A,'ffe6','ffe7');program(code,B,'ffe7','ffe6');
-  coldFixture(artifact,report,'compiled-cross-family-window-without-full-history-absorption',{
+  coldFixture(artifact,report,'compiled-cross-family-edges-keep-immutable-bodies',{
     code,registers:REGS,flags:FLAGS,
   },world=>{
     world.cache.instructions=2048;world.cache.blocks=128;
@@ -101,8 +101,8 @@ export function runExecutionWindowCases(artifact,report) {
     world.result.parentHistories={blocks:[65,65],instructions:[129,129],limitBlocks:128,
       parents:parents.map(parent=>({id:String(parent.id),pc:parent.pc,slot:parent.slot,bytes:parent.bytes,sha256:parent.sha256}))};
 
-    // Starting at B makes the A port receive its 1024th real linked selection
-    // first. The recording then contains only the four completed hot PCs.
+    // Repeated already-owned transitions learn directory connectivity without
+    // re-emitting either full parent or a duplicate execution window.
     world.reset({pc:B,registers:REGS,flags:FLAGS,fp:initial});
     const before=world.snapshot(),helpers=world.helperCalls.length,formed=world.execute(4400,B);
     coldLiteral(world,before,formed,{pc:B,retired:4400,budget:4400,registers:REGS,flags:FLAGS,
@@ -110,54 +110,73 @@ export function runExecutionWindowCases(artifact,report) {
       identity:world.bigint(world.context,120)});
     assert.equal(formed.id,parentA.id,'the final executed family is A before postlease installation');
     assert.equal(formed.regions,2200);assert.equal(formed.chainedColdWork,0);assert.equal(formed.chainedColdRetired,0);
-    const recording=world.recording();world.result.recording=recording;
-    assert.equal(recording.active,0);assert.equal(recording.overflow,0);assert.equal(recording.used,129);
-    assert(recording.events.every(event=>event.kind===1),'the automatic opportunity contains no completed cold instructions');
-    assert.deepEqual([...new Set(recording.events.map(event=>event.owner))].sort(),[String(parentA.id),String(parentB.id)].sort());
-
-    // This full literal run is deliberately valid on the old engine too. Its
-    // actual dispatcher count is the mechanism RED, after complete semantics.
-    world.reset({pc:A,registers:REGS,flags:FLAGS,fp:initial});
-    const warmBefore=world.snapshot(),warm=world.execute(36,A);
-    coldLiteral(world,warmBefore,warm,{pc:A,retired:36,budget:36,registers:REGS,flags:FLAGS,
-      fp:fp(initial,{value:VALUE.thirtyNine,fip:B}),writes:[],versionWrites:0});
-    world.result.semanticComplete=true;
-    world.result.windowWitness={regions:warm.regions,id:String(warm.id),coldWork:warm.chainedColdWork,
-      admissions:world.cache.admissions,generatedBytes:world.cache.generatedModuleBytes};
-    assert.equal(warm.regions,1,'one actual emitted body internalizes all matching A/B boundaries');
-    assert.equal(warm.chainedColdWork,0);assert.equal(warm.chainedColdRetired,0);
-    const window=world.cache.units.get(warm.id);assert(window&&window.id!==parentA.id&&window.id!==parentB.id);
-    assert.equal(window.pc,A);assert.equal(world.cache.admissions,3);assert.equal(world.cache.units.size,3);
-    const record=world.moduleRecords.get(window.id),decoded=lookup(record.source);
-    assert.deepEqual(decoded.entries.map(entry=>entry.pc),[A,A+2,B,B+2]);assert.equal(decoded.blocks,2);
-    const retained=retain(world,window,[A]);
-    assert.equal(world.helperCalls.length,helpers,'the exact PC53 hot path executes no canonical callback');
-    stable(world,parentA,{skip:[A]});stable(world,parentB);
-    world.result.window={id:String(window.id),root:window.pc,slot:window.slot,bytes:window.bytes,sha256:record.sha256,
-      instructionPcs:decoded.entries.map(entry=>entry.pc)};
     const admissions=world.cache.admissions,generated=world.cache.generatedModuleBytes;
-
+    assert.equal(admissions,2,'a fully owned compiled graph does not create an automatic window');
+    assert.equal(world.cache.units.size,2);
+    for(let replay=0;replay<2;replay++) {
+      world.reset({pc:A,registers:REGS,flags:FLAGS,fp:initial});
+      const warmBefore=world.snapshot(),warm=world.execute(36,A);
+      coldLiteral(world,warmBefore,warm,{pc:A,retired:36,budget:36,registers:REGS,flags:FLAGS,
+        fp:fp(initial,{value:VALUE.thirtyNine,fip:B}),writes:[],versionWrites:0});
+      assert.equal(warm.id,parentB.id);assert.equal(warm.regions,18);
+      assert.equal(warm.chainedColdWork,0);assert.equal(warm.chainedColdRetired,0);
+      assert.equal(world.resolverCalls,warmBefore.resolverCalls,
+        'learned cross-fragment transitions run without native ownership resolution');
+    }
+    world.result.semanticComplete=true;
+    assert.equal(world.helperCalls.length,helpers);
     for(const budget of[0,1]) {
       world.reset({pc:A,registers:REGS,flags:FLAGS,fp:initial});
       const prefixBefore=world.snapshot(),run=world.execute(budget,A);
       coldLiteral(world,prefixBefore,run,{pc:A+(budget?2:0),retired:budget,budget,registers:REGS,flags:FLAGS,
         fp:budget?fp(initial,{value:VALUE.five,fip:A}):initial,writes:[],versionWrites:0});
-      assert.equal(run.id,window.id);assert.equal(run.regions,1);
+      assert.equal(run.id,parentA.id);assert.equal(run.regions,1);
     }
+    stable(world,parentA);stable(world,parentB);
+    assert.equal(world.cache.admissions,admissions);assert.equal(world.cache.generatedModuleBytes,generated);
+    assert.equal(world.cache.units.size,2);world.result.windowSemanticComplete=true;
+  });
 
-    // Even a validated owner capability cannot execute a different public root.
-    // A zero-progress side exit must bypass this window and reveal old A again.
+  // Keep the independent root-only/wrong-entry/bypass controls on the explicit
+  // legacy trace API. Automatic formation no longer creates such executors.
+  coldFixture(artifact,report,'manual-root-only-trace-preserves-quota-and-wrong-root-capability-controls',{
+    code,registers:REGS,flags:FLAGS,referencePrepared:true,
+  },world=>{
+    const initial=fp(world.initialFp,{status:0x220});
+    const parents=[A,B].map(base=>{
+      const unit=world.cache.entry(base);world.cache.entry(base+2);
+      return retain(world,unit,[base,base+2]);
+    });
+    world.reset({pc:A,registers:REGS,flags:FLAGS,fp:initial});world.cache.select(A);
+    assert.equal(world.raw.core_trace_start(A),0);
+    const before=world.snapshot(),train=world.execute(4400,A);
+    coldLiteral(world,before,train,{pc:A,retired:4400,budget:4400,registers:REGS,flags:FLAGS,
+      fp:fp(initial,{value:VALUE.fourFourZeroThree,fip:B}),writes:[],versionWrites:0});
+    assert.equal(world.raw.core_trace_finish(A,128,32),0);
+    const trace=world.cache.select(A);assert(trace&&!parents.some(parent=>parent.id===trace.id));
+    const retained=retain(world,trace,[A]),record=world.moduleRecords.get(trace.id),decoded=lookup(record.source);
+    assert.deepEqual(decoded.entries.map(entry=>entry.pc),[A,A+2,B,B+2]);assert.equal(decoded.blocks,2);
+    const admissions=world.cache.admissions,generated=world.cache.generatedModuleBytes;
+    for(const budget of[0,1]) {
+      world.reset({pc:A,registers:REGS,flags:FLAGS,fp:initial});
+      const prefixBefore=world.snapshot(),run=world.execute(budget,A);
+      coldLiteral(world,prefixBefore,run,{pc:A+(budget?2:0),retired:budget,budget,registers:REGS,flags:FLAGS,
+        fp:budget?fp(initial,{value:VALUE.five,fip:A}):initial,writes:[],versionWrites:0});
+      assert.equal(run.id,trace.id);assert.equal(run.regions,1);
+    }
     world.reset({pc:A+4,registers:REGS,flags:FLAGS,fp:initial});
-    const selected=world.cache.select(A);assert.equal(selected,window);
+    const selected=world.cache.select(A);assert.equal(selected,trace);
     const wrongBefore=world.snapshot();world.cache.budget=3;
     const wrong=world.cache.execute(selected);world.result.runs.push({...wrong,id:String(wrong.id)});
     coldLiteral(world,wrongBefore,wrong,{pc:A+4,retired:0,work:0,budget:3,stop:1,registers:REGS,flags:FLAGS,
       fp:initial,writes:[],versionWrites:0});
-    assert.equal(wrong.id,window.id);assert.equal(wrong.regions,1);
-    assert.equal(world.raw.core_lookup(A),0);assert.equal(world.bigint(world.context,120),parentA.id,
-      'a real zero-progress window exit restores the retained family root');
-    stable(world,parentA);stable(world,parentB);stable(world,retained,{skip:[A]});
+    assert.equal(wrong.id,trace.id);assert.equal(wrong.regions,1);
+    assert.equal(world.raw.core_lookup(A),0);
+    assert.equal(world.bigint(world.context,120),parents[0].id,
+      'a zero-progress wrong-root trace exit exposes the unchanged baseline root');
+    for(const parent of parents)stable(world,parent);
+    stable(world,retained,{skip:[A]});
     assert.equal(world.cache.admissions,admissions);assert.equal(world.cache.generatedModuleBytes,generated);
-    assert.equal(world.cache.units.size,3);world.result.windowSemanticComplete=true;
+    assert.equal(world.cache.units.size,3);world.result.semanticComplete=true;
   });
 }

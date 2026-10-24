@@ -118,35 +118,34 @@ export function runFamilyPlanCases(artifact,report,{boundedOnly=false}={}) {
   code.set(unhex('f7d2 85d2 0f84f6fdffff e9f1feffff'),0x200);
   code.set(unhex('40 49 75fc 90 0f0b'),0x300);
 
-  if(!boundedOnly)coldFixture(artifact,report,'connected-observed-plan-atomically-absorbs-two-current-families',
+  if(!boundedOnly)coldFixture(artifact,report,'automatic-frontier-keeps-two-current-families-and-emits-only-new-bridge',
     {code,registers:trainRegisters},world=>{
       const parents=trainParents(world),epoch=world.bigint(world.word(world.context,88));
       bridge(world,192,'00000000000080c10740');world.result.bridgeSemanticComplete=true;
       requireRecordedParents(world,parents);
       assert.equal(world.bigint(world.word(world.context,88)),epoch);
-      assert.equal(world.cache.admissions,3,'one new connected family is admitted after both parents');
-      assert.equal(world.cache.units.size,1,'all current connected parents are absorbed atomically');
-      const owner=saved(world,[...world.cache.units.values()][0]);
-      assert.equal(owner.id,parents[1].id+1n,'planning consumes no executor identity before the one accepted emission');
-      for(const parent of parents) {
-        assert.equal(world.cache.units.has(parent.id),false);
-        assert.equal(world.bigint(world.raw.core_link_owners_ptr(),parent.slot*8),
-          parent.slot===owner.slot?owner.id:0n,'every old reciprocal native slot is retired before reuse');
-        if(parent.slot!==owner.slot) {
-          assert.equal(world.cache.table.get(parent.slot),null);
-          assert.equal(world.cache.publishers.get(parent.slot),null);
-        }
-      }
+      assert.equal(world.cache.admissions,3,'only the previously unowned bridge emits a new fragment');
+      assert.equal(world.cache.units.size,3,'automatic connectivity preserves both immutable parent owners');
+      for(const[parent,ports]of[[parents[0],A_PORTS],[parents[1],B_PORTS]])assertOwner(world,parent,ports);
+      const owner=saved(world,[...world.cache.units.values()].find(unit=>!parents.some(parent=>parent.id===unit.id)));
+      assert.equal(owner.id,parents[1].id+1n,'fully owned history consumes no identity or replacement emission');
+      assert.equal(owner.unit.pc,C);
       assert.equal(moduleCount(world),3);assert.equal(world.moduleRecords.size,3);
-      const ports=[...A_PORTS,...B_PORTS,...C_PORTS];assertOwner(world,owner,ports);
+      assertOwner(world,owner,C_PORTS);
       const retained=checkpoint(world);
-      for(const[count,fp]of[[9,'00000000000000a80340'],[2048,'00000000000018800b40']]) {
+      let learned=false;
+      for(const[count,fp]of[[9,'00000000000000a80340'],[9,'00000000000000a80340'],[2048,'00000000000018800b40']]) {
+        const resolves=world.resolverCalls;
         const {run}=bridge(world,count,fp);
-        assert.equal(run.id,owner.id);assert.equal(run.regions,1,'the whole observed bridge remains inside one actual body');
+        assert.equal(run.regions,2*count-1,'each immutable parent and bridge executes once per actual visit');
         assert.equal(run.chainedColdWork,0);noNewModule(world,retained);
+        if(learned)assert.equal(world.resolverCalls,resolves,'learned fragment edges resolve entirely in generated Wasm');
+        learned=true;
       }
-      rotatePorts(world,owner,ports);
-      assertOwner(world,owner,ports);world.result.semanticComplete=true;
+      for(const[parent,ports]of[[parents[0],A_PORTS],[parents[1],B_PORTS],[owner,C_PORTS]]) {
+        rotatePorts(world,parent,ports);assertOwner(world,parent,ports);
+      }
+      world.result.semanticComplete=true;
     });
 
   coldFixture(artifact,report,'overbound-connected-plan-compiles-only-unowned-pc-zero-prefix-to-existing-frontier',
@@ -174,10 +173,14 @@ export function runFamilyPlanCases(artifact,report,{boundedOnly=false}={}) {
       assertOwner(world,prefix,prefixPorts);
       assert.equal(moduleCount(world),3);assert.equal(world.moduleRecords.size,3);
       const retained=checkpoint(world);
-      for(const[count,fp]of[[9,'00000000000000a80340'],[2048,'00000000000018800b40']]) {
+      let learned=false;
+      for(const[count,fp]of[[9,'00000000000000a80340'],[9,'00000000000000a80340'],[2048,'00000000000018800b40']]) {
+        const resolves=world.resolverCalls;
         const {run}=bridge(world,count,fp,0);
         assert.equal(run.regions,2*count-1,'each immutable parent and the exact bridge prefix executes once per actual visit');
         assert.equal(run.chainedColdWork,0,'the resource refusal never forces known code back through cold execution');
+        if(learned)assert.equal(world.resolverCalls,resolves,'the bounded frontier uses generated stable continuations after learning');
+        learned=true;
         noNewModule(world,retained);
         for(const[parent,ports]of[[parents[0],A_PORTS],[parents[1],B_PORTS]])assertOwner(world,parent,ports);
         assertOwner(world,prefix,prefixPorts);

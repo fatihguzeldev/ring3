@@ -28,8 +28,11 @@ export function runStableGraphCase(artifact,report) {
     const state=record('R3ST',56),s=view(state);registers.forEach((value,index)=>s.setUint32(16+index*4,value,true));
     s.setUint32(48,0x1000,true);s.setUint32(52,2,true);new Uint8Array(memory.buffer,engine.base,56).set(state);
     const initialFp=bytes(engine.base+4236,128),initialSimd=bytes(engine.base+4364,160),initialYmm=bytes(engine.base+4612,144);
-    const prepare=api.core_prepare;let prepares=0;
+    const prepare=api.core_prepare;let prepares=0,resolves=0;
     api.core_prepare=(...args)=>{prepares++;return prepare(...args);};
+    const resolve=api.core_chain_resolve_owned;
+    assert.equal(typeof resolve,'function','the actual stable-fragment resolver is present');
+    api.core_chain_resolve_owned=(...args)=>{resolves++;return resolve(...args);};
     cache=new CodeCache(engine,{budget,instructions:64,blocks:8,chain:true});
     const select=pc=>{
       const unit=cache.entry(pc),encoded=bytes(api.core_code_ptr()>>>0,api.core_code_len()>>>0);
@@ -37,6 +40,8 @@ export function runStableGraphCase(artifact,report) {
       result.modules.push(module);return unit;
     };
     const first=select(0x1000),second=select(0x1040);assert.notEqual(first.id,second.id);
+    const originals=[first,second].map(unit=>({unit,run:unit.run,link:unit.link,
+      publish:unit.publish,slot:unit.slot}));
     status('core_lookup',0,0x1000);
     status('core_begin',0);status('core_end',0);
     const backing=word(cache.context,64),expectedRam=bytes(backing,word(cache.context,68)*4096);
@@ -53,16 +58,14 @@ export function runStableGraphCase(artifact,report) {
     assert.equal(run.coreReason,2,'a warmed existing graph completes its quota without a code-formation stop');
     assert.deepEqual([run.pc,run.retired,run.work],[0x1048,budget,budget]);
     const overlays=[...cache.units.values()].filter(unit=>unit!==first&&unit!==second);
-    assert.equal(overlays.length,1,'the default recorder installs exactly one separate executor after the lease');
-    const overlay=overlays[0];result.overlay={identity:String(overlay.id),pc:overlay.pc,bytes:overlay.bytes,slot:overlay.slot};
-    assert.equal(run.regions,2*iterations,'the entire first lease still executes the immutable baseline graph');
-    assert.equal(prepares,prepared,'post-lease installation uses the already selected observed executor without baseline preparation');
-    assert.equal(cache.units.size,3);assert.equal(cache.units.get(first.id),first);assert.equal(cache.units.get(second.id),second);
-    assert.equal(cache.admissions,3);assert.equal(cache.generatedModuleBytes,result.modules[0].bytes+result.modules[1].bytes+overlay.bytes);
-    assert.equal(cache.nativeCache.compiled,'3');assert.equal(cache.nativeCache.retainedUnits,'3');
+    assert.equal(overlays.length,0,'fully owned automatic edges learn connectivity without emitting another executor');
+    assert.equal(run.regions,2*iterations,'the full graph executes the same immutable fragments past 4096 edges');
+    assert.equal(prepares,prepared,'fully owned captures require no additional preparation');
+    assert.equal(cache.units.size,2);assert.equal(cache.units.get(first.id),first);assert.equal(cache.units.get(second.id),second);
+    assert.equal(cache.admissions,2);assert.equal(cache.generatedModuleBytes,result.modules[0].bytes+result.modules[1].bytes);
+    assert.equal(cache.nativeCache.compiled,'2');assert.equal(cache.nativeCache.retainedUnits,'2');
     assert.deepEqual([cache.transientAdmissions,cache.transientRuns],[0,0]);
-    const wantedOwners=owners.slice();view(wantedOwners).setBigUint64(overlay.slot*8,overlay.id,true);
-    assert.deepEqual(bytes(api.core_link_owners_ptr()>>>0,4097*8),wantedOwners,'both source slots survive; only the separate executor slot is added');
+    assert.deepEqual(bytes(api.core_link_owners_ptr()>>>0,4097*8),owners,'both source slots survive without any new binding');
     const wantedRegisters=registers.slice();wantedRegisters[1]=0;
     assert.deepEqual(Array.from({length:8},(_,i)=>word(cache.context,i*4)),wantedRegisters);
     assert.deepEqual([word(cache.context,32),word(cache.context,36),word(cache.context,40),word(cache.context,44)],
@@ -73,18 +76,54 @@ export function runStableGraphCase(artifact,report) {
     assert.deepEqual(bytes(engine.base+4364,160),initialSimd);assert.deepEqual(bytes(engine.base+4612,144),initialYmm);
     assert.deepEqual(bytes(backing,expectedRam.length),expectedRam);
     assert.equal(new DataView(memory.buffer).getBigUint64(versionPointer,true),beforeVersion+2n*BigInt(iterations));
-    const overlayHash=hash(bytes(api.core_code_ptr()>>>0,api.core_code_len()>>>0));
     for(const[unit,module]of[[first,result.modules[0]],[second,result.modules[1]]]){
-      // All observed instruction ports share the one new executor. Existing
-      // baseline instances and slots remain immutable for explicit legacy use.
-      const sourcePort=cache.entry(module.pc+4);assert.equal(sourcePort,overlay);
+      // Explicit precise-port admission adds no executable body and preserves
+      // the original source/ordinal dictionary of each fragment.
+      const sourcePort=cache.entry(module.pc+4);assert.equal(sourcePort,unit);
       const id=new DataView(memory.buffer).getBigUint64(cache.context+120,true);
-      assert.equal(id,overlay.id);assert.equal(hash(bytes(api.core_code_ptr()>>>0,api.core_code_len()>>>0)),overlayHash);
+      assert.equal(id,unit.id);assert.equal(hash(bytes(api.core_code_ptr()>>>0,api.core_code_len()>>>0)),module.sha256);
       assert.equal(cache.units.get(unit.id),unit,'the original SDK instance remains retained');
       assert.equal(cache.table.get(unit.slot),unit.link,'the baseline table binding is unchanged');
     }
+    const generated=cache.generatedModuleBytes,preparedAfterPorts=prepares;
+    result.warm=[];
+    for(let replay=0;replay<2;replay++){
+      const warmIterations=9,warmBudget=5*warmIterations+1;
+      const warmState=state.slice(),warmView=view(warmState);
+      warmView.setUint32(20,warmIterations,true);
+      new Uint8Array(memory.buffer,engine.base,56).set(warmState);cache.import();
+      assert.equal(cache.select(0x1000),first);
+      const before=bytes(cache.context,128),resolveBefore=resolves;
+      cache.budget=warmBudget;const warm=cache.execute(first);
+      result.warm.push({...warm,id:String(warm.id),nativeResolves:resolves-resolveBefore});
+      assert.deepEqual([warm.pc,warm.retired,warm.work,warm.coreReason,warm.regions],
+        [0x1048,warmBudget,warmBudget,2,2*warmIterations]);
+      assert.equal(warm.id,second.id);
+      const full=before.slice(),f=view(full);
+      f.setUint32(4,0,true);f.setUint32(32,0x1048,true);f.setUint32(36,0x46,true);
+      f.setUint32(40,view(before).getUint32(40,true)+warmBudget,true);f.setUint32(44,0,true);
+      for(const offset of[48,52,112,116])f.setUint32(offset,0,true);
+      f.setBigUint64(120,second.id,true);
+      assert.deepEqual(bytes(cache.context,128),full,'full warm Context32 and final fragment capability');
+      assert.deepEqual(bytes(engine.base,56),wanted);assert.deepEqual(bytes(engine.base+4236,128),initialFp);
+      assert.deepEqual(bytes(engine.base+4364,160),initialSimd);assert.deepEqual(bytes(engine.base+4612,144),initialYmm);
+      ram.setUint32(dataOffset+0x10,iterations+(replay+1)*warmIterations,true);
+      ram.setUint32(dataOffset+0x14,2*(iterations+(replay+1)*warmIterations),true);
+      assert.deepEqual(bytes(backing,expectedRam.length),expectedRam,'whole warm canonical backing');
+      assert.equal(new DataView(memory.buffer).getBigUint64(versionPointer,true),
+        beforeVersion+2n*BigInt(iterations+(replay+1)*warmIterations));
+      assert.equal(resolves,resolveBefore,'warm edges route without native ownership resolution');
+      assert.equal(prepares,preparedAfterPorts);assert.equal(cache.admissions,2);
+      assert.equal(cache.generatedModuleBytes,generated);assert.equal(cache.units.size,2);
+    }
+    for(const saved of originals){
+      assert.equal(saved.unit.slot,saved.slot);assert.equal(saved.unit.run,saved.run);
+      assert.equal(saved.unit.link,saved.link);assert.equal(saved.unit.publish,saved.publish);
+      assert.equal(cache.table.get(saved.slot),saved.link);assert.equal(cache.publishers.get(saved.slot),saved.publish);
+    }
+    assert.deepEqual(bytes(api.core_link_owners_ptr()>>>0,4097*8),owners);
     result.final={iterations,retired:budget,writes:2*iterations,version:String(beforeVersion+2n*BigInt(iterations)),
-      ramSha256:hash(expectedRam),identities:[String(first.id),String(second.id)]};result.complete=true;
+      warmIterations:18,nativeResolves:resolves,ramSha256:hash(expectedRam),identities:[String(first.id),String(second.id)]};result.complete=true;
   }catch(error){result.failure={message:String(error),stack:error.stack};throw error;}
   finally{if(cache?.open)api.core_end();if(opened)status('close',0);}
 }

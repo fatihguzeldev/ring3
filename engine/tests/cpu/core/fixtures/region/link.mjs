@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
 import {Engine,KEY,record,view} from '../../../../../../sdk/runtime/engine.js';
 import {CodeCache} from '../../../../../../sdk/runtime/cache.js';
+import {resolverExport,forceNativeInspection} from '../link.mjs';
 
 const FP=4236,SIMD=4364,YMM=4612,COLD=0x40000000;
 const unhex=text=>Uint8Array.from(Buffer.from(text.replaceAll(' ',''),'hex'));
@@ -57,7 +58,8 @@ function runLinkedCase(artifact,report,withCold) {
   };
   const api=Object.freeze({...raw,
     core_numeric:(...args)=>{result.numericCalls++;return raw.core_numeric(...args);},
-    [typeof raw.core_chain_select==='function'?'core_chain_select':'core_chain_probe']:(context,pc,selectionRetired)=>{
+    ...(typeof raw.core_numeric_owned==='function'?{core_numeric_owned:(...args)=>{result.numericCalls++;return raw.core_numeric_owned(...args);}}:{}),
+    [resolverExport(raw)]:(context,pc,selectionRetired)=>{
       const first=result.probes.length===0;
       assert.equal(context,cache.context,'the live probe uses the retained CPU context');
       assert.equal(pc,first?registers[6]:0x1080,'the three authored units execute in order');
@@ -93,7 +95,7 @@ function runLinkedCase(artifact,report,withCold) {
         assert.deepEqual(bank(),initialBank,'raw80 payloads and metadata are not packed at an intermediate compiled boundary');
         assert.deepEqual(bytes(context,48),initialContext,'GPRs, flags and work remain private at intermediate probes');
       }
-      const returned=(raw.core_chain_select??raw.core_chain_probe)(context,pc,selectionRetired)>>>0;
+      const returned=raw[resolverExport(raw)](context,pc,selectionRetired)>>>0;
       assert.equal(returned,first&&withCold?COLD:units.get(pc).slot,'the actual native cache chooses the authored owner');
       result.probes.push({pc,returned,retired,remaining:global(12),sequence:String(global(99)),
         canonicalRevision:String(revision()),bankHex:hex(bank()),active:global(84),dirty:global(86)});
@@ -135,6 +137,7 @@ function runLinkedCase(artifact,report,withCold) {
     initialFp=bytes(engine.base+FP,128);
     const initialSimd=bytes(engine.base+SIMD,160),initialYmm=bytes(engine.base+YMM,144);
     cache=new CodeCache(engine,{budget,instructions:64,blocks:8,chain:true});
+    forceNativeInspection(cache,result);
     assert.equal(cache.linkedCore,true,'the fixture requires the actual linked CPU ABI');
     for(const pc of[0x1000,0x1040,0x1080]) {
       const unit=cache.entry(pc);units.set(pc,unit);

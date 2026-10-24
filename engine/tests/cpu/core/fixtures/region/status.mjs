@@ -1,8 +1,9 @@
-import {linkedField} from '../pool-state.mjs';
+import {linkedField,fpPoolState} from '../pool-state.mjs';
 import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
 import {Engine,KEY,record,view} from '../../../../../../sdk/runtime/engine.js';
 import {CodeCache} from '../../../../../../sdk/runtime/cache.js';
+import {resolverExport,forceNativeInspection} from '../link.mjs';
 
 const hex=bytes=>Buffer.from(bytes).toString('hex');
 const unhex=text=>Uint8Array.from(Buffer.from(text,'hex'));
@@ -199,8 +200,9 @@ function runLinkedStatusCase(artifact,report,{operation,code,opcode,left,right,k
   };
   const api=Object.freeze({...raw,
     core_numeric:(...args)=>{result.numericCalls++;return raw.core_numeric(...args);},
+    ...(typeof raw.core_numeric_owned==='function'?{core_numeric_owned:(...args)=>{result.numericCalls++;return raw.core_numeric_owned(...args);}}:{}),
     core_chain_cold:()=>assert.fail('all four linked status units are retained before execution'),
-    [typeof raw.core_chain_select==='function'?'core_chain_select':'core_chain_probe']:(context,pc,selectionRetired)=>{
+    [resolverExport(raw)]:(context,pc,selectionRetired)=>{
       const index=result.probes.length,observed=index===2;
       assert(index<3,'the authored four-unit chain has exactly three internal probes');
       assert.equal(context,cache.context);assert.equal(pc,[0x1040,0x1080,0x10c0][index]);
@@ -209,8 +211,13 @@ function runLinkedStatusCase(artifact,report,{operation,code,opcode,left,right,k
       assert.deepEqual(Array.from({length:8},(_,i)=>global(i+2)>>>0),wantedRegisters,'all live linked registers');
       assert.deepEqual([global(10),global(11),global(12),global(13)],[pc,2,6-index*2,2+index*2],
         'PC, all FLAGS, quota and completed prefix stay exact across every link');
-      assert.deepEqual([global(84),global(85),global(86)],[1,3,1],
-        'the two numerical operands stay valid while only the computed result owns a dirty payload');
+      assert.deepEqual([global(84),global(85),global(86)],[1,cache.continuationCore?1:3,1],
+        'only the computed result needs a cached native pool payload; its unchanged input remains authoritative');
+      if(cache.continuationCore){
+        const input=fpPoolState(memory,word(context,92)).records[1],literal=unhex(right),d=view(literal);
+        assert.deepEqual([input.low,input.high,input.valid],[d.getBigUint64(0,true),d.getUint16(8,true),0],
+          'the unchanged second operand retains its exact opaque raw80 payload without per-producer VALID publication');
+      }
       assert.deepEqual([global(87),global(88),global(89),global(90),global(91),global(92),global(93)],
         [0x27f,observed?wanted.status:PE,0xfff0,0,0x1000,0,opcode],
         'FNSTSW resolves status without changing the arithmetic metadata');
@@ -223,7 +230,7 @@ function runLinkedStatusCase(artifact,report,{operation,code,opcode,left,right,k
       assert.deepEqual(bank(),initialBank,'neither ordinary links nor FNSTSW pack the raw80 bank');
       assert.deepEqual(bytes(context,48),initialContext,'private linked work leaves the canonical scalar snapshot untouched');
       assert.deepEqual(bytes(engine.base+4236,128),initialFp,'the public FP state is still unpublished');
-      const returned=(raw.core_chain_select??raw.core_chain_probe)(context,pc,selectionRetired)>>>0;
+      const returned=raw[resolverExport(raw)](context,pc,selectionRetired)>>>0;
       assert.equal(returned,units.get(pc).slot,'the actual native owner probe chooses the retained successor');
       result.probes.push({pc,returned,retired:global(13),remaining:global(12),pending:global(100),status:global(88)});
       return returned;
@@ -250,6 +257,7 @@ function runLinkedStatusCase(artifact,report,{operation,code,opcode,left,right,k
     fp.set(unhex(left),40);fp.set(unhex(right),50);initialFp=fp.slice();
     const initialSimd=bytes(engine.base+4364,160),initialYmm=bytes(engine.base+4612,144);
     cache=new CodeCache(engine,{budget:8,instructions:64,blocks:8,chain:true});
+    forceNativeInspection(cache,result);
     assert.equal(cache.linkedCore,true,'the fixture requires actual typed compiled linking');
     for(const pc of[0x1000,0x1040,0x1080,0x10c0]) {
       units.set(pc,cache.entry(pc));

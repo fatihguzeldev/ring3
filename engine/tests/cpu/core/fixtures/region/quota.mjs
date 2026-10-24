@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
 import {Engine,KEY,record,view} from '../../../../../../sdk/runtime/engine.js';
 import {CodeCache} from '../../../../../../sdk/runtime/cache.js';
+import {resolverExport,forceNativeInspection} from '../link.mjs';
 
 const unhex=text=>Uint8Array.from(Buffer.from(text.replaceAll(' ',''),'hex'));
 const hash=bytes=>createHash('sha256').update(bytes).digest('hex');
@@ -26,7 +27,8 @@ export function runLinkedQuotaCase(artifact,report) {
   };
   const api=Object.freeze({...raw,
     core_numeric:(...args)=>{result.numericCalls++;return raw.core_numeric(...args);},
-    [typeof raw.core_chain_select==='function'?'core_chain_select':'core_chain_probe']:(context,pc,selectionRetired)=>{
+    ...(typeof raw.core_numeric_owned==='function'?{core_numeric_owned:(...args)=>{result.numericCalls++;return raw.core_numeric_owned(...args);}}:{}),
+    [resolverExport(raw)]:(context,pc,selectionRetired)=>{
       assert.equal(context,cache.context);assert.equal(pc,0x1040);assert.equal(result.probes.length,0);
       assert.deepEqual([global(84),global(85),global(86),global(89),global(90)],
         [1,255,255,0,0],'all eight occupied dirty slots reach the target as actual linked state');
@@ -34,7 +36,7 @@ export function runLinkedQuotaCase(artifact,report) {
       assert.deepEqual([global(13),global(12)],[9,1],'only one instruction remains for the target');
       assert.deepEqual(bytes(word(context,92),100),initialBank,'the producer has not packed its private raw80 bank');
       assert.deepEqual(bytes(engine.base+4236,128),initialFp,'the public FP image remains unpublished at the link');
-      const returned=(raw.core_chain_select??raw.core_chain_probe)(context,pc,selectionRetired)>>>0;
+      const returned=raw[resolverExport(raw)](context,pc,selectionRetired)>>>0;
       assert.equal(returned,units.get(pc).slot,'the real native probe selects the retained loop unit');
       result.probes.push({pc,returned,retired:global(13),remaining:global(12),tag:global(89)});
       return returned;
@@ -60,6 +62,7 @@ export function runLinkedQuotaCase(artifact,report) {
     initialFp=bytes(engine.base+4236,128);
     const initialSimd=bytes(engine.base+4364,160),initialYmm=bytes(engine.base+4612,144);
     cache=new CodeCache(engine,{budget:10,instructions:64,blocks:8,chain:true});
+    forceNativeInspection(cache,result);
     assert.equal(cache.linkedCore,true,'the control exercises the actual compiled-link ABI');
     for(const pc of[0x1000,0x1040]){
       units.set(pc,cache.entry(pc));const encoded=bytes(raw.core_code_ptr()>>>0,raw.core_code_len()>>>0);

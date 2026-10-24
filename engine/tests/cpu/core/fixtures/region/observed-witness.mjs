@@ -22,8 +22,9 @@ export function instrumentObservedModule(source) {
   let defined=0;
   while(r.at<bytes.length){const id=r.byte(),raw=r.take(r.unsigned());if(id===6)defined=new Reader(raw).unsigned();}
   const imported=WebAssembly.Module.imports(new WebAssembly.Module(bytes)).filter(item=>item.kind==='global').length;
-  const names=[...counters.values()],base=imported+defined;
-  const globals=Uint8Array.from(names.flatMap(()=>[0x7f,1,0x41,0,0x0b]));
+  const names=[...counters.values(),'last_add_result'],base=imported+defined;
+  const globals=join([Uint8Array.from([...counters.values()].flatMap(()=>[0x7f,1,0x41,0,0x0b])),
+    Uint8Array.of(0x7c,1,0x44,0,0,0,0,0,0,0,0,0x0b)]);
   const input=new Reader(bytes);input.take(8);const output=[bytes.subarray(0,8)],proof={functions:[]};
   while(input.at<bytes.length){
     const id=input.byte(),raw=input.take(input.unsigned());let changed=raw;
@@ -42,6 +43,16 @@ export function instrumentObservedModule(source) {
           const increment=join([Uint8Array.of(0x23),u(index),Uint8Array.of(0x41,1,0x6a,0x24),u(index)]);
           body=join([body.subarray(0,at),increment,body.subarray(at)]);
           proof.functions.push({name,index:parsed.imports.length+i,counter});
+        }
+        if(name==='guest.run'){
+          // Keep the actual last arithmetic result on its original stack. This
+          // distinguishes a carried-value bug from a later stale projection.
+          const chunks=[];let from=0;
+          for(const op of parsed.functions[i].ops)if(op.op===0xa0){
+            chunks.push(body.subarray(from,op.offset+1),Uint8Array.of(0x24),u(base+2),
+              Uint8Array.of(0x23),u(base+2));from=op.offset+1;
+          }
+          chunks.push(body.subarray(from));body=join(chunks);
         }
         functions.push(u(body.length),body);
       }

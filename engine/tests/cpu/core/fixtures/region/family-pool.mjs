@@ -3,6 +3,7 @@ import {createHash} from 'node:crypto';
 import {coldFixture,coldLiteral} from '../../../../support/core_wasm/cold_observed.mjs';
 import {readGeneratedModule} from './structure.mjs';
 import {instrumentWitnessModule,readWitness,setWitnessBank,resetWitnessMasks,witnessCounters} from './witness.mjs';
+import {cacheCallbacks,cacheResolver,bindCacheContinuation} from '../link.mjs';
 
 const A=0x1000,B=0x1040,C=0x1080;
 const ODD='0008000000000080ff3f',UP='0010000000000080ff3f';
@@ -58,7 +59,7 @@ function instrument(world,units,probes) {
       counters:difference(after,previous)});
     for(const item of diagnostics)resetWitnessMasks(item);
     previous=sum(diagnostics);
-    return(world.raw.core_chain_select??world.raw.core_chain_probe)(context,pc,retired);
+    return cacheResolver(world.cache)(context,pc,retired);
   };
   const support=new WebAssembly.Instance(new WebAssembly.Module(shared.bytes),{ring3:{memory:world.memory,
     functions:world.cache.table,publishers:world.cache.publishers,probe,cold:world.api.core_chain_cold}}).exports;
@@ -68,12 +69,13 @@ function instrument(world,units,probes) {
     else if(name==='linkAbi'||name==='supportAbi')assert.equal(support[name].value,value.value,'instrumentation preserves immutable ABI values');
   }
   if(support['trace.arena'])support['trace.arena'].value=world.raw.core_trace_pointer()>>>0;
+  bindCacheContinuation(world.cache,support);
   world.cache.dispatch=support;diagnostics.push(support);
   for(const unit of units.values()) {
     const record=world.moduleRecords.get(unit.id);assert(record?.source);
     const measured=instrumentWitnessModule(record.source,readGeneratedModule(record.source));
     const generated=new WebAssembly.Instance(new WebAssembly.Module(measured.bytes),{ring3:{memory:world.memory,
-      read:world.api.core_read,write:world.api.core_write,numeric:world.api.core_numeric,precise:world.api.core_precise,
+      read:world.api.core_read,write:world.api.core_write,...cacheCallbacks(world.cache),
       ...support,'support.abi':support.supportAbi}}).exports;
     Object.assign(unit,{run:generated.run,link:generated.link,publish:generated.publish});
     world.cache.table.set(unit.slot,unit.link);world.cache.publishers.set(unit.slot,unit.publish);
@@ -135,7 +137,23 @@ function run(artifact,report,bridge,iterations) {
     units.get(C).ports=bridge==='cpuid'?[C,C+5,C+7,C+12]:bridge==='control'?[C,C+3]:[C,C+1];
 
     pointer(world,A);
+    const wantedRegisters=bridge==='cpuid'?[0x220,0,0,0x3000,0x4800,0,B,C]
+      :[0xa5a50220,registers[1],registers[2],0x3000,0x4800,0,B,C];
+    const wanted=image(initial,{control:bridge==='control'?0x37f:0x27f,status:0x20,tag:0xfff0,
+      opcode:0x5d1,fip:B+4,fdp:0x3004,cs:0x1b,ds:0x23,registers:{0:ODD,1:ODD,7:UP}});
+    // The final authored stack upload may invalidate validation certificates
+    // cached while training the separate families. Execute and verify one real
+    // complete traversal before claiming that a subsequent traversal is warm.
+    const learningInputs=[...registers.slice(0,5),1,B,C],learningBudget=(bridge==='cpuid'?14:12)-1;
+    world.reset({pc:A,registers:learningInputs,flags:2,fp:initial});
+    const learningBefore=world.snapshot(),learning=world.execute(learningBudget,A);
+    coldLiteral(world,learningBefore,learning,{pc:B+12,retired:learningBudget,budget:learningBudget,
+      registers:wantedRegisters,flags:0x46,fp:wanted,writes:[],versionWrites:0});
+    assert.equal(learning.id,units.get(B).id);assert.equal(learning.regions,3);
+    world.result.learningSemanticComplete=true;
     const inputs=[...registers.slice(0,5),iterations,B,C];
+    // Reset only public CPU/FP input; no source or guest-memory upload occurs
+    // between the verified learning traversal and this measured traversal.
     world.reset({pc:A,registers:inputs,flags:2,fp:initial});
     const probes=[],witness=instrument(world,units,probes),before=world.snapshot();
     const bank=world.word(world.context,92),initialBank=hex(world.bytes(bank,100));
@@ -143,10 +161,6 @@ function run(artifact,report,bridge,iterations) {
       cold:world.cache.coldRuns,recording:world.recording()};
     const helpers=world.helperCalls.length,budget=(bridge==='cpuid'?14:12)*iterations-1;
     const result=world.execute(budget,A),measured=witness.read();
-    const wantedRegisters=bridge==='cpuid'?[0x220,0,0,0x3000,0x4800,0,B,C]
-      :[0xa5a50220,registers[1],registers[2],0x3000,0x4800,0,B,C];
-    const wanted=image(initial,{control:bridge==='control'?0x37f:0x27f,status:0x20,tag:0xfff0,
-      opcode:0x5d1,fip:B+4,fdp:0x3004,cs:0x1b,ds:0x23,registers:{0:ODD,1:ODD,7:UP}});
     coldLiteral(world,before,result,{pc:B+12,retired:budget,budget,registers:wantedRegisters,
       flags:0x46,fp:wanted,writes:[],versionWrites:0});
     assert.equal(result.id,units.get(B).id);assert.equal(result.regions,3*iterations);
@@ -158,7 +172,9 @@ function run(artifact,report,bridge,iterations) {
     // Independent full-state semantics above precede every new mechanism assertion.
     assert.equal(world.cache.admissions,baseline.admissions);
     assert.equal(world.cache.generatedModuleBytes,baseline.bytes);assert.equal(world.cache.units.size,3);
-    assert.equal(world.cache.coldRuns,baseline.cold);assert.equal(probes.length,3*iterations-1);
+    assert.equal(world.cache.coldRuns,baseline.cold);
+    assert.equal(probes.length,world.cache.continuationCore?0:3*iterations-1,
+      'validated warm continuations resolve in generated code; only actual native misses create probes');
     assert.equal(measured.body_entries,3*iterations);
     assert.equal(measured.normalizer_calls,0);assert.equal(measured.wide_snapshot_calls,0);
     assert.equal(world.helperCalls.length-helpers,bridge==='ordinary'?0:iterations);

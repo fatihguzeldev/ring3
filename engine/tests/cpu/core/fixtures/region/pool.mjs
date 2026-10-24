@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
 import {Engine,KEY,record,view} from '../../../../../../sdk/runtime/engine.js';
 import {CodeCache as CurrentCodeCache} from '../../../../../../sdk/runtime/cache.js';
+import {cacheCallbacks,cacheResolver,resolverExport,forceNativeInspection} from '../link.mjs';
 import {readGeneratedModule} from './structure.mjs';
 import {instrumentWitnessModule,readWitness,setWitnessBank,resetWitnessMasks,witnessCounters} from './witness.mjs';
 
@@ -41,8 +42,9 @@ function runLinkedPoolCase(artifact,report,iterations) {
   const api={...raw,
     core_prepare:(...args)=>{prepares++;return raw.core_prepare(...args);},
     core_numeric:(...args)=>{helpers++;return raw.core_numeric(...args);},
+    ...(typeof raw.core_numeric_owned==='function'?{core_numeric_owned:(...args)=>{helpers++;return raw.core_numeric_owned(...args);}}:{}),
     core_chain_cold:()=>assert.fail('the three declared source-current owners are retained'),
-    [typeof raw.core_chain_select==='function'?'core_chain_select':'core_chain_probe']:(context,pc,selectionRetired)=>{
+    [resolverExport(raw)]:(context,pc,selectionRetired)=>{
       const index=result.probes.length,stage=index%3,cycle=Math.floor(index/3);
       assert.equal(context,cache.context);assert.equal(pc,[0x1080,0x1040,0x1000][stage]);
       assert(index<3*iterations-1,'the declared chain has a bounded exact number of links');
@@ -56,7 +58,7 @@ function runLinkedPoolCase(artifact,report,iterations) {
       result.probes.push({pc,source:['A','scalar-C','B'][stage],cycle,retired,counters:observed,canonicalBankHex});
       for(const item of diagnostics)resetWitnessMasks(item);
       previousCounters=sum(diagnostics);
-      const slot=(raw.core_chain_select??raw.core_chain_probe)(context,pc,selectionRetired)>>>0;
+      const slot=raw[resolverExport(raw)](context,pc,selectionRetired)>>>0;
       assert.equal(slot,units.get(pc).slot,'the real native probe selects the declared owner');return slot;
     },
   };
@@ -95,11 +97,12 @@ function runLinkedPoolCase(artifact,report,iterations) {
     const dispatchSource=bytes(raw.core_dispatch_code_ptr()>>>0,raw.core_dispatch_code_len()>>>0);
     const dispatchDiagnostic=instrumentWitnessModule(dispatchSource,readGeneratedModule(dispatchSource),true);
     const support=new WebAssembly.Instance(new WebAssembly.Module(dispatchDiagnostic.bytes),{ring3:{memory,
-      functions:cache.table,publishers:cache.publishers,probe:api.core_chain_select??api.core_chain_probe,cold:api.core_chain_cold}}).exports;
-    cache.dispatch=support;diagnostics.push(support);result.supportProof=dispatchDiagnostic.proof;
+      functions:cache.table,publishers:cache.publishers,probe:cacheResolver(cache),cold:api.core_chain_cold}}).exports;
+    cache.dispatch=support;forceNativeInspection(cache,result);
+    diagnostics.push(support);result.supportProof=dispatchDiagnostic.proof;
     for(const module of result.modules){
       const diagnostic=instrumentWitnessModule(module.source,readGeneratedModule(module.source));
-      const bindings={memory,read:api.core_read,write:api.core_write,numeric:api.core_numeric,precise:api.core_precise,
+      const bindings={memory,read:api.core_read,write:api.core_write,...cacheCallbacks(cache),
         ...support,'support.abi':support.supportAbi};
       const generated=new WebAssembly.Instance(new WebAssembly.Module(diagnostic.bytes),{ring3:bindings}).exports;
       const unit=units.get(module.pc);Object.assign(unit,{run:generated.run,link:generated.link,publish:generated.publish});

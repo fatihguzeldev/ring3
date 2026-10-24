@@ -5,6 +5,7 @@ import {CodeCache as CurrentCodeCache} from '../../../../../../sdk/runtime/cache
 import {readGeneratedModule} from './structure.mjs';
 import {instrumentWitnessModule,readWitness,setWitnessBank,witnessCounters} from './witness.mjs';
 import {instrumentObservedModule,readObservedWitness} from './observed-witness.mjs';
+import {cacheCallbacks,cacheResolver,bindCacheContinuation} from '../link.mjs';
 
 const FP=4236,SIMD=4364,YMM=4612,ROOT=0x1000,CALLEE=0x1100;
 const THREE='00000000000000c00040',TWO='00000000000000800040';
@@ -57,21 +58,31 @@ function fixture(artifact,report,name,options,body) {
   const setWord=(pointer,offset,value)=>new DataView(memory.buffer).setUint32(pointer+offset,value,true);
   let cache,engine,opened=false;
   const diagnostics=[],owners=[],units=new Map();let prepares=0,probes=0,helpers=0,preciseCalls=0;
+  const numeric=(operation,context,pc,ordinal,args)=>{
+    helpers++;const call={operation,context,ordinal,pc,contextPc:word(context,32),identity:String(bigint(context,120))};
+    result.numericCalls.push(call);call.returned=raw[operation](...args);
+    const bank=word(context,92);call.fip=word(bank,8);
+    call.opcode=new DataView(memory.buffer).getUint16(bank+6,true);return call.returned;
+  };
   const api={...raw,
     core_prepare:(...args)=>{prepares++;return raw.core_prepare(...args);},
-    core_numeric:(context,ordinal)=>{
-      helpers++;const call={context,ordinal,pc:word(context,32),identity:String(bigint(context,120))};
-      result.numericCalls.push(call);call.returned=raw.core_numeric(context,ordinal);
-      const bank=word(context,92);call.fip=word(bank,8);
-      call.opcode=new DataView(memory.buffer).getUint16(bank+6,true);return call.returned;
-    },
+    core_numeric:(context,ordinal)=>numeric('core_numeric',context,word(context,32),ordinal,[context,ordinal]),
+    ...(typeof raw.core_numeric_owned==='function'?{core_numeric_owned:(context,slot,generation,pc,ordinal)=>
+      numeric('core_numeric_owned',context,pc,ordinal,[context,slot,generation,pc,ordinal])}:{}),
     ...(typeof raw.core_precise==='function'?{core_precise:(context)=>{
       preciseCalls++;return raw.core_precise(context);
+    }}:{}),
+    ...(typeof raw.core_precise_owned==='function'?{core_precise_owned:(...args)=>{
+      preciseCalls++;return raw.core_precise_owned(...args);
     }}:{}),
     core_chain_probe:(...args)=>{probes++;const returned=raw.core_chain_probe(...args);
       result.selections.push({operation:'probe',args,returned});return returned;},
     ...(typeof raw.core_chain_select==='function'?{core_chain_select:(...args)=>{
       probes++;const returned=raw.core_chain_select(...args);result.selections.push({operation:'select',args,returned});return returned;
+    }}:{}),
+    ...(typeof raw.core_chain_resolve_owned==='function'?{core_chain_resolve_owned:(...args)=>{
+      probes++;const returned=raw.core_chain_resolve_owned(...args);
+      result.selections.push({operation:'resolve-owned',args,returned});return returned;
     }}:{}),
   };
   const status=(operation,wanted,...args)=>{const actual=raw[operation](...args)>>>0;
@@ -120,10 +131,11 @@ function fixture(artifact,report,name,options,body) {
         const parsed=readGeneratedModule(dispatchSource),diagnostic=instrumentWitnessModule(dispatchSource,parsed,true);
         const probeImport=parsed.imports.find(item=>item.name==='probe');assert(probeImport,'real dispatcher probe import');
         const probeType=parsed.types[probeImport.type];
-        const probe=probeType.parameters.length===3?api.core_chain_select:api.core_chain_probe;
+        const probe=probeType.parameters.length===3?cacheResolver(cache):api.core_chain_probe;
         assert.equal(typeof probe,'function','the exact dispatcher selection ABI has its native capability');
         const support=new WebAssembly.Instance(new WebAssembly.Module(diagnostic.bytes),{ring3:{memory,
           functions:cache.table,publishers:cache.publishers,probe,cold:raw.core_chain_cold}}).exports;
+        bindCacheContinuation(cache,support);
         if(support['trace.arena']){
           assert(support['trace.arena'] instanceof WebAssembly.Global);
           support['trace.arena'].value=raw.core_trace_pointer();
@@ -133,7 +145,7 @@ function fixture(artifact,report,name,options,body) {
       }
       for(const{unit,module}of units.values())if(!module.instrumentedSha256){
         const diagnostic=instrumentObservedModule(module.source);
-        const bindings={memory,read:api.core_read,write:api.core_write,numeric:api.core_numeric,precise:api.core_precise,
+        const bindings={memory,read:api.core_read,write:api.core_write,...cacheCallbacks(cache),
           ...cache.dispatch,'support.abi':cache.dispatch.supportAbi};
         const generated=new WebAssembly.Instance(new WebAssembly.Module(diagnostic.bytes),{ring3:bindings}).exports;
         Object.assign(unit,{run:generated.run,link:generated.link,publish:generated.publish});
@@ -197,7 +209,15 @@ function literal(world,before,run,{pc,retired,budget,registers,flags=2,writes=0,
     f.setUint32(24,fpPc,true);f.setUint16(32,0x1b,true);}
   if(fpData!==undefined)f.setUint32(28,fpData,true);
   if(fpDs!==undefined)f.setUint16(34,fpDs,true);
-  assert.deepEqual(bytes(engine.base+FP,128),wantedFp,'all physical payloads, empty ghosts, independent tags and x87 metadata');
+  const actualFp=bytes(engine.base+FP,128);
+  if(!Buffer.from(actualFp).equals(Buffer.from(wantedFp))){
+    result.actualFpHex=Buffer.from(actualFp).toString('hex');
+    result.actualLastAdd=world.diagnostics.map(item=>item['test.observed_last_add_result']?.value).filter(value=>value!==undefined);
+    result.fpFailureWitness={counters:difference(world.counters(),before.counters),
+      routing:Object.fromEntries(Object.entries(world.routing()).map(([name,value])=>[name,value-before.routing[name]])),
+      probes:world.probes-before.probes,preciseCalls:world.preciseCalls-before.preciseCalls};
+  }
+  assert.deepEqual(actualFp,wantedFp,'all physical payloads, empty ghosts, independent tags and x87 metadata');
   assert.deepEqual(bytes(engine.base+SIMD,160),before.simd);assert.deepEqual(bytes(engine.base+YMM,144),before.ymm);
   const wantedRam=before.ram.slice(),wantedPages=before.pages.slice();
   for(const[address,value]of Object.entries({...stackWrites,...(stackReturn===undefined?{}:{[0x47fc]:stackReturn})})){
@@ -348,6 +368,7 @@ export function runObservedCanonicalCases(artifact,report) {
       stackReturn:0x1005,fpValue:FULL80,fpPc:CALLEE,fpOpcode:0x443,fpData:0x3008,fpDs:0x23,helpers:2});
     for(const call of world.result.numericCalls.slice(-2)){
       assert.equal(call.identity,String(selected.id),'planned canonical callbacks use the observed executor capability');
+      assert.equal(call.pc,CALLEE,'the canonical callback carries the actual callee instruction PC');
       assert.equal(call.ordinal,0);assert.equal(call.opcode,0x443);assert.equal(call.returned,0);
     }
     world.result.semanticComplete=true;assert.equal(completed.counters.body_entries,1);assert.equal(completed.probes,0);
@@ -359,6 +380,7 @@ export function runObservedCanonicalCases(artifact,report) {
     const baseline=world.result.numericCalls.filter(call=>call.identity===String(world.callee.id));
     assert.equal(baseline.length,3);for(const call of baseline){
       assert.equal(call.ordinal,0,'the independently compiled callee really uses native ordinal zero');
+      assert.equal(call.pc,CALLEE,'the original callee callback names its real source instruction');
       assert.equal(call.identity,String(world.callee.id));assert.equal(call.opcode,0x443);assert.equal(call.returned,0);
     }
     world.reset(2);const selected=world.select(ROOT);world.install();
@@ -377,6 +399,8 @@ export function runObservedCanonicalCases(artifact,report) {
       'control loads preserve historical FIP while real computations publish their authored PCs');
     assert.deepEqual(callbacks.map(call=>call.ordinal),[0,1,2,0,1,2],
       'the same callee operation resolves through the overlay dictionary ordinal two');
+    assert.deepEqual(callbacks.map(call=>call.pc),[ROOT,ROOT+2,CALLEE,ROOT,ROOT+2,CALLEE],
+      'every overlay callback carries the exact control/arithmetic PC independently of its ordinal');
     for(const call of callbacks){assert.equal(call.identity,String(selected.id));assert.equal(call.returned,0);}
     world.result.semanticComplete=true;assert.equal(completed.counters.body_entries,1);assert.equal(completed.probes,0);
     assert.equal(completed.counters.canonical_calls,6,'one real callback per exact canonical operation remains');
