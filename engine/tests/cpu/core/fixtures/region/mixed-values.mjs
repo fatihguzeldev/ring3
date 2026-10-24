@@ -32,6 +32,23 @@ function retained(t,body) {
 }
 export function runMixedValueCases(fixture) {
   const mechanism=[];
+  for(const c of[
+    {name:'self-subtract',code:'2bc0 ffe6',retired:2,flags:0x446},
+    {name:'compare-then-replace-register',code:'83f801 b800000000 ffe6',retired:3,flags:0x412},
+  ])fixture(`mixed-values-${c.name}-pins-flags-input-before-register-publication`,{
+    segments:[[ROOT,c.code]],registers,initialFlags:FLAGS,initialFp,data,
+  },t=>retained(t,()=>{
+    const expected=t.bytes(t.context(),128),v=new DataView(expected.buffer);
+    for(const[offset,value]of[[0,0],[32,TARGET],[36,c.flags],[40,c.retired],[44,0],[112,0]])
+      v.setUint32(offset,value,true);
+    // SUB r,r has a constant result but its exact flag recipe still owns the
+    // old input. CMP followed by MOV similarly leaves only FLAGS using EAX.
+    const run=t.check({pc:TARGET,retired:c.retired,budget:c.retired,regs:{0:0},
+      flags:c.flags,fp:t.startingFp});
+    assert.deepEqual(t.bytes(t.context(),128),expected,'full Context128 retains the original flag operands');
+    assert.equal(run.activations.length,1);assert.equal(run.helperCalls,0);assert.equal(run.preciseCalls,0);
+    t.result.flagsRecovery={initialEax:registers[0],finalEax:0,flags:c.flags,retired:c.retired};
+  }));
   fixture('mixed-values-128-ordered-reads-preserve-one-live-affine-value',{
     segments:[[ROOT,code]],registers,initialFlags:FLAGS,initialFp,data,compileInstructions:512,
     stateWitness:true,witnessData:[0x3000,512],

@@ -155,8 +155,9 @@ impl Output<'_> {
         kernel_gpr: u8,
         kernel_flags: bool,
     ) {
-        // Evaluate every changed root before overwriting any physical local;
-        // parallel copies and exact branch-only recovery share this rule.
+        // Pin the complete requested dependency set before any physical GPR
+        // changes. A folded result can discard its input while FLAGS still
+        // needs it (SUB r,r, or CMP followed by MOV to the compared register).
         let physical = self.physical_gpr.unwrap_or(recovery.gpr);
         let changed: Vec<_> = (0..8)
             .filter(|&r| kernel_gpr & (1 << r) == 0 && physical[r] != recovery.gpr[r])
@@ -164,6 +165,12 @@ impl Output<'_> {
         for &register in &changed {
             self.demand(recovery.gpr[register]);
             self.c().drop();
+        }
+        if !kernel_flags {
+            for value in recovery.flags.roots() {
+                self.demand(value);
+                self.c().drop();
+            }
         }
         for register in changed {
             self.demand(recovery.gpr[register]);
