@@ -1,4 +1,5 @@
 mod access;
+pub(in crate::cpu::core) mod executable;
 mod flow;
 mod fp;
 mod gpr;
@@ -17,6 +18,7 @@ use scalar::ScalarPlan;
 
 /// One consumed semantic lowering plan, separate from the architectural exit map.
 pub(in crate::cpu::core) struct ExecutionPlan {
+    pub executable: executable::ExecutablePlan,
     pub scalar: ScalarPlan,
     pub fp: Guards,
 }
@@ -24,10 +26,17 @@ pub(in crate::cpu::core) struct ExecutionPlan {
 impl ExecutionPlan {
     pub fn analyze(region: &Region, values: &RegionPlan) -> Self {
         Self {
+            executable: executable::ExecutablePlan::analyze(region, values),
             scalar: ScalarPlan::analyze(region, values),
             fp: Guards::analyze(region, values),
         }
     }
+}
+
+pub(in crate::cpu::core) fn inline_numeric_candidate(
+    operation: crate::cpu::x86::ir::Operation,
+) -> bool {
+    !fp::canonical_numeric(operation)
 }
 
 macro_rules! id {
