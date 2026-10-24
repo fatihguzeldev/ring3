@@ -101,7 +101,7 @@ pub(in crate::cpu::core) fn define_globals(
             mutable: false,
             shared: false,
         },
-        &ConstExpr::i32_const(3),
+        &ConstExpr::i32_const(4),
     );
     exports.export("linkAbi", ExportKind::Global, base + GLOBAL_COUNT);
 }
@@ -209,20 +209,84 @@ pub(super) fn emit_boundary(
     function
 }
 
-pub(super) fn emit_entry(body: u32, linked: bool) -> Function {
-    let mut function = Function::new([]);
+pub(super) fn emit_entry(body: u32, linked: bool, numeric: bool) -> Function {
+    let mut function = Function::new([(1, ValType::I32)]);
     let mut code = function.instructions();
     code.i32_const(i32::from(linked)).global_set(MODE);
     if !linked {
         code.i32_const(0).global_set(VALID);
     }
-    code.local_get(0)
+    code.loop_(BlockType::Empty)
+        .local_get(0)
         .local_get(1)
         .call(body)
+        .local_tee(2)
+        .i32_const(crate::cpu::core::StopReason::ExactPrefix as i32)
+        .i32_eq()
+        .if_(BlockType::Empty);
+    // The generated body commits its actual completed prefix once. Linked
+    // state is canonicalized only for this uncommon precise ingress.
+    if linked {
+        code.local_get(0)
+            .call(super::support::owner_defined(7, numeric));
+    }
+    code.local_get(0)
+        .call(2 + u32::from(numeric))
+        .local_tee(2)
+        .i32_const(crate::cpu::core::StopReason::NeedCode as i32)
+        .i32_eq()
+        .local_get(0)
+        .i32_load(mem(32, 2))
+        .local_get(0)
+        .i32_load(mem(44, 2))
+        .call(super::support::owner_defined(8, numeric))
+        .i32_and()
+        .if_(BlockType::Empty)
+        .local_get(0)
+        .i32_load(mem(44, 2))
+        .local_set(1)
+        .br(2)
+        .end();
+    if linked {
+        code.local_get(2)
+            .i32_const(crate::cpu::core::StopReason::NeedCode as i32)
+            .i32_eq()
+            .if_(BlockType::Empty);
+        restore_canonical_globals(&mut code);
+        code.end();
+    }
+    code.end()
+        .local_get(2)
         .i32_const(0)
         .global_set(MODE)
+        .return_()
+        .end()
+        .unreachable()
         .end();
     function
+}
+
+fn restore_canonical_globals(code: &mut InstructionSink<'_>) {
+    for (offset, local) in
+        (0..8)
+            .map(|index| (index * 4, index + 2))
+            .chain([(32, 10), (36, 11), (40, 13), (44, 12)])
+    {
+        code.local_get(0)
+            .i32_load(mem(u64::from(offset), 2))
+            .global_set(global(local));
+    }
+    for local in [20, 21, 22, 23, 24, 25] {
+        code.i32_const(0).global_set(global(local));
+    }
+    code.local_get(0)
+        .i32_load(mem(crate::cpu::core::memory::TRANSACTION_VERSION, 2))
+        .i64_load(mem(0, 3))
+        .global_set(global(99))
+        .local_get(0)
+        .global_set(CONTEXT)
+        .i32_const(1)
+        .global_set(VALID);
 }
 
 pub(super) fn emit_publisher(

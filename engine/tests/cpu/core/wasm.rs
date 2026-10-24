@@ -97,7 +97,9 @@ fn generated_x87_helpers_transfer_only_their_integer_inputs_and_outputs() {
     let mut manifest = String::new();
     for (name, operation) in [
         ("register", "d9e8"),
-        ("indexed", "d9448b08"),
+        // A planned canonical load exercises the bridge independently of fast
+        // admission failures, which now belong to the exact-prefix executor.
+        ("indexed", "db6c8b08"),
         ("status", "dfe0"),
         ("move-below", "dac1"),
         ("move-below-equal", "dad1"),
@@ -113,7 +115,11 @@ fn generated_x87_helpers_transfer_only_their_integer_inputs_and_outputs() {
         assert_eq!(code.native_instructions().len(), 1);
         assert_eq!(code.native_instructions()[0].pc, 0x102b);
         fs::write(scratch.0.join(format!("{name}.wasm")), code.wasm()).unwrap();
-        manifest.push_str(&format!("{name}\t{hex}\t{}\n", code.identity()));
+        manifest.push_str(&format!(
+            "{name}\t{hex}\t{}\t{}\n",
+            code.identity(),
+            code.instruction_count()
+        ));
     }
     fs::write(scratch.0.join("numeric-transfer.tsv"), manifest).unwrap();
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
@@ -161,7 +167,11 @@ fn generated_zero_flag_branches_preserve_state_without_materializing_the_conditi
         assert!(code.is_current(&memory));
         assert!(code.native_instructions().is_empty());
         fs::write(scratch.0.join(format!("{name}.wasm")), code.wasm()).unwrap();
-        manifest.push_str(&format!("{name}\t{hex}\t{}\n", code.identity()));
+        manifest.push_str(&format!(
+            "{name}\t{hex}\t{}\t{}\n",
+            code.identity(),
+            code.instruction_count()
+        ));
     }
     fs::write(scratch.0.join("conditions.tsv"), manifest).unwrap();
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
@@ -390,7 +400,11 @@ fn generated_wasm_runs_authored_integer_control_memory_programs() {
         }
         assert!(code.is_current(&memory), "fresh source: {name}");
         fs::write(scratch.0.join(format!("{name}.wasm")), code.wasm()).unwrap();
-        manifest.push_str(&format!("{name}\t{hex}\t{}\n", code.identity()));
+        manifest.push_str(&format!(
+            "{name}\t{hex}\t{}\t{}\n",
+            code.identity(),
+            code.instruction_count()
+        ));
     }
     fs::write(scratch.0.join("programs.tsv"), manifest).unwrap();
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();

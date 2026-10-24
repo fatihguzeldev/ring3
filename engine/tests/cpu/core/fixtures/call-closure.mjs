@@ -5,6 +5,7 @@ import {readFileSync,writeFileSync} from 'node:fs';
 import {join} from 'node:path';
 import {performance} from 'node:perf_hooks';
 import {makeKernel} from './kernels.mjs';
+import {runActualPrefix} from './actual-prefix.mjs';
 
 const directory=process.argv[2], timing=process.argv.includes('--timing');
 const CTX=0x100,MAP=0x10000,PERM=0x410000,EXEC=0x510000;
@@ -131,6 +132,19 @@ function validate(initial,closed,budget,wanted,stop,regionCount) {
 function check(label,budget,options,wanted) {
   for(const closed of [false,true]) {
     stage=`${label}/${closed}`;
+    if(label.startsWith('budget-')) {
+      const writes=[];
+      for(let call=1;call<=(wanted.calls??0);call++) {
+        writes.push([0x47fc,4,0x1005]);
+        if(call<=(wanted.data??0))writes.push([0x300c,4,call]);
+      }
+      runActualPrefix({code:readFileSync(join(directory,'plain.bin')),entry:0x1000,instructions:64,blocks:8},
+        'call-closure',`${label}/${closed?'closed-source':'split-source'}`,budget,
+        {regs:[5,options.n??3,7,0x3000,0x4800,0,0,0],flags:2,stackReturn:0,continueNeedCode:true},
+        {reason:wanted.stop,pc:wanted.pc,retired:wanted.retired,regs:wanted.regs,flags:wanted.flags,writes},
+        {onRow:row=>{row.comparisonArm=closed?'closed-source precise semantics':'split-source precise semantics';cases.push(row);checkpoint();}});
+      continue;
+    }
     const initial=seed(closed,options),stop=driver.run(CTX,budget,closed?3:1)>>>0;
     const row={label,closed,budget,stop,regions:driver.regions.value,contextHex:hex(bytes.subarray(CTX,CTX+128)),
       ramHex:hex(bytes.subarray(BACKING,BACKING+3*4096)),reads,writes};
@@ -147,6 +161,8 @@ try {
     [21,0x1008,14,0,10,0x4800,0x46,3,7,'caller'],
   ])check(`budget-${budget}`,budget,{}, {stop:2,pc,retired:budget,regs:regs(eax,ecx,edx,esp),flags,data,
     calls:Math.floor((budget+6)/7),regions,last});
+  check('full-span-closed-versus-split',22,{}, {stop:4,pc:0x1008,retired:21,
+    regs:regs(14,0,10),flags:0x46,data:3,calls:3,regions:7,last:'caller'});
   check('call-stack-fault',21,{unmapStack:true},{stop:3,pc:0x1000,retired:0,regs:regs(5,3,7),flags:2,
     regions:1,last:'caller',fault:[0x47fc,0x10204],writes:1});
   check('callee-rmw-fault',21,{dataPermission:1},{stop:3,pc:0x1045,retired:3,regs:regs(8,3,15,0x47fc),flags:6,
@@ -161,16 +177,16 @@ try {
     const n=Number(process.env.RING3_CORE_CALL_ITERATIONS??131072),kernel=makeKernel('call',n);
     report.timing={iterations:n,work:kernel.retired,warmupsPerArm:2,rounds:8,
       scope:'one driver call; authored Wasm resolver, no Rust lookup/lease; no slow host helper calls'};
-    const wanted={stop:2,pc:kernel.pc,retired:kernel.retired,regs:kernel.regs,flags:kernel.flags,data:n,calls:n,
+    const wanted={stop:4,pc:kernel.pc,retired:kernel.retired,regs:kernel.regs,flags:kernel.flags,data:n,calls:n,
       regions:2*n+1,last:'caller'};
     function timed(closed,phase,round,position) {
       stage=`${phase}/${round}/${position}/${closed}`;
-      const initial=seed(closed,{n}),before=performance.now(),stop=driver.run(CTX,kernel.retired,closed?3:1)>>>0;
+      const initial=seed(closed,{n}),before=performance.now(),stop=driver.run(CTX,kernel.retired+1,closed?3:1)>>>0;
       const elapsedMs=performance.now()-before;
       const row={closed,phase,round,position,elapsedMs,stop,regions:driver.regions.value,
         contextHex:hex(bytes.subarray(CTX,CTX+128)),ramSha256:hash(bytes.subarray(BACKING,BACKING+3*4096)),reads,writes};
       runs.push(row);report.lastRamHex=hex(bytes.subarray(BACKING,BACKING+3*4096));checkpoint();
-      validate(initial,closed,kernel.retired,wanted,stop,row.regions);row.complete=true;delete report.lastRamHex;
+      validate(initial,closed,kernel.retired+1,wanted,stop,row.regions);row.complete=true;delete report.lastRamHex;
     }
     for(let warm=0;warm<2;warm++)for(const closed of [false,true])timed(closed,'warmup',warm,Number(closed));
     for(let round=0;round<8;round++)(round%2?[true,false,false,true]:[false,true,true,false])

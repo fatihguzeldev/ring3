@@ -46,10 +46,13 @@ export function assertCoreNames(module, ownerEntry, identity) {
   assert.match(moduleName.slice(prefix.length), /^[1-9][0-9]*$/, 'profiler module identifies its compilation');
   if (identity !== undefined) assert.equal(moduleName, prefix + identity);
   const numeric = WebAssembly.Module.imports(module).some(item => item.name === 'numeric');
+  const precise = WebAssembly.Module.imports(module).some(item => item.name === 'precise');
   const names = ['guest.read_slow', 'guest.write_slow', ...(numeric ? ['guest.numeric'] : []),
+    ...(precise ? ['guest.precise'] : []),
     ...supportNames,'guest.run', 'guest.lookup', 'guest.publish', 'guest.commit_frame_cold','guest.select_frame'];
   const wrappers = ['guest.entry', 'guest.link', 'guest.publish_link'];
   names.push(...wrappers);
+  if(precise)names.push('guest.hot_entry');
   assert.deepEqual(functions, names.map((name, index) => [index, name]), 'names use actual function indices');
 }
 

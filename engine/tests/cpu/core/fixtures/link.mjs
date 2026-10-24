@@ -13,6 +13,7 @@ const poolSupportNames=[...supportNames.slice(0,8),'support.commit_pool'];
 const legacySupportNames=[...supportNames.slice(0,8),'support.normalize_kernel'];
 const supportForAbi=abi=>abi===1?legacySupportNames:abi===2?poolSupportNames:abi<5?previousSupportNames:supportNames;
 const supportSources=new WeakMap(),supportInstances=new WeakMap();
+const preciseCallbacks=new WeakMap();
 let standaloneSupport;
 
 export function coreImports(module) {
@@ -24,7 +25,10 @@ export function coreImports(module) {
     {module:'ring3',name:'support.abi',kind:'global'}], 'the complete versioned per-CPU support ABI is imported directly');
   const recorder=imports.filter(item=>item.name==='trace.arena');
   if(recorder.length)assert.deepEqual(recorder,[{module:'ring3',name:'trace.arena',kind:'global'}]);
-  return imports.filter(item=>!item.name.startsWith('link.')&&!item.name.startsWith('support.')&&item.name!=='trace.arena');
+  const precise=imports.filter(item=>item.name==='precise');
+  if(precise.length)assert.deepEqual(precise,[{module:'ring3',name:'precise',kind:'function'}],
+    'exact-prefix ingress has one explicit CPU callback');
+  return imports.filter(item=>!item.name.startsWith('link.')&&!item.name.startsWith('support.')&&item.name!=='trace.arena'&&item.name!=='precise');
 }
 
 export function coreSupportSource(memory) {
@@ -78,6 +82,7 @@ export function instantiateCore(module,imports) {
     !WebAssembly.Module.imports(module).filter(item=>item.name.startsWith('support.')&&item.kind==='function').every(item=>typeof supplied[item.name]==='function')?bindings(supplied.memory):{};
   const instance=new WebAssembly.Instance(module,{...imports,
     ring3:{...shared,...linkGlobals(module,supplied),...supplied,
+      precise:supplied.precise??preciseCallbacks.get(supplied.memory)??(()=>assert.fail('exact-prefix execution requires the actual CPU adapter')),
       'support.abi':supplied['support.abi']??supplied.supportAbi??shared['support.abi']}});
   const memory=instance.exports.memory,ptr=instance.exports.ring3_abi_v1_core_dispatch_code_ptr,
     len=instance.exports.ring3_abi_v1_core_dispatch_code_len;
@@ -85,5 +90,7 @@ export function instantiateCore(module,imports) {
     supportSources.set(memory,()=>{const at=ptr()>>>0,length=len()>>>0;
       assert(at>0&&length>=8&&at+length<=memory.buffer.byteLength,'valid production support descriptor');
       return new Uint8Array(memory.buffer).slice(at,at+length);});
+  if(memory instanceof WebAssembly.Memory&&typeof instance.exports.ring3_abi_v1_core_precise==='function')
+    preciseCallbacks.set(memory,instance.exports.ring3_abi_v1_core_precise);
   return instance;
 }

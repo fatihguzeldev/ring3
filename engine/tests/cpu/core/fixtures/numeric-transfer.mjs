@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
 import {readFileSync,writeFileSync} from 'node:fs';
 import {join} from 'node:path';
+import {runActualPrefix} from './actual-prefix.mjs';
 
 const directory=process.argv[2],CTX=256,BUDGET=32,NATIVE_PC=0x102b;
 const memory=new WebAssembly.Memory({initial:2}),bytes=new Uint8Array(memory.buffer),view=new DataView(memory.buffer);
@@ -22,18 +23,28 @@ function numeric(context,ordinal) {
   return 0;
 }
 for(const line of readFileSync(join(directory,'numeric-transfer.tsv'),'utf8').trim().split('\n')) {
-  const [name,hex,id]=line.split('\t'),source=readFileSync(join(directory,`${name}.wasm`));
+  const [name,hex,id,instructions]=line.split('\t'),source=readFileSync(join(directory,`${name}.wasm`));
   const module=new WebAssembly.Module(source);
   assert.deepEqual(coreImports(module),[
     {module:'ring3',name:'memory',kind:'memory'},{module:'ring3',name:'read',kind:'function'},
     {module:'ring3',name:'write',kind:'function'},{module:'ring3',name:'numeric',kind:'function'},
   ]);
   const unexpected=()=>assert.fail('scalar memory import is outside this transfer fixture');
-  programs.set(name,{run:instantiateCore(module,{ring3:{memory,read:unexpected,write:unexpected,numeric}}).exports.run,
-    id:BigInt(id),code:Buffer.from(hex,'hex'),sourceSha256:hash(source)});
+  programs.set(name,{run:instantiateCore(module,{ring3:{memory,read:unexpected,write:unexpected,numeric,
+    precise:()=>assert.fail('this full-span bridge control must not enter a foreign precise CPU')}}).exports.run,
+    id:BigInt(id),code:Buffer.from(hex,'hex'),instructions:Number(instructions),sourceSha256:hash(source)});
 }
 
 function check(name,inputs,flags,outputs={},mode='success') {
+  if(name==='status') {
+    const program=programs.get(name),regs=[...dirty];regs[0]=0x1234;regs[7]=0x77777778;
+    runActualPrefix(program,name,'status/nonwaiting-actual-observer',BUDGET,
+      {regs:initial,flags:0x402,retired:37,fpStatus:0x1234},
+      {reason:4,pc:0x1000+program.code.length-2,retired:11,regs,flags:0x406},
+      {onRow:row=>{row.scope='actual nonwaiting x87 status observer; no canonical bridge is claimed';records.push(row);
+        writeFileSync(report,JSON.stringify({complete:false,records}));},after:({row})=>assert.equal(row.numericCalls,0)});
+    return;
+  }
   const program=programs.get(name);bytes.fill(0);bytes.set(program.code,0x1000);
   initial.forEach((value,index)=>put(CTX+index*4,value));put(CTX+32,0x1000);put(CTX+36,0x402);
   put(CTX+40,37);put(CTX+44,0xcafebabe);put(CTX+48,0xaaaaaaaa);put(CTX+52,0xbbbbbbbb);

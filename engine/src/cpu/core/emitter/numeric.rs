@@ -136,17 +136,18 @@ pub(super) fn emit(out: &mut Output<'_>, next: u32) {
         .unwrap()
         .operation;
     if direct::state(out, operation) {
-        service::request(out, next, true);
+        out.exit(super::StopReason::ExactPrefix, Some(out.pc), out.prefix);
         out.c().end();
         return;
     }
-    out.c().local_get(frame::EXACT_SUFFIX).if_(BlockType::Empty);
-    service::request(out, next, false);
-    out.c().else_();
     let direct = direct::begin(out, operation, next) || simd::begin(out, operation, next);
-    service::request(out, next, true);
     if direct {
+        // A failed speculative fast admission has not executed this instruction.
+        // Reconstruct the completed prefix and let the exact executor own it.
+        out.exit(super::StopReason::ExactPrefix, Some(out.pc), out.prefix);
         out.c().end();
+    } else {
+        // Planned canonical effects retain the selected module's own ordinal.
+        service::request(out, next, true);
     }
-    out.c().end();
 }

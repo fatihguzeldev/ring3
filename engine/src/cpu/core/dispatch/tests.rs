@@ -67,7 +67,13 @@ fn generated_dispatch_chains_unchanged_regions_with_one_shared_work_budget() {
             compile(&memory, GuestAddress(entry), options).unwrap()
         };
         fs::write(directory.join(format!("{name}.wasm")), code.wasm()).unwrap();
-        writeln!(&mut manifest, "{name}\t{entry}\t{}", code.identity()).unwrap();
+        writeln!(
+            &mut manifest,
+            "{name}\t{entry}\t{}\t{}",
+            code.identity(),
+            code.instruction_count()
+        )
+        .unwrap();
     }
     fs::write(directory.join("regions.tsv"), manifest).unwrap();
     let result = Command::new("node")

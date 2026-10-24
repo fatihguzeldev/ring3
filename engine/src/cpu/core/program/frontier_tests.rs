@@ -196,7 +196,18 @@ fn generated_frontier_modules_preserve_exact_prefixes_and_faults() {
         let code =
             compile_with_frontier(&memory, GuestAddress(entry), options(), &[], &frontier).unwrap();
         fs::write(directory.join(format!("{name}.wasm")), code.wasm()).unwrap();
-        writeln!(&mut manifest, "{name}\t{entry}\t{}", code.identity()).unwrap();
+        let boundaries = frontier
+            .iter()
+            .map(|pc| pc.0.to_string())
+            .collect::<Vec<_>>()
+            .join(",");
+        writeln!(
+            &mut manifest,
+            "{name}\t{entry}\t{}\t{}\t{boundaries}",
+            code.identity(),
+            code.instruction_count()
+        )
+        .unwrap();
     }
     fs::write(directory.join("regions.tsv"), manifest).unwrap();
     let result = Command::new("node")

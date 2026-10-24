@@ -1,4 +1,4 @@
-use super::{CTX, ENTRY_OFFSET, Output, RETIRED, exits, link, mem};
+use super::{CTX, Output, RETIRED, exits, link, mem};
 use crate::cpu::core::{StopReason, trace};
 use wasm_encoder::{BlockType, Function, InstructionSink, ValType};
 
@@ -15,7 +15,7 @@ pub(super) fn parameters() -> [ValType; 6] {
 
 // Every compiled owner records only while a bounded capture is active. The
 // actual owner identity and port preserve source authority across nested traces.
-pub(super) fn record_block(out: &mut Output<'_>, entry: u32, end: u32) {
+pub(super) fn record_block(out: &mut Output<'_>, entry: u32, end: u32, offset: u32) {
     let recorder = out.internal(15);
     out.c()
         .global_get(link::TRACE_ARENA)
@@ -28,7 +28,7 @@ pub(super) fn record_block(out: &mut Output<'_>, entry: u32, end: u32) {
         .i64_load(mem(120, 3))
         .i32_const(entry as i32)
         .i32_const(end as i32)
-        .local_get(ENTRY_OFFSET)
+        .i32_const(offset as i32)
         .i32_const(trace::BLOCK as i32)
         .call(recorder)
         .end()

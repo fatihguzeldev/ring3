@@ -5,6 +5,7 @@ import {readFileSync, writeFileSync} from 'node:fs';
 import {join} from 'node:path';
 import {makeKernel} from './kernels.mjs';
 import {assertCoreNames, assertDispatchNames} from './names.mjs';
+import {runActualPrefix} from './actual-prefix.mjs';
 
 const directory = process.argv[2], PAGE = 4096, CTX = 0x100;
 const MAP = 0x10000, PERM = 0x410000, EXEC = 0x510000, VERSION = 0x510100;
@@ -58,7 +59,7 @@ function write(context, address, width, value) {
   return invalidated ? 2 : 0;
 }
 for (const [index, line] of readFileSync(join(directory, 'regions.tsv'), 'utf8').trim().split('\n').entries()) {
-  const [name, entry, id] = line.split('\t'), encoded = readFileSync(join(directory, `${name}.wasm`));
+  const [name, entry, id, instructions] = line.split('\t'), encoded = readFileSync(join(directory, `${name}.wasm`));
   assert(WebAssembly.validate(encoded), `${name}: original region validates`);
   const module = new WebAssembly.Module(encoded);
   assertCoreNames(module, Number(entry), id);
@@ -66,7 +67,8 @@ for (const [index, line] of readFileSync(join(directory, 'regions.tsv'), 'utf8')
     {module: 'ring3', name: 'memory', kind: 'memory'}, {module: 'ring3', name: 'read', kind: 'function'},
     {module: 'ring3', name: 'write', kind: 'function'},
   ]);
-  regions.set(name, {name, entry: Number(entry), id: BigInt(id), slot: index + 1, module, sha256: hash(encoded)});
+  regions.set(name, {name, entry: Number(entry), id: BigInt(id), instructions:Number(instructions),
+    slot: index + 1, module, sha256: hash(encoded)});
 }
 const byPc = new Map([[0x1000,'caller'],[0x1005,'caller'],[0x1008,'caller'],[0x1040,'callee'],[0x1140,'after-repeat']]);
 function probe(context,pc) {
@@ -99,6 +101,24 @@ assert.equal(dispatch.run.length, 3); assert.equal(dispatch.regions.value, 0);
 
 const initialRegs = [5,3,7,0x3000,0x4800,0,0,0];
 function check(label, name, budget, options, expected) {
+  if(label.startsWith('shared-budget-cut-')||name==='repeat') {
+    const first=regions.get(name),writes=[];
+    for(const[address,width,value]of expected.writes??[]) {
+      if(name==='repeat')for(let index=0;index<width;index++)writes.push([address+index,1,value>>>(8*index)&255]);
+      else writes.push([address,width,value]);
+    }
+    runActualPrefix({...first,code:image,blocks:8},name,label,budget,
+      {regs:options.regs??initialRegs,flags:options.flags??2,retired:options.retired??0,
+        initial:options.initial??[],missing:[0x5000],continueNeedCode:expected.stop!==1},
+      {reason:expected.stop,pc:expected.pc,retired:expected.retired-(options.retired??0),work:expected.work??expected.retired,
+        regs:expected.regs??options.regs??initialRegs,flags:expected.flags??options.flags??2,writes,
+        ...(expected.fault?{fault:expected.fault}:{})},
+      {onRow:row=>{records.push(row);checkpoint();},after:({row})=>{
+        assert.equal(row.activations.length,expected.regions,`${label}: actual owner boundary count`);
+        assert.equal(row.activations.length-1,expected.next??0,`${label}: genuine NeedCode owner continuations`);
+      }});
+    checkpoint();return;
+  }
   active = {options, next: [], reads: 0, writes: 0};
   bytes.fill(0, CTX, CTX + 128); bytes.fill(0, BACKING, BACKING + 16 * PAGE);
   bytes.fill(0, EXEC, EXEC + 64); bytes.fill(0, VERSION, VERSION + 8);

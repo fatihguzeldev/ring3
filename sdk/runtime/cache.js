@@ -61,6 +61,7 @@ export class CodeCache {
       return [name, this.api[name]];
     }));
     if (typeof this.api.core_cold_run === 'function') this.native.core_cold_run = this.api.core_cold_run;
+    if (typeof this.api.core_precise === 'function') this.native.core_precise = this.api.core_precise;
     if (typeof this.api.core_lookup === 'function') this.native.core_lookup = this.api.core_lookup;
     if (typeof this.api.core_cold_status_ptr === 'function') this.native.core_cold_status_ptr = this.api.core_cold_status_ptr;
     for (const name of ['core_trace_ready','core_trace_root','core_trace_finish'])
@@ -83,6 +84,8 @@ export class CodeCache {
     this.transient = null;
     this.transientAdmissions = 0; this.transientRuns = 0; this.transientModuleBytes = 0;
     this.chainedColdRuns = 0; this.chainedColdWork = 0; this.chainedColdRetired = 0;
+    this.preciseRuns = 0; this.preciseWork = 0; this.preciseRetired = 0;
+    this.preciseBinding = this.native.core_precise ? context => this.invokePrecise(context) : null;
     this.evictionReasons = {count:0,bytes:0};
     this.prunedNative = 0; this.prunedNativeBytes = 0; this.nativeCache = undefined;
     this.generatedModuleBytes = 0; this.retainedModuleBytes = 0;
@@ -257,8 +260,10 @@ export class CodeCache {
         !cold.every(value => value instanceof WebAssembly.Global && value.value === 0))
       throw new Error('invalid core dispatch cold counters');
     if (this.linkedCore) {
-      if (!(exports.linkAbi instanceof WebAssembly.Global) || exports.linkAbi.value !== 3 ||
+      if (!(exports.linkAbi instanceof WebAssembly.Global) || ![3,4].includes(exports.linkAbi.value) ||
           !cold.every(value=>value !== undefined)) throw new Error('invalid core link ABI');
+      this.preciseCore = exports.linkAbi.value === 4;
+      if (this.preciseCore && !this.native.core_precise) throw new Error('missing exact-prefix core export');
       const globals = {};
       for (const name of LINK_GLOBALS) {
         const value = exports[name];
@@ -435,6 +440,7 @@ export class CodeCache {
       : new WebAssembly.Module(encoded);
     const bindings = {memory: this.memory};
     const available = {read: this.native.core_read, write: this.native.core_write, numeric: this.native.core_numeric};
+    if (this.preciseBinding) available.precise = this.preciseBinding;
     const found = new Set();
     for (const item of WebAssembly.Module.imports(module)) {
       if (item.module !== 'ring3' || found.has(item.name)) throw new Error(`invalid core import ${item.module}.${item.name}`);
@@ -454,6 +460,7 @@ export class CodeCache {
     }
     if (!['memory', 'read', 'write'].every(name => found.has(name)) ||
         (this.linkedCore && !LINK_GLOBALS.every(name=>found.has(name)))) throw new Error('incomplete core imports');
+    if (this.preciseCore && !found.has('precise')) throw new Error('incomplete exact-prefix core imports');
     if (this.#support && !SUPPORT_IMPORTS.every(name=>found.has(name)))
       throw new Error('incomplete core support imports');
     const instance = this.compilation
@@ -510,7 +517,7 @@ export class CodeCache {
     }
     if (status !== 0) throw Object.assign(new Error(`core_begin returned ${status}`), {operation: 'core_begin', status});
     this.open = true;
-    const before = this.word(40), startPc = this.pc;
+    const before = this.word(40), startPc = this.pc, preciseBefore = this.preciseRuns;
     let stop, failure;
     let regions;
     let chainedColdRuns = 0, chainedColdWork = 0, chainedColdRetired = 0;
@@ -540,7 +547,7 @@ export class CodeCache {
       if (ended !== 0 && !failure) throw new Error(`core_end returned ${ended}`);
     }
     const result = this.finishRun(stop,before,regions,'compiled',startPc,chainedColdRuns,chainedColdWork,chainedColdRetired,
-      unit.transient ? unit.id : null);
+      unit.transient ? unit.id : null,this.preciseRuns-preciseBefore);
     this.installRecordedTrace();
     return result;
   }
@@ -574,7 +581,18 @@ export class CodeCache {
     this.installRecordedTrace();
     return result;
   }
-  finishRun(stop,before,regions,kind,startPc,chainedColdRuns=0,chainedColdWork=0,chainedColdRetired=0,transientId=null) {
+  invokePrecise(context) {
+    if (!this.open || context !== this.context || !this.native.core_precise)
+      throw new Error('invalid exact-prefix CPU lease');
+    const retired = this.word(40), remaining = this.word(44);
+    const stop = this.native.core_precise(context) >>> 0;
+    const work = remaining-this.word(44), completed = (this.word(40)-retired) >>> 0;
+    if (work < 0 || completed > work || stop < 1 || stop > 10)
+      throw new Error('invalid exact-prefix execution result');
+    this.preciseRuns++; this.preciseWork += work; this.preciseRetired += completed;
+    return stop;
+  }
+  finishRun(stop,before,regions,kind,startPc,chainedColdRuns=0,chainedColdWork=0,chainedColdRetired=0,transientId=null,preciseRuns=0) {
     const cold = kind === 'cold', retired = (this.word(40) - before) >>> 0;
     const remaining = this.word(44), work = this.budget - remaining;
     if (!Number.isInteger(chainedColdRuns) || chainedColdRuns < 0 ||
@@ -587,8 +605,9 @@ export class CodeCache {
         !Number.isInteger(regions) || regions < (cold ? 0 : 1) || regions > work-chainedColdWork+1)
       throw new Error(`invalid core stop ${stop} at 0x${this.pc.toString(16)}`);
     const identity = new DataView(this.memory.buffer).getBigUint64(this.context+120,true);
-    const coldEnd = !cold && this.chain && this.chainedColdEnabled && chainedColdRuns > 0 && identity === 0n;
-    if (cold ? identity !== 0n : transientId !== null ? identity !== transientId : !coldEnd && !this.units.has(identity))
+    const coldEnd = !cold && identity === 0n &&
+      (this.chain && this.chainedColdEnabled && chainedColdRuns > 0 || preciseRuns > 0);
+    if (cold ? identity !== 0n : transientId !== null ? !coldEnd && identity !== transientId : !coldEnd && !this.units.has(identity))
       throw new Error(cold ? 'cold execution retained a compiled identity' : 'core dispatch selected an unretained region');
     if (!cold && this.jitPc === startPc && stop === 1 && work === 0 && this.pc === startPc)
       throw new Error(`core JIT handoff made no progress at 0x${startPc.toString(16)}`);
@@ -636,6 +655,7 @@ export class CodeCache {
     return {backend: 'core', chainEnabled:this.chain, runs: this.runs, regions:this.regions, retired: this.retired, work: this.work, admissions: this.admissions,
       coldEnabled:!!this.native.core_cold_run,coldRuns:this.coldRuns,coldRetired:this.coldRetired,coldWork:this.coldWork,
       chainedColdRuns:this.chainedColdRuns,chainedColdWork:this.chainedColdWork,chainedColdRetired:this.chainedColdRetired,
+      preciseRuns:this.preciseRuns,preciseWork:this.preciseWork,preciseRetired:this.preciseRetired,
       compileInstructionLimit:this.instructions, compileBlockLimit:this.blocks, workBudget:this.budget,
       engineCacheHits: this.hits, evictions: this.evictions, generatedModuleBytes: this.generatedModuleBytes,
       retainedModuleBytes: this.retainedModuleBytes, installedUnits: this.units.size, unitCapacity: this.capacity ?? this.#slotExtent,

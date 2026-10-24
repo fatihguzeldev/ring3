@@ -156,6 +156,67 @@ function transientFixture() {
   return f;
 }
 
+test('exact-prefix binding requires the active CPU lease and counts actual work across memory growth',()=>{
+  const f=fixture();
+  f.api.core_precise=pointer=>{
+    f.calls.push(['precise',pointer]);
+    f.engine.memory.grow(1);
+    const d=new DataView(f.engine.memory.buffer);
+    d.setUint32(pointer+40,1,true); // Three retirements across the u32 wrap.
+    d.setUint32(pointer+44,4,true); // Five work units include partial REP work.
+    return 2;
+  };
+  const cache=new CodeCache(f.engine,{chain:false});cache.entry(0x1000);
+  assert.throws(()=>cache.preciseBinding(f.context),/CPU lease/);
+  cache.open=true;
+  assert.throws(()=>cache.preciseBinding(f.context+128),/CPU lease/);
+  assert.equal(f.calls.filter(([name])=>name==='precise').length,0);
+  const d=new DataView(f.engine.memory.buffer);
+  d.setUint32(f.context+40,0xfffffffe,true);d.setUint32(f.context+44,9,true);
+  assert.equal(cache.preciseBinding(f.context),2);cache.open=false;
+  assert.deepEqual([cache.preciseRuns,cache.preciseWork,cache.preciseRetired],[1,5,3]);
+  assert.deepEqual(f.calls.filter(([name])=>name==='precise'),[['precise',f.context]]);
+});
+
+for(const exact of[true,false])test(`transient code store ${exact?'accepts actual exact execution':'rejects an unexplained revoked identity'}`,()=>{
+  const f=transientFixture();
+  const store=pointer=>{
+    const d=new DataView(f.engine.memory.buffer);
+    d.setUint32(pointer+32,0x1006,true);d.setUint32(pointer+40,1,true);
+    d.setUint32(pointer+44,0,true);d.setBigUint64(pointer+120,0n,true);return 6;
+  };
+  f.api.core_precise=store;
+  const cache=new CodeCache(f.engine,{chain:false,budget:1});cache.entry(0x1000);
+  const transient=cache.entry(0x1004);
+  transient.run=(pointer,budget)=>{
+    new DataView(f.engine.memory.buffer).setUint32(pointer+44,budget,true);
+    return exact?cache.preciseBinding(pointer):store(pointer);
+  };
+  if(exact){
+    const result=cache.execute(transient);
+    assert.deepEqual([result.coreReason,result.id,result.work,result.retired],[6,null,1,1]);
+    assert.equal(cache.preciseRuns,1);assert.equal(cache.transient,null);
+    assert.equal(f.calls.filter(([name])=>name==='end').length,1);
+  }else{
+    assert.throws(()=>cache.execute(transient),/unretained region/);
+    assert.equal(cache.preciseRuns,0);
+  }
+});
+
+for(const [name,remaining,retired,stop]of[
+  ['private stop reason',3,1,11],['increasing quota',6,0,2],['retirement beyond work',4,2,2],
+])test(`exact-prefix binding rejects ${name} without recording a successful run`,()=>{
+  const f=fixture();
+  f.api.core_precise=pointer=>{
+    const d=new DataView(f.engine.memory.buffer);
+    d.setUint32(pointer+40,retired,true);d.setUint32(pointer+44,remaining,true);return stop;
+  };
+  const cache=new CodeCache(f.engine,{chain:false});cache.entry(0x1000);cache.open=true;
+  new DataView(f.engine.memory.buffer).setUint32(f.context+44,5,true);
+  assert.throws(()=>cache.preciseBinding(f.context),/exact-prefix execution result/);cache.open=false;
+  assert.deepEqual([cache.preciseRuns,cache.preciseWork,cache.preciseRetired],[0,0,0]);
+});
+
 test('recorded installation uses an explicit zero anchor and accepts legacy trace metadata',()=>{
   for(const [installedState,anchor] of [[2,0],[0,0x2000]]) {
     const f=fixture();

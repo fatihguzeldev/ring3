@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
 import {readFileSync,writeFileSync} from 'node:fs';
 import {join} from 'node:path';
+import {runActualPrefix} from './actual-prefix.mjs';
 
 const directory = process.argv[2], CTX = 0x100, MAP = 0x10000, PERM = 0x410000;
 const EXEC = 0x510000, VERSION = 0x510100, PAGE_VERSION = 0x510200, BACKING = 0x520000;
@@ -82,7 +83,7 @@ function countLookups(source) {
   assert(instrumented&&bodyInstrumented&&exported);return Uint8Array.from(output);
 }
 for (const line of readFileSync(join(directory,'regions.tsv'),'utf8').trim().split('\n')) {
-  const [name,entry,identity] = line.split('\t'), encoded = readFileSync(join(directory,`${name}.wasm`));
+  const [name,entry,identity,instructions,frontiers] = line.split('\t'), encoded = readFileSync(join(directory,`${name}.wasm`));
   const module = new WebAssembly.Module(encoded);
   assertCoreNames(module,Number(entry),identity);
   assert.deepEqual(coreImports(module),[
@@ -90,7 +91,8 @@ for (const line of readFileSync(join(directory,'regions.tsv'),'utf8').trim().spl
     {module:'ring3',name:'write',kind:'function'},
   ]);
   const instrumented=countLookups(encoded),exports=instantiateCore(new WebAssembly.Module(instrumented),{ring3:{memory,read,write}}).exports;
-  regions.set(name,{name,entry:Number(entry),identity:BigInt(identity),run:exports.run,lookups:exports['test.lookup_calls'],bodyCalls:exports['test.body_calls'],sha256:hash(encoded),instrumentedSha256:hash(instrumented)});
+  regions.set(name,{name,entry:Number(entry),identity:BigInt(identity),instructions:Number(instructions),
+    frontiers:frontiers?frontiers.split(',').map(Number):[],run:exports.run,lookups:exports['test.lookup_calls'],bodyCalls:exports['test.body_calls'],sha256:hash(encoded),instrumentedSha256:hash(instrumented)});
 }
 function reset(name,eax=5,readonly=false,options={}) {
   bytes.fill(0,CTX,CTX+128); bytes.fill(0,BACKING,BACKING+3*4096);
@@ -109,6 +111,28 @@ function reset(name,eax=5,readonly=false,options={}) {
   return first;
 }
 function step(label,region,budget,expected) {
+  if(expected.stop===2||(budget===1&&expected.fault)) {
+    const regs=Array.from({length:8},(_,index)=>get(CTX+index*4)),wanted=[...regs];
+    wanted[0]=expected.eax;if(expected.ecx!==undefined)wanted[1]=expected.ecx;
+    if(expected.esp!==undefined)wanted[4]=expected.esp;
+    const currentRetired=get(CTX+40),writes=[];
+    if(expected.stackWrite!==undefined)writes.push([0x47fc,4,expected.stackWrite]);
+    if(expected.data!==get(BACKING+4096))writes.push([0x3000,4,expected.data]);
+    runActualPrefix({...region,code:image,blocks:8},region.name,label,budget,
+      {regs,flags:get(CTX+36),pc:get(CTX+32),retired:currentRetired,
+        continueNeedCode:expected.stop===2,readOnly:bytes[PERM+3]===1,secondReadOnly:bytes[PERM+4]===1,
+        unmapStack:get(MAP+4*4)===0,initialVersion:d.getBigUint64(VERSION,true),
+        initialPages:[[0x3000,bytes.slice(BACKING+4096,BACKING+8192)],[0x4000,bytes.slice(BACKING+8192,BACKING+12288)]],
+        pageVersions:[3,4].filter(page=>get(MAP+page*4)>0).map(page=>[page*4096,d.getBigUint64(PAGE_VERSION+(get(MAP+page*4)-1)*16+8,true)])},
+      {reason:expected.stop,pc:expected.pc,retired:expected.retired-currentRetired,remaining:expected.remaining,
+        regs:wanted,flags:expected.flags,writes,
+        // The one-instruction faulting tail fits its full fixed-work span.
+        ...(expected.fault?{fault:[expected.faultAddress??0x3000,expected.faultMetadata??0x20204,14]}:{})},
+      {instrument:countLookups,onRow:row=>{cases.push(row);checkpoint();},after:({generated,row})=>{
+        row.lookups=generated.exports['test.lookup_calls'].value;row.bodyCalls=generated.exports['test.body_calls'].value;
+      }});
+    checkpoint();return;
+  }
   d.setBigUint64(CTX+120,region.identity,true);
   const wanted = bytes.slice(CTX,CTX+128), c = new DataView(wanted.buffer), ram = bytes.slice(BACKING,BACKING+3*4096);
   c.setUint32(0,expected.eax,true); c.setUint32(32,expected.pc,true); c.setUint32(36,expected.flags,true);

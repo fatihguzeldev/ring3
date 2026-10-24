@@ -8,6 +8,7 @@ import {runExtended} from './extended.mjs';
 import {runBits} from './bits.mjs';
 import {assertCoreNames} from './names.mjs';
 import {instrumentStateWitness} from './region/structure.mjs';
+import {runActualPrefix} from './actual-prefix.mjs';
 
 const directory = process.argv[2];
 const PAGE = 4096, MAP = 0x10000, PERM = 0x410000;
@@ -105,7 +106,7 @@ function numeric(context, ordinal) {
 }
 
 for (const line of readFileSync(join(directory, 'programs.tsv'), 'utf8').trim().split('\n')) {
-  const [name, hex, identity] = line.split('\t'), wasm = readFileSync(join(directory, `${name}.wasm`));
+  const [name, hex, identity, instructions] = line.split('\t'), wasm = readFileSync(join(directory, `${name}.wasm`));
   assert.ok(WebAssembly.validate(wasm), `${name}: validates`);
   const module = new WebAssembly.Module(wasm);
   assertCoreNames(module, name.endsWith('-callee') ? 0x1010 : 0x1000, identity);
@@ -121,7 +122,8 @@ for (const line of readFileSync(join(directory, 'programs.tsv'), 'utf8').trim().
   const instance = instantiateCore(diagnostic?new WebAssembly.Module(diagnostic.bytes):module, {ring3: {...support,memory, read, write, numeric}});
   assert.equal(typeof instance.exports.run, 'function');
   assert.equal(instance.exports.run.length, 2);
-  programs.set(name, {code: Buffer.from(hex, 'hex'), identity: BigInt(identity), wasmSha256: hash(wasm), run: instance.exports.run,
+  programs.set(name, {code: Buffer.from(hex, 'hex'), identity: BigInt(identity), instructions:Number(instructions),
+    entry:name.endsWith('-callee')?0x1010:0x1000,wasmSha256: hash(wasm), run: instance.exports.run,
     groupWitness:diagnostic?()=>diagnostic.read(instance,support,get(CTX+92),undefined,{
       context:CTX,executable:get(CTX+72),executableLength:get(CTX+68)*4,
       privateSlots:get(CTX+76),privateLength:get(CTX+76)?64:0,
@@ -178,6 +180,16 @@ function seed(name, options = {}) {
 }
 
 function check(name, label, budget, options, outcome) {
+  const precise=name.startsWith('rep-')||name==='move-word-string'||label.startsWith('loop-cut-')||
+    label==='load-budget-prefix'||label==='budget-exit-publishes-only-the-complete-store-prefix'||
+    (budget===0&&!options.inactive&&!options.wrongIdentity);
+  if(precise) {
+    runActualPrefix(programs.get(name),name,label,budget,options,outcome,{onRow:row=>{
+      results.push(row);writeFileSync(reportPath,JSON.stringify({schema:1,complete:false,results}));
+    }});
+    writeFileSync(reportPath,JSON.stringify({schema:1,complete:false,results}));
+    return;
+  }
   const initial = seed(name, options), before = bytes.slice(CTX, CTX + 128);
   const authorityBefore=options.privateAuthority?{
     mappings:bytes.slice(MAP,MAP+(1<<22)),permissions:bytes.slice(PERM,PERM+(1<<20)),
@@ -481,7 +493,7 @@ try {
   assert.deepEqual(guards.trailing,trailing,'publication preserves the eight trailing context bytes');
 } finally {CTX=0x100;}
 const report = {schema: 1, complete: true, node: process.version, cases: results.length,
-  sources: Object.fromEntries(['./run.mjs','./link.mjs', './oracle.mjs', './extended.mjs', './bits.mjs', './names.mjs', '../wasm.rs'].map(path => [path, hash(readFileSync(new URL(path, import.meta.url)))])),
+  sources: Object.fromEntries(['./run.mjs','./actual-prefix.mjs','./link.mjs', './oracle.mjs', './extended.mjs', './bits.mjs', './names.mjs', '../wasm.rs'].map(path => [path, hash(readFileSync(new URL(path, import.meta.url)))])),
   modules: Object.fromEntries([...programs].map(([name, program]) => [name, {identity: String(program.identity), wasmSha256: program.wasmSha256, codeSha256: hash(program.code)}])),
   results};
 writeFileSync(reportPath, JSON.stringify(report, null, 2));

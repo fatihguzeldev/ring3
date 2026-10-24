@@ -139,13 +139,13 @@ pub(in crate::cpu::core) fn names(names: &mut NameMap, first: u32) {
 }
 
 pub(super) fn owner_defined(offset: u32, numeric: bool) -> u32 {
-    2 + u32::from(numeric) + COUNT + offset
+    3 + u32::from(numeric) + COUNT + offset
 }
 
 // Keep the lowerer's logical helper IDs centralized while imports and owner
 // definitions occupy separate contiguous Wasm function-index ranges.
 pub(super) fn owner_internal(logical: u32, numeric: bool) -> u32 {
-    let first = 2 + u32::from(numeric);
+    let first = 3 + u32::from(numeric);
     match logical {
         2 => first,
         3..=5 => owner_defined(logical - 3, numeric),
@@ -167,9 +167,9 @@ pub(super) fn owner_store(width: u32, numeric: bool) -> u32 {
         4 => 7,
         _ => unreachable!("unsupported store width {width}"),
     };
-    2 + u32::from(numeric) + offset
+    3 + u32::from(numeric) + offset
 }
 
 pub(super) fn owner_kernel(numeric: bool) -> u32 {
-    2 + u32::from(numeric) + 8
+    3 + u32::from(numeric) + 8
 }

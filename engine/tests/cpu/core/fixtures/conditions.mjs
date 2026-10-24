@@ -5,6 +5,7 @@ import {readFileSync,writeFileSync} from 'node:fs';
 import {join} from 'node:path';
 import {assertCoreNames} from './names.mjs';
 import {instrumentCallCounter} from './calls.mjs';
+import {runActualPrefix} from './actual-prefix.mjs';
 
 const directory=process.argv[2],CTX=256,PAGE=4096,MAP=0x10000,PERM=0x410000;
 const EXEC=0x510000,VERSION=0x510100,PAGE_VERSION=0x510200,BACKING=0x520000,GENERATION=0x530000;
@@ -25,7 +26,7 @@ function write(context,address,width,value) {
   view.setBigUint64(GENERATION,1n,true);return 2;
 }
 for(const line of readFileSync(join(directory,'conditions.tsv'),'utf8').trim().split('\n')) {
-  const [name,hex,id]=line.split('\t'),source=readFileSync(join(directory,`${name}.wasm`));
+  const [name,hex,id,instructions]=line.split('\t'),source=readFileSync(join(directory,`${name}.wasm`));
   const original=new WebAssembly.Module(source);assertCoreNames(original,0x1000,id);
   assert.deepEqual(coreImports(original),[
     {module:'ring3',name:'memory',kind:'memory'},{module:'ring3',name:'read',kind:'function'},{module:'ring3',name:'write',kind:'function'},
@@ -33,11 +34,27 @@ for(const line of readFileSync(join(directory,'conditions.tsv'),'utf8').trim().s
   const instrumented=countFlagCalls(source),module=new WebAssembly.Module(instrumented);
   const exports=instantiateCore(module,{ring3:{memory,read,write}}).exports;
   assert(exports['test.flag_calls'] instanceof WebAssembly.Global);
-  programs.set(name,{...exports,id:BigInt(id),code:Buffer.from(hex,'hex'),sourceSha256:hash(source),instrumentedSha256:hash(instrumented)});
+  programs.set(name,{...exports,id:BigInt(id),code:Buffer.from(hex,'hex'),instructions:Number(instructions),
+    sourceSha256:hash(source),instrumentedSha256:hash(instrumented)});
 }
 
 function check(name,label,options,expected) {
   const program=programs.get(name),budget=options.budget??40;
+  if(options.budget!==undefined) {
+    const regs=[options.eax??0xa5a55a5a,0x22222222,0x33333333,0x3000,0x4800,0x55555555,0x66666666,0x77777777];
+    const result=[...regs];if(expected.eax!==undefined)result[0]=expected.eax;
+    if(expected.ebx!==undefined)result[3]=expected.ebx;if(expected.esi!==undefined)result[6]=expected.esi;
+    runActualPrefix(program,name,label,budget,{regs,flags:options.flags??0x402,retired:37},
+      {reason:expected.reason??4,pc:expected.pc,retired:expected.retired,flags:expected.flags,regs:result},
+      {instrument:countFlagCalls,onRow:row=>{records.push(row);writeFileSync(report,JSON.stringify({complete:false,records}));},
+        after:({generated,row})=>{
+          // Initial full-span rejection publishes the unchanged tuple once;
+          // native precise arithmetic itself does not call support.flags.
+          row.calls=generated.exports['test.flag_calls'].value;
+          assert.equal(row.calls,1,`${label}: sole pre-precise canonical FLAGS publication`);
+        }});
+    writeFileSync(report,JSON.stringify({complete:false,records}));return;
+  }
   bytes.fill(0,CTX,CTX+128);bytes.fill(0,BACKING,BACKING+3*PAGE);
   bytes.fill(0,EXEC,EXEC+12);bytes.fill(0,VERSION,VERSION+8);bytes.fill(0,PAGE_VERSION,PAGE_VERSION+48);bytes.fill(0,GENERATION,GENERATION+8);
   for(const [page,slot,permission] of [[1,1,7],[3,2,options.readOnly?1:3],[4,3,3]]){put(MAP+page*4,slot);bytes[PERM+page]=permission;}

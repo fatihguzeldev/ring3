@@ -133,55 +133,60 @@ impl Emitter<'_, '_> {
     fn block(&mut self, id: BlockId) {
         self.current = id;
         let block = &self.graph.blocks[id.0];
+        let fixed_work = self.out.spans[id.0].fixed_work;
+        let entry_frame = self.out.plan.block(id).entry;
         self.out.guarded_control = block.terminator == Terminator::GuardedIndirect;
         self.out.address_fact = None;
+        // Eligibility precedes predicted entry state and trace recording. A
+        // partial/interior ingress belongs to the one exact executor, not to a
+        // second set of instruction-prefix labels inside the hot body.
         self.out
             .c()
             .local_get(super::ENTRY_OFFSET)
-            .i32_eqz()
+            .i32_const(0)
+            .i32_ne()
             .local_get(REMAIN)
             .i32_const(block.instructions.len() as i32)
-            .i32_ge_u()
-            .i32_and()
-            .local_set(super::FULL_BLOCK);
+            .i32_lt_u()
+            .i32_or()
+            .i32_const(i32::from(!fixed_work))
+            .i32_or()
+            .if_(BlockType::Empty)
+            .local_get(super::ENTRY_OFFSET)
+            .i32_eqz()
+            .if_(BlockType::Empty);
+        // A completed internal edge already transferred the actual frame.
+        // Fresh external state has no active local FP view to commit here.
+        super::numeric::emit_frame(self.out, entry_frame);
+        self.out
+            .c()
+            .i32_const(block.entry as i32)
+            .local_set(super::EIP)
+            .end();
+        self.out.frame = None;
+        self.out.before_frame = None;
+        self.out.after_frame = None;
+        self.out
+            .c()
+            .i32_const(0)
+            .local_set(super::PREFIX_BASE)
+            .i32_const(StopReason::Budget as i32)
+            .i32_const(StopReason::ExactPrefix as i32)
+            .local_get(REMAIN)
+            .i32_eqz()
+            .select()
+            .return_()
+            .end()
+            .i32_const(1)
+            .local_set(super::FULL_BLOCK)
+            .i32_const(0)
+            .local_set(super::PREFIX_BASE);
         self.out.frame = Some(self.out.plan.block(id).entry);
         self.out.before_frame = self.out.frame;
         self.out.after_frame = self.out.frame;
         let constants = self.out.plan.block(id).contract.gpr_constants;
         self.out.guarded_gpr_facts = true;
-        self.out.c().local_get(super::ENTRY_OFFSET);
-        if self.out.family {
-            // A fresh family entry has actual identity state, including a
-            // secondary block start whose prefix offset happens to be zero.
-            self.out.c().local_get(super::FRESH_OWNER_ENTRY).i32_or();
-        }
-        self.out.c().if_(BlockType::Empty);
-        if self.out.family {
-            self.out
-                .c()
-                .local_get(super::ENTRY_OFFSET)
-                .i32_eqz()
-                .if_(BlockType::Empty);
-            // A true block start has fresh identity cells and inherited metadata.
-            // Its guarded first uses can consume the actual physical pool.
-            super::numeric::enter_block(self.out, id);
-            self.out.c().else_();
-            super::numeric::enter_port(self.out);
-            self.out.c().end();
-        } else {
-            super::numeric::enter_port(self.out);
-        }
-        self.out.c().i32_const(0).local_set(super::FULL_BLOCK);
-        self.out
-            .c()
-            .i32_const(0)
-            .local_set(super::GP_FACTS_VALID)
-            .local_get(super::ENTRY_OFFSET)
-            .local_set(super::PREFIX_BASE)
-            .else_();
-        self.out.c().i32_const(0).local_set(super::PREFIX_BASE);
-        // Group proofs consume actual GPR value identities. Ordinary entries
-        // without constant guards are valid; interior ports took the false arm.
+        // Constants remain guarded against the actual fresh architectural GPRs.
         self.out.c().i32_const(1);
         for (register, value) in constants.into_iter().enumerate() {
             if let Some(value) = value {
@@ -195,7 +200,6 @@ impl Emitter<'_, '_> {
         }
         self.out.c().local_set(super::GP_FACTS_VALID);
         super::numeric::enter_block(self.out, id);
-        self.out.c().end();
         if self.out.family {
             self.out
                 .c()
@@ -203,15 +207,10 @@ impl Emitter<'_, '_> {
                 .local_set(super::FRESH_OWNER_ENTRY);
         }
         self.out.c().i32_const(0).local_set(ENTRY_PENDING);
-        super::trace::record_block(
-            self.out,
-            block.entry,
-            block
-                .instructions
-                .last()
-                .expect("nonempty region block")
-                .next,
-        );
+        let trace = &self.out.spans[id.0];
+        let (trace_entry, trace_end, trace_offset) =
+            (trace.trace_entry, trace.trace_end, trace.trace_offset);
+        super::trace::record_block(self.out, trace_entry, trace_end, trace_offset);
         self.out.c().i32_const(0).local_set(super::ENTRY_OFFSET);
         self.out.block(id, block);
         match block.terminator {

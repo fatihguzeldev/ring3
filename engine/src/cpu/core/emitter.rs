@@ -1,6 +1,7 @@
 mod access;
 mod code;
 mod control;
+mod executable;
 mod exits;
 mod integer;
 pub(super) mod link;
@@ -60,7 +61,7 @@ pub(super) const FP_PAYLOAD_TOKENS: u32 = 177;
 pub(super) const FP_TAG_TOKENS: u32 = 178;
 pub(super) const SCALAR_CACHE_BASE: u32 = 179;
 
-const BLOCK_BITS: u32 = 10;
+const BLOCK_BITS: u32 = 14;
 
 pub(super) fn mem(offset: u64, align: u32) -> MemArg {
     MemArg {
@@ -119,9 +120,11 @@ pub(super) fn emit(
     identity: u64,
     native: &[NativeInstruction],
 ) -> Vec<u8> {
-    let graph =
-        super::region::Region::from_blocks(blocks, entry).expect("decoded blocks form a region");
-    emit_graph(blocks, entry, identity, native, graph, false)
+    let spans = super::program::spans::partition(blocks);
+    let blocks: Vec<_> = spans.iter().map(|span| span.block.clone()).collect();
+    let graph = super::region::Region::from_blocks(&blocks, entry)
+        .expect("decoded executable spans form a region");
+    emit_graph(&spans, entry, identity, native, graph, false)
 }
 
 pub(super) fn emit_observed(
@@ -131,9 +134,11 @@ pub(super) fn emit_observed(
     native: &[NativeInstruction],
     observed_edges: &[(u32, u32)],
 ) -> Vec<u8> {
-    let graph = super::region::Region::from_observed(blocks, entry, observed_edges)
+    let spans = super::program::spans::partition(blocks);
+    let blocks: Vec<_> = spans.iter().map(|span| span.block.clone()).collect();
+    let graph = super::region::Region::from_observed(&blocks, entry, observed_edges)
         .expect("recorded blocks and edges form an observed region");
-    emit_graph(blocks, entry, identity, native, graph, false)
+    emit_graph(&spans, entry, identity, native, graph, false)
 }
 
 pub(super) fn emit_observed_family(
@@ -143,13 +148,15 @@ pub(super) fn emit_observed_family(
     native: &[NativeInstruction],
     observed_edges: &[(u32, u32)],
 ) -> Vec<u8> {
-    let graph = super::region::Region::from_observed(blocks, entry, observed_edges)
+    let spans = super::program::spans::partition(blocks);
+    let blocks: Vec<_> = spans.iter().map(|span| span.block.clone()).collect();
+    let graph = super::region::Region::from_observed(&blocks, entry, observed_edges)
         .expect("recorded family forms an observed region");
-    emit_graph(blocks, entry, identity, native, graph, true)
+    emit_graph(&spans, entry, identity, native, graph, true)
 }
 
 fn emit_graph(
-    blocks: &[Block],
+    spans: &[super::program::spans::ExecutableSpan],
     entry: u32,
     identity: u64,
     native: &[NativeInstruction],
@@ -158,7 +165,7 @@ fn emit_graph(
 ) -> Vec<u8> {
     let plan = super::region::values::RegionPlan::analyze(&graph);
     let numeric = !native.is_empty();
-    let body = run(&graph, &plan, identity, native, family);
+    let body = run(&graph, &plan, identity, native, family, spans);
     let mut module = Module::new();
     let mut types = TypeSection::new();
     types.ty().function([ValType::I32; 2], [ValType::I32]);
@@ -249,11 +256,12 @@ fn emit_graph(
     if !native.is_empty() {
         imports.import("ring3", "numeric", EntityType::Function(0));
     }
+    imports.import("ring3", "precise", EntityType::Function(4));
     link::imports(&mut imports);
     support::imports(&mut imports, [3, 6, 9, 10, 12, 7, 7, 7, 13, 14, 15, 17]);
     module.section(&imports);
     let mut functions = FunctionSection::new();
-    for kind in [0, 4, 5, 11, 16, 0, 0, 8] {
+    for kind in [0, 4, 5, 11, 16, 0, 0, 8, 0] {
         functions.function(kind);
     }
     module.section(&functions);
@@ -265,7 +273,7 @@ fn emit_graph(
     module.section(&exports);
     let mut code = CodeSection::new();
     code.raw(&body);
-    code.function(&lookup(blocks));
+    code.function(&lookup(spans));
     code.function(&link::emit_boundary(
         numeric,
         support::owner_internal(2, numeric),
@@ -282,12 +290,21 @@ fn emit_graph(
     code.function(&link::emit_entry(
         support::owner_internal(3, numeric),
         false,
+        numeric,
     ));
-    code.function(&link::emit_entry(support::owner_internal(3, numeric), true));
+    code.function(&link::emit_entry(
+        support::owner_internal(3, numeric),
+        true,
+        numeric,
+    ));
     code.function(&link::emit_publisher(
         support::owner_internal(2, numeric),
         support::owner_internal(7, numeric),
         support::owner_internal(8, numeric),
+    ));
+    code.function(&hot_entry(
+        spans,
+        (graph.is_observed && !family).then_some(entry),
     ));
     module.section(&code);
     let mut names = NameSection::new();
@@ -298,7 +315,8 @@ fn emit_graph(
     if numeric {
         functions.append(2, "guest.numeric");
     }
-    support::names(&mut functions, 2 + u32::from(numeric));
+    functions.append(2 + u32::from(numeric), "guest.precise");
+    support::names(&mut functions, 3 + u32::from(numeric));
     for (index, name) in [
         "guest.run",
         "guest.lookup",
@@ -317,12 +335,13 @@ fn emit_graph(
     {
         functions.append(wrappers + offset as u32, name);
     }
+    functions.append(support::owner_defined(8, numeric), "guest.hot_entry");
     names.functions(&functions);
     module.section(&names);
     module.finish()
 }
 
-fn lookup(blocks: &[Block]) -> Function {
+fn lookup(spans: &[super::program::spans::ExecutableSpan]) -> Function {
     fn tree(code: &mut wasm_encoder::InstructionSink<'_>, ports: &[(u32, u32)]) {
         if ports.is_empty() {
             code.i32_const(-1);
@@ -345,11 +364,12 @@ fn lookup(blocks: &[Block]) -> Function {
         tree(code, &ports[middle + 1..]);
         code.end().end();
     }
-    let mut ports: Vec<_> = blocks
+    let mut ports: Vec<_> = spans
         .iter()
         .enumerate()
-        .flat_map(|(block, body)| {
-            body.instructions
+        .flat_map(|(block, span)| {
+            span.block
+                .instructions
                 .iter()
                 .enumerate()
                 .map(move |(prefix, instruction)| {
@@ -366,14 +386,76 @@ fn lookup(blocks: &[Block]) -> Function {
     function
 }
 
+fn hot_entry(spans: &[super::program::spans::ExecutableSpan], root: Option<u32>) -> Function {
+    fn count(c: &mut wasm_encoder::InstructionSink<'_>, entries: &[(u32, u32)]) {
+        if entries.is_empty() {
+            c.i32_const(0);
+            return;
+        }
+        let mid = entries.len() / 2;
+        let (pc, work) = entries[mid];
+        c.local_get(0)
+            .i32_const(pc as i32)
+            .i32_eq()
+            .if_(BlockType::Result(ValType::I32))
+            .i32_const(work as i32)
+            .else_()
+            .local_get(0)
+            .i32_const(pc as i32)
+            .i32_lt_u()
+            .if_(BlockType::Result(ValType::I32));
+        count(c, &entries[..mid]);
+        c.else_();
+        count(c, &entries[mid + 1..]);
+        c.end().end();
+    }
+    let mut entries: Vec<_> = spans
+        .iter()
+        .filter(|span| span.fixed_work && root.is_none_or(|pc| span.block.entry == pc))
+        .map(|span| (span.block.entry, span.block.instructions.len() as u32))
+        .collect();
+    entries.sort_unstable();
+    let mut function = Function::new([(1, ValType::I32)]);
+    let mut c = function.instructions();
+    count(&mut c, &entries);
+    c.local_tee(2)
+        .i32_const(0)
+        .i32_ne()
+        .local_get(1)
+        .local_get(2)
+        .i32_ge_u()
+        .i32_and()
+        .end();
+    function
+}
+
 fn run(
     graph: &super::region::Region,
     plan: &super::region::values::RegionPlan,
     identity: u64,
     native: &[NativeInstruction],
     family: bool,
+    spans: &[super::program::spans::ExecutableSpan],
 ) -> Vec<u8> {
     let execution = super::region::values::ExecutionPlan::analyze(graph, plan);
+    let expression_slots = graph
+        .blocks
+        .iter()
+        .enumerate()
+        .flat_map(|(index, _)| {
+            &execution
+                .executable
+                .block(super::region::BlockId(index))
+                .steps
+        })
+        .filter_map(|step| match step {
+            super::region::values::executable::ExecutableStep::Pure(run) => {
+                Some(execution.executable.live_expressions(run).len())
+            }
+            _ => None,
+        })
+        .max()
+        .unwrap_or(0);
     let mut function = Function::new([
         (25, ValType::I32),
         (1, ValType::I64),
@@ -406,6 +488,7 @@ fn run(
         (1, ValType::I64),
         (1, ValType::I32),
         (execution.scalar.cache_count() as u32, ValType::I32),
+        (expression_slots as u32, ValType::I32),
     ]);
     let mut out = Output {
         function: &mut function,
@@ -418,6 +501,8 @@ fn run(
         plan,
         scalar_plan: &execution.scalar,
         fp_schedule: &execution.fp,
+        executable: &execution.executable,
+        expression_base: SCALAR_CACHE_BASE + execution.scalar.cache_count(),
         frame: None,
         before_frame: None,
         after_frame: None,
@@ -430,6 +515,7 @@ fn run(
         family,
         guarded_control: false,
         native,
+        spans,
     };
     out.c()
         .block(BlockType::Empty)
@@ -549,6 +635,8 @@ pub(super) struct Output<'a> {
     plan: &'a super::region::values::RegionPlan,
     scalar_plan: &'a super::region::values::scalar::ScalarPlan,
     fp_schedule: &'a super::region::values::Guards,
+    executable: &'a super::region::values::executable::ExecutablePlan,
+    expression_base: u32,
     frame: Option<super::region::values::FrameStateId>,
     before_frame: Option<super::region::values::FrameStateId>,
     after_frame: Option<super::region::values::FrameStateId>,
@@ -561,6 +649,7 @@ pub(super) struct Output<'a> {
     family: bool,
     guarded_control: bool,
     native: &'a [NativeInstruction],
+    spans: &'a [super::program::spans::ExecutableSpan],
 }
 
 impl Output<'_> {
@@ -582,61 +671,22 @@ impl Output<'_> {
             super::memory::groups::invalidate(self.c().raw());
         }
         let mut counted = false;
-        // chunking bounds simultaneous instruction labels; normal entries bypass
-        // both selectors and share the same instruction body with precise ports.
-        const CHUNK_BITS: u32 = 6;
-        const CHUNK: usize = 1 << CHUNK_BITS;
-        let chunks = block.instructions.len().div_ceil(CHUNK) as u32;
-        self.begin_port_selector(chunks);
-        self.c()
-            .local_get(PREFIX_BASE)
-            .i32_eqz()
-            .br_if(0)
-            .local_get(PREFIX_BASE)
-            .i32_const(CHUNK_BITS as i32)
-            .i32_shr_u()
-            .br_table(0..chunks, chunks);
-        for (chunk_index, instructions) in block.instructions.chunks(CHUNK).enumerate() {
-            self.c().end();
-            let count = instructions.len() as u32;
-            self.begin_port_selector(count);
-            let start = (chunk_index * CHUNK) as i32;
-            self.c()
-                .local_get(PREFIX_BASE)
-                .i32_eqz()
-                .br_if(0)
-                .local_get(PREFIX_BASE)
-                .i32_const(start)
-                .i32_gt_u()
-                .if_(BlockType::Result(ValType::I32))
-                .local_get(PREFIX_BASE)
-                .i32_const(start)
-                .i32_sub()
-                .else_()
-                .i32_const(0)
-                .end()
-                .br_table(0..count, count);
-            for instruction in instructions {
-                self.c().end();
-                counted |= self.block_instruction(id, block, instruction);
+        let steps = self.executable.block(id).steps.clone();
+        for step in &steps {
+            match step {
+                super::region::values::executable::ExecutableStep::Pure(run) => self.pure_run(run),
+                super::region::values::executable::ExecutableStep::Effect(effect) => {
+                    counted |= self.block_instruction(
+                        id,
+                        block,
+                        &block.instructions[effect.point.prefix as usize],
+                    );
+                }
             }
-            self.finish_port_selector();
         }
-        self.finish_port_selector();
         if !counted {
             self.count(block.instructions.len() as u32);
         }
-    }
-
-    fn begin_port_selector(&mut self, labels: u32) {
-        self.c().block(BlockType::Empty).block(BlockType::Empty);
-        for _ in 0..labels {
-            self.c().block(BlockType::Empty);
-        }
-    }
-
-    fn finish_port_selector(&mut self) {
-        self.c().br(1).end().unreachable().end();
     }
 
     fn block_instruction(
@@ -660,18 +710,6 @@ impl Output<'_> {
         };
         self.prefix = prefix;
         self.stack_access = None;
-        self.c()
-            .local_get(FULL_BLOCK)
-            .i32_eqz()
-            .if_(BlockType::Empty)
-            .local_get(REMAIN)
-            .i32_const(prefix as i32)
-            .local_get(PREFIX_BASE)
-            .i32_sub()
-            .i32_le_u()
-            .if_(BlockType::Empty);
-        self.exit(StopReason::Budget, Some(self.pc), prefix);
-        self.c().end().end();
         self.record_flags = true;
         self.tail_flags = instruction
             .operation
