@@ -1115,3 +1115,75 @@ test('legacy dispatchers and nonchained execution still reject an unselected fin
   assert.throws(()=>direct.execute(selected),/identity|unretained/i);
   assert.equal(direct.open,false); assert.equal(direct.stats().runs,0);
 });
+
+test('automatic executable selection requires the complete native pair', () => {
+  for (const name of ['core_lookup_executable','core_prepare_executable']) {
+    const f=fixture();f.api[name]=()=>0;
+    assert.throws(()=>new CodeCache(f.engine,{chain:false}),/incomplete core executable selection exports/);
+    assert.deepEqual(f.calls,[],'a partial capability is rejected before preparing or executing');
+  }
+});
+
+test('automatic executable lookup and preparation use the paired capability', () => {
+  const f=fixture(),sourcePrepare=f.api.core_prepare;
+  f.api.core_prepare_executable=(...args)=>{
+    f.calls.push(['prepare-executable',...args]);return sourcePrepare(...args);
+  };
+  f.api.core_lookup_executable=pc=>{f.calls.push(['lookup-executable',pc]);return 0;};
+  f.api.core_prepare=()=>{throw new Error('automatic preparation selected source-only policy');};
+  f.api.core_lookup=()=>{throw new Error('automatic lookup selected source-only policy');};
+  const cache=new CodeCache(f.engine,{chain:false,budget:3,instructions:8,blocks:2});
+  const unit=cache.select(0x1000);assert(unit);
+  const g=fixture();g.api.core_cold_run=()=>0;
+  g.api.core_prepare_executable=g.api.core_prepare;
+  g.api.core_lookup_executable=pc=>{g.calls.push(['lookup-executable',pc]);return 4;};
+  const cold=new CodeCache(g.engine,{chain:false});
+  assert.equal(cold.select(0x1000),null);
+  assert.deepEqual(f.calls.filter(([name])=>name.endsWith('-executable')),
+    [['prepare-executable',0x1000,8,2]]);
+  assert.deepEqual(g.calls,[['lookup-executable',0x1000]]);
+});
+
+test('automatic executable capabilities remain bound to the original native functions', () => {
+  for (const target of ['api','native']) {
+    const f=fixture();
+    f.api.core_prepare_executable=f.api.core_prepare;
+    f.api.core_lookup_executable=()=>4;
+    const cache=new CodeCache(f.engine,{chain:false});
+    (target==='api'?f.api:cache.native).core_prepare_executable=()=>0;
+    assert.throws(()=>cache.entry(0x1000),/core native bindings changed/);
+    assert.deepEqual(f.calls,[],'changed selection functions never acquire a lease');
+  }
+});
+
+test('automatic executable selection preserves native failure operation names', () => {
+  const f=fixture();f.api.core_cold_run=()=>0;
+  f.api.core_lookup_executable=()=>9;f.api.core_prepare_executable=()=>7;
+  const cache=new CodeCache(f.engine,{chain:false});
+  assert.throws(()=>cache.select(0x1000),error=>error.operation==='core_lookup_executable'&&error.status===9);
+  const g=fixture();g.api.core_lookup_executable=()=>4;g.api.core_prepare_executable=()=>7;
+  const eagerless=new CodeCache(g.engine,{chain:false});
+  assert.throws(()=>eagerless.select(0x1000),error=>error.operation==='core_prepare_executable'&&error.status===7);
+  assert.deepEqual(f.calls,[],'selection failure does not execute or publish');
+});
+
+test('automatic executable misses leave source-only selection to exact cold execution', () => {
+  const f=fixture();f.api.core_cold_run=()=>0;
+  f.api.core_lookup_executable=()=>4;f.api.core_prepare_executable=()=>4;
+  const cache=new CodeCache(f.engine,{chain:false});
+  assert.equal(cache.select(0x1005),null);
+  const g=fixture();g.api.core_lookup_executable=()=>4;g.api.core_prepare_executable=()=>4;
+  const withoutCold=new CodeCache(g.engine,{chain:false});
+  assert.equal(withoutCold.select(0x1005),null);
+  assert.deepEqual(f.calls,[],'a source-only miss acquires no owner or generated module');
+  assert.deepEqual(g.calls,[]);
+  assert(cache.entry(0x1005),'explicit source preparation keeps the existing manual behavior');
+  assert.equal(f.calls.filter(([name])=>name==='prepare').length,1);
+});
+
+test('automatic executable preparation cannot synthesize a transient owner', () => {
+  const f=fixture();f.api.core_lookup_executable=()=>4;f.api.core_prepare_executable=()=>18;
+  const cache=new CodeCache(f.engine,{chain:false});
+  assert.throws(()=>cache.select(0x1000),error=>error.operation==='core_prepare_executable'&&error.status===18);
+  assert.deepEqual(f.calls,[]);
+});

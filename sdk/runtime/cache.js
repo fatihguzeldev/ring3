@@ -4,6 +4,7 @@ const LINK_LOCALS = [...Array.from({length:12},(_,index)=>index+2),
 const CONTINUATION_GLOBALS = ['link.continuation','link.port'];
 const CONTINUATION_EXPORTS = ['core_continuation_ptr','core_continuation_format','core_chain_resolve_owned',
   'core_numeric_owned','core_precise_owned','core_end_owned'];
+const EXECUTABLE_EXPORTS = ['core_lookup_executable','core_prepare_executable'];
 const LINK_GLOBALS = ['link.mode','link.valid','link.context',...LINK_LOCALS.map(local=>`link.local${local}`),'trace.arena'];
 const SUPPORT_FUNCTIONS = [
   ['support.flags',8],['support.materialize_numeric',1],['support.resolve_status',5],
@@ -33,6 +34,8 @@ const compilationPc = (pc,prepareHistoryPartial = false) => ({
 
 export class CodeCache {
   #bindings;
+  #lookupOperation = 'core_lookup';
+  #prepareOperation = 'core_prepare';
   #contextView;
   #linkGlobals;
   #support;
@@ -66,6 +69,13 @@ export class CodeCache {
     if (typeof this.api.core_cold_run === 'function') this.native.core_cold_run = this.api.core_cold_run;
     if (typeof this.api.core_precise === 'function') this.native.core_precise = this.api.core_precise;
     if (typeof this.api.core_lookup === 'function') this.native.core_lookup = this.api.core_lookup;
+    const executable = EXECUTABLE_EXPORTS.map(name=>typeof this.api[name] === 'function');
+    if (executable.some(Boolean) && !executable.every(Boolean))
+      throw new Error('incomplete core executable selection exports');
+    if (executable.every(Boolean)) {
+      for (const name of EXECUTABLE_EXPORTS) this.native[name] = this.api[name];
+      [this.#lookupOperation,this.#prepareOperation] = EXECUTABLE_EXPORTS;
+    }
     if (typeof this.api.core_cold_status_ptr === 'function') this.native.core_cold_status_ptr = this.api.core_cold_status_ptr;
     for (const name of ['core_trace_ready','core_trace_root','core_trace_finish'])
       if (typeof this.api[name] === 'function') this.native[name] = this.api[name];
@@ -86,6 +96,11 @@ export class CodeCache {
     if (this.continuationCore) {
       for (const name of CONTINUATION_EXPORTS) this.native[name] = this.api[name];
       if (this.native.core_continuation_format() !== 1) throw new Error('unsupported core continuation format');
+    }
+    if (typeof this.api.core_chain_resolve_executable_owned === 'function') {
+      if (!this.continuationCore || !executable.every(Boolean))
+        throw new Error('incomplete core executable resolver exports');
+      this.native.core_chain_resolve_executable_owned = this.api.core_chain_resolve_executable_owned;
     }
     this.#bindings = Object.entries(this.native);
     this.budget = budget; this.instructions = instructions; this.blocks = blocks; this.capacity = capacity;
@@ -260,8 +275,17 @@ export class CodeCache {
       : [['memory','memory'],['functions','table'],['next','function']]);
     if (imports.length !== expected.size || imports.some(item => item.module !== 'ring3' || expected.get(item.name) !== item.kind) ||
         new Set(imports.map(item => item.name)).size !== expected.size) throw new Error('invalid core dispatch imports');
+    const executableResolve = this.native.core_chain_resolve_executable_owned;
+    const probe = executableResolve ? (context,pc,retired) => {
+      // Generated scalar state is still live in the dispatcher's locals at a
+      // cold miss. Context44 is a publication snapshot, not the current quota.
+      const remaining = this.dispatch?.['link.local12']?.value;
+      if (!Number.isInteger(remaining) || remaining < -0x80000000 || remaining > 0x7fffffff)
+        throw new Error('invalid live executable quota');
+      return executableResolve(context,pc,retired,remaining >>> 0);
+    } : this.continuationCore ? this.native.core_chain_resolve_owned : this.native.core_chain_select;
     const bindings = this.linkedCore
-      ? {memory:this.memory,functions:this.table,publishers:this.publishers,probe:this.continuationCore?this.native.core_chain_resolve_owned:this.native.core_chain_select,cold:this.native.core_chain_cold}
+      ? {memory:this.memory,functions:this.table,publishers:this.publishers,probe,cold:this.native.core_chain_cold}
       : {memory:this.memory,functions:this.table,next:this.native.core_chain_next};
     const exports = new WebAssembly.Instance(module,{ring3:bindings}).exports;
     if (typeof exports.run !== 'function' || exports.run.length !== 3 || !(exports.regions instanceof WebAssembly.Global) || exports.regions.value !== 0)
@@ -390,11 +414,12 @@ export class CodeCache {
     if (this.open) throw new Error('cannot select code during execution');
     this.pristine();
     if (this.native.core_cold_run) {
-      if (this.native.core_lookup) {
+      const operation = this.#lookupOperation;
+      if (this.native[operation]) {
         const lookup = () => {
-          const status = this.native.core_lookup(pc) >>> 0;
+          const status = this.native[operation](pc) >>> 0;
           if (status !== 0 && status !== 4)
-            throw Object.assign(new Error(`core_lookup returned ${status}`),{operation:'core_lookup',status});
+            throw Object.assign(new Error(`${operation} returned ${status}`),{operation,status});
           return status;
         };
         const status = this.compilation ? this.measureCompilation('prepare',lookup,pc) : lookup();
@@ -402,7 +427,7 @@ export class CodeCache {
       }
       return null;
     }
-    return this.entry(pc);
+    return this.#entry(pc,this.#prepareOperation);
   }
   retainContext(pointer) {
     if (!pointer || pointer % 8 || pointer + 128 > this.memory.buffer.byteLength)
@@ -411,15 +436,21 @@ export class CodeCache {
     this.context = pointer;
   }
   entry(pc = this.pc) {
+    // Explicit source preparation retains the original manual API. Automatic
+    // selection uses executable capability and lets misses run exactly cold.
+    return this.#entry(pc,'core_prepare');
+  }
+  #entry(pc,operation) {
     if (this.open) throw new Error('cannot select code during execution');
     this.pristine();
     const prepare = () => {
-      const status = this.native.core_prepare(pc,this.instructions,this.blocks) >>> 0;
-      if (status !== 0 && status !== 18)
-        throw Object.assign(new Error(`core_prepare returned ${status}`),{operation:'core_prepare',status});
+      const status = this.native[operation](pc,this.instructions,this.blocks) >>> 0;
+      if (operation === 'core_prepare_executable' ? status !== 0 && status !== 4 : status !== 0 && status !== 18)
+        throw Object.assign(new Error(`${operation} returned ${status}`),{operation,status});
       return status;
     };
     const prepared = this.compilation ? this.measureCompilation('prepare',prepare,pc) : prepare();
+    if (prepared === 4) return null;
     return this.#selectedEntry(pc,prepared);
   }
   #selectedEntry(pc,prepared) {

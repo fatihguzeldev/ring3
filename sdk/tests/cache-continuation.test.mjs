@@ -33,7 +33,7 @@ const i32 = value => [0x41,...positive(value)];
 const local = index => [0x20,...u(index)];
 const store = (offset,value) => [...local(0),...i32(value),0x36,2,...u(offset)];
 
-function driver(abi=5) {
+function driver(abi=5,probeQuota) {
   const imports = [5,...string('ring3'),...string('memory'),2,0,2,
     ...string('ring3'),...string('functions'),1,0x70,0,1,
     ...string('ring3'),...string('publishers'),1,0x70,0,1,
@@ -45,9 +45,11 @@ function driver(abi=5) {
     ...string('coldRuns'),3,1,...string('coldWork'),3,2,...string('coldRetired'),3,3,
     ...GLOBALS.flatMap((name,index)=>[...string(name),3,...u(index+4)]),
     ...string('linkAbi'),3,...u(4+GLOBALS.length)];
+  const probe=probeQuota===undefined?[]:[...i32(probeQuota),0x24,...u(4+GLOBALS.indexOf('link.local12')),
+    ...local(0),...i32(0x1040),...i32(3),0x10,0,0x1a];
   return wasm([section(1,[TYPES.length,...TYPES.flat()]),section(2,imports),section(3,[1,4]),
     section(6,globals),section(7,exports),section(10,[1,...body([
-      ...i32(1),0x24,0,...local(0),...local(1),...local(2),0x11,2,0,
+      ...i32(1),0x24,0,...probe,...local(0),...local(1),...local(2),0x11,2,0,
     ])])]);
 }
 
@@ -69,7 +71,7 @@ function owner({callbacks=false,corruptNonce=false}={}) {
 function fixture(options={}) {
   const memory = new WebAssembly.Memory({initial:2});
   const calls = [], links = new Map(), arena = new Map([[48,0x1000]]);
-  const control = {}, encoded = owner(options), dispatch = driver(options.abi ?? 5);
+  const control = {}, encoded = owner(options), dispatch = driver(options.abi ?? 5,options.probeQuota);
   const budget = options.callbacks ? 2 : 1;
   const data = () => new DataView(memory.buffer);
   const close = () => {
@@ -189,4 +191,30 @@ for(const failure of ['reject','trap'])test(`owned end ${failure} cannot strand 
   assert.equal(f.data().getUint32(HEADER+4,true),0);assert.equal(cache.runs,0);
   assert.equal(f.data().getUint32(CONTEXT+40,true),1);
   assert.equal(cache.units.get(unit.id),unit);assert.equal(cache.table.get(unit.slot),unit.link);
+});
+
+test('executable owned resolution forwards live dispatcher quota instead of Context44',()=>{
+  for(const remaining of[0,1,4]){
+    const f=fixture({probeQuota:remaining});
+    f.api.core_lookup_executable=()=>4;f.api.core_prepare_executable=f.api.core_prepare;
+    f.api.core_chain_resolve_executable_owned=(...args)=>{f.calls.push(['resolve-executable',...args]);return 0;};
+    f.api.core_chain_resolve_owned=()=>{throw new Error('automatic resolution used legacy source policy');};
+    const {cache,unit}=retained(f);
+    const run=cache.execute(unit);assert.equal(run.retired,1);
+    assert.deepEqual(f.calls.filter(([name])=>name==='resolve-executable'),
+      [['resolve-executable',CONTEXT,0x1040,3,remaining]]);
+  }
+});
+
+test('executable owned resolution requires its complete capabilities and immutable binding',()=>{
+  const missing=fixture();missing.api.core_chain_resolve_executable_owned=()=>0;
+  assert.throws(()=>new CodeCache(missing.engine),/incomplete core executable resolver exports/);
+  for(const target of['api','native']){
+    const f=fixture();f.api.core_lookup_executable=()=>4;f.api.core_prepare_executable=f.api.core_prepare;
+    f.api.core_chain_resolve_executable_owned=()=>0;
+    const {cache,unit}=retained(f);
+    (target==='api'?f.api:cache.native).core_chain_resolve_executable_owned=()=>0;
+    assert.throws(()=>cache.execute(unit),/core native bindings changed/);
+    assert.equal(f.calls.some(([name])=>name==='begin'),false);
+  }
 });
