@@ -1,5 +1,6 @@
 mod abi;
 pub(crate) mod cold;
+pub(crate) mod continuation;
 mod dispatch;
 mod effects;
 mod emitter;

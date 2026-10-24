@@ -116,6 +116,7 @@ pub(crate) struct HotSpan {
     pub entry: u32,
     pub end: u32,
     pub instructions: u32,
+    pub port: u32,
 }
 
 #[cfg(test)]
@@ -157,7 +158,8 @@ mod hot_span_tests {
             Some(HotSpan {
                 entry: 0x1000,
                 end: 0x1003,
-                instructions: 2
+                instructions: 2,
+                port: 0,
             })
         );
         assert_eq!(code.eligible_hot_span(0x1000, 1), None);
@@ -167,7 +169,8 @@ mod hot_span_tests {
             Some(HotSpan {
                 entry: 0x1003,
                 end: 0x1004,
-                instructions: 1
+                instructions: 1,
+                port: 1,
             })
         );
         assert_eq!(code.hot_span(0x1004), None);
@@ -176,7 +179,8 @@ mod hot_span_tests {
             Some(HotSpan {
                 entry: 0x1006,
                 end: 0x1007,
-                instructions: 1
+                instructions: 1,
+                port: 3,
             })
         );
     }
@@ -263,6 +267,12 @@ impl CompiledCode {
     pub(crate) fn eligible_hot_span(&self, pc: u32, remaining: u32) -> Option<HotSpan> {
         self.hot_span(pc)
             .filter(|span| span.instructions <= remaining)
+    }
+    pub(crate) fn hot_spans(&self) -> impl Iterator<Item = HotSpan> + '_ {
+        self.hot_spans
+            .iter()
+            .copied()
+            .filter(|span| self.supports_entry(span.entry))
     }
     pub(crate) fn trace_root(&self) -> Option<u32> {
         self.trace_root
@@ -977,8 +987,9 @@ fn finish_code(
     instruction_pcs.dedup();
     let mut hot_spans: Vec<_> = spans::partition(&blocks)
         .into_iter()
-        .filter(|span| span.fixed_work)
-        .map(|span| HotSpan {
+        .enumerate()
+        .filter(|(_, span)| span.fixed_work)
+        .map(|(index, span)| HotSpan {
             entry: span.block.entry,
             end: span
                 .block
@@ -987,6 +998,7 @@ fn finish_code(
                 .expect("nonempty executable span")
                 .next,
             instructions: span.block.instructions.len() as u32,
+            port: index as u32,
         })
         .collect();
     hot_spans.sort_unstable_by_key(|span| span.entry);
