@@ -221,11 +221,13 @@ export function inspectCanonicalSpine(bytes) {
   assert.equal(bodies.length,1,'one actual guarded architectural body owns the canonical continuation');
   const imported=module.imports.findIndex(item=>item.module==='ring3'&&item.name==='numeric');
   assert(imported>=0,'this numerical owner imports the real canonical numeric boundary');
-  assert.deepEqual(signature(module,imported),{parameters:[0x7f,0x7f],results:[0x7f]},
-    'the inspected boundary is the actual context/ordinal canonical function');
+  const owned=module.globalImports.some(item=>item.module==='ring3'&&item.name==='link.continuation');
+  assert.deepEqual(signature(module,imported),{parameters:Array(owned?3:2).fill(0x7f),results:[0x7f]},
+    owned?'the owned canonical boundary consumes context, actual PC and ordinal'
+      :'the pinned legacy canonical boundary consumes context and ordinal');
   const sites=module.functions.flatMap((fn,offset)=>fn.ops.flatMap(node=>node.op===16&&node.call===imported?
     [{function:offset+module.imports.length,offset:node.offset}]:[]));
-  return{body:bodies[0].index,imported,sites,ownerBytes:bytes.length,
+  return{body:bodies[0].index,imported,owned,sites,ownerBytes:bytes.length,
     bodyOperators:defined(module,bodies[0].index).ops.length};
 }
 
@@ -518,9 +520,13 @@ function inspectExitEpilogue(module,name) {
           canonicalPrefix[3]?.op===4&&guard?.type===-64&&guard.otherwise===undefined&&
           canonicalPrefix.at(-1)?.op===11&&canonicalPrefix.at(-1).frame===guard,
           'the added service is wholly inside the exact canonical-kind2 arm before the unchanged restart tail');
+        const owned=module.globalImports.some(item=>item.module==='ring3'&&item.name==='link.continuation');
+        const inputs=owned?[0,173,172]:[0,172],args=ops.slice(call-inputs.length,call);
         check(imported>=0&&calls.length===1&&ops[call]?.frames.includes(guard)&&
-          ops[call-2]?.op===0x20&&ops[call-2].local===0&&ops[call-1]?.op===0x20&&ops[call-1].local===172,
-          'the sole canonical callback consumes the actual context and runtime request ordinal inside its service guard');
+          JSON.stringify(signature(module,imported))===JSON.stringify({parameters:Array(inputs.length).fill(0x7f),results:[0x7f]})&&
+          args.length===inputs.length&&args.every((node,i)=>node.op===0x20&&node.local===inputs[i]),
+          owned?'the sole owned callback consumes context, actual request PC and ordinal inside its service guard'
+            :'the sole legacy callback consumes context and runtime request ordinal inside its service guard');
         summary.canonicalService={guardOpen:guard?.open,guardEnd:guard?.end,call,imported};
       }
       const terminal=ops.slice(serviceTest.end+1,serviceLoop.end);

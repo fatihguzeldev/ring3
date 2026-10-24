@@ -24,19 +24,25 @@ export function coldFixture(artifact,report,name,options,body) {
   const word=(pointer,offset=0)=>new DataView(memory.buffer).getUint32(pointer+offset,true);
   const bigint=(pointer,offset=0)=>new DataView(memory.buffer).getBigUint64(pointer+offset,true);
   const setWord=(pointer,offset,value)=>new DataView(memory.buffer).setUint32(pointer+offset,value,true);
-  let prepares=0,cache,engine,context=0,opened=false;
+  let prepares=0,resolverCalls=0,cache,engine,context=0,opened=false;
+  const numeric=(operation,pointer,pc,ordinal,args)=>{
+    const call={operation,ordinal,identity:String(bigint(pointer,120)),pc,contextPc:word(pointer,32)};
+    result.helperCalls.push(call);call.returned=raw[operation](...args);
+    const bank=word(pointer,92);call.fip=word(bank,8);
+    call.opcode=new DataView(memory.buffer).getUint16(bank+6,true);return call.returned;
+  };
   const api={...raw,
     core_prepare:(...args)=>{
       prepares++;
       if(options.referencePrepared)return raw.core_prepare(...args);
       throw new Error(`${name}: ordinary cold frontend invoked core_prepare(${args})`);
     },
-    core_numeric:(pointer,ordinal)=>{
-      const call={ordinal,identity:String(bigint(pointer,120)),pc:word(pointer,32)};
-      result.helperCalls.push(call);call.returned=raw.core_numeric(pointer,ordinal);
-      const bank=word(pointer,92);call.fip=word(bank,8);
-      call.opcode=new DataView(memory.buffer).getUint16(bank+6,true);return call.returned;
-    },
+    core_numeric:(pointer,ordinal)=>numeric('core_numeric',pointer,word(pointer,32),ordinal,[pointer,ordinal]),
+    ...(typeof raw.core_numeric_owned==='function'?{core_numeric_owned:(pointer,slot,generation,pc,ordinal)=>
+      numeric('core_numeric_owned',pointer,pc,ordinal,[pointer,slot,generation,pc,ordinal])}:{}),
+    ...(typeof raw.core_chain_resolve_owned==='function'?{core_chain_resolve_owned:(...args)=>{
+      resolverCalls++;return raw.core_chain_resolve_owned(...args);
+    }}:{}),
   };
   const moduleDescriptor=Object.getOwnPropertyDescriptor(WebAssembly,'Module'),OriginalModule=WebAssembly.Module;
   const moduleRecords=new Map();
@@ -102,11 +108,12 @@ export function coldFixture(artifact,report,name,options,body) {
     const world={artifact,result,raw,api,memory,engine,cache,context,bytes,word,bigint,setWord,
       physical,moduleRecords,initialFp,initialSimd,initialYmm,makeState,
       get prepares(){return prepares;},get helperCalls(){return result.helperCalls;},
+      get resolverCalls(){return resolverCalls;},
       revision:()=>bigint(word(context,80)),
       snapshot(){return{context:bytes(context,128),state:bytes(engine.base,56),fp:bytes(engine.base+FP,128),
         simd:bytes(engine.base+SIMD,160),ymm:bytes(engine.base+YMM,144),
         ram:bytes(word(context,64),word(context,68)*4096),pages:bytes(word(context,84),word(context,68)*16),
-        revision:this.revision(),epoch:bigint(word(context,88)),prepares,helpers:result.helperCalls.length};},
+        revision:this.revision(),epoch:bigint(word(context,88)),prepares,helpers:result.helperCalls.length,resolverCalls};},
       reset(changes={}) {
         cache.publish();new Uint8Array(memory.buffer,engine.base,56).set(makeState(changes));
         for(const[offset,image]of[[FP,changes.fp??initialFp],[SIMD,changes.simd??initialSimd],[YMM,changes.ymm??initialYmm]])

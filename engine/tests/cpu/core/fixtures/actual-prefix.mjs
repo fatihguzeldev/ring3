@@ -84,7 +84,7 @@ export function runActualPrefix(program,name,label,budget,options={},outcome,{in
     const module=new WebAssembly.Module(source);assertCoreNames(module,program.entry??0x1000,identity);
     let preciseCalls=0,reads=0,writes=0,numericCalls=0;
     const support=instantiateSupport(memory);
-    assert.equal(support.linkAbi?.value,4,'actual engine support uses exact-prefix link ABI 4');
+    assert.equal(support.linkAbi?.value,typeof api.core_continuation_format==='function'?5:4,'actual engine support uses the required precise/continuation ABI');
     const imports={ring3:{...support,memory,
       read:(...args)=>{reads++;return api.core_read(...args);},
       write:(...args)=>{writes++;return api.core_write(...args);},

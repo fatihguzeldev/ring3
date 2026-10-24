@@ -58,7 +58,7 @@ export function assertCoreNames(module, ownerEntry, identity) {
 
 export function assertDispatchNames(module) {
   assert.deepEqual(readNames(module), {moduleName: 'ring3.dispatch',
-    functions: ['guest.probe','guest.cold','guest.chain',...supportNames].map((name,index)=>[index,name])});
+    functions: ['guest.probe','guest.cold','guest.chain',...(WebAssembly.Module.exports(module).some(item=>item.name==='link.continuation')?['guest.continuation']:[]),...supportNames].map((name,index)=>[index,name])});
 }
 
 export function coreFunctionNames(module) {

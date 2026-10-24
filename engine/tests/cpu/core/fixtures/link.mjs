@@ -18,7 +18,7 @@ let standaloneSupport;
 
 export function coreImports(module) {
   const imports=WebAssembly.Module.imports(module),links=imports.filter(item=>item.name.startsWith('link.'));
-  if(links.length)assert.deepEqual(links,linkNames(links.length===47?legacyFields:fields).map(name=>({module:'ring3',name,kind:'global'})),
+  if(links.length)assert.deepEqual(links,[...linkNames(links.length===47?legacyFields:fields),...(links.length===24?['link.continuation','link.port']:[])].map(name=>({module:'ring3',name,kind:'global'})),
     'the complete typed compiled-link state is the only added import surface');
   const support=imports.filter(item=>item.name.startsWith('support.'));
   if(support.length)assert.deepEqual(support,[...(support.some(item=>item.name==='support.normalize_kernel')?legacySupportNames:support.some(item=>item.name==='support.commit_pool')?poolSupportNames:support.some(item=>item.name==='support.record_trace')?supportNames:previousSupportNames).map(name=>({module:'ring3',name,kind:'function'})),
@@ -76,12 +76,61 @@ export function linkGlobals(module,shared={}) {
   return globals;
 }
 
+// Diagnostic owners keep the production SDK lease and native owner authority.
+// Public legacy exports retain their selected-owner contract under ABI5.
+export function cacheCallbacks(cache) {
+  return {
+    numeric:cache.continuationCore
+      ? (context,pc,ordinal)=>cache.open?cache.invokeNumeric(context,pc,ordinal)
+        :cache.native.core_numeric(context,ordinal)
+      : cache.native.core_numeric,
+    precise:typeof cache.native.core_precise==='function'
+      ? context=>cache.open?cache.invokePrecise(context):cache.native.core_precise(context) : undefined,
+  };
+}
+
+export function cacheResolver(cache) {
+  const resolve=cache.continuationCore?cache.native.core_chain_resolve_owned
+    : cache.native.core_chain_select??cache.native.core_chain_probe;
+  assert.equal(typeof resolve,'function','the negotiated dispatcher uses its actual native resolver');
+  return resolve;
+}
+
+export function resolverExport(api) {
+  return typeof api.core_chain_resolve_owned==='function'?'core_chain_resolve_owned'
+    :typeof api.core_chain_select==='function'?'core_chain_select':'core_chain_probe';
+}
+
+export function bindCacheContinuation(cache,exports) {
+  if(!cache.continuationCore)return;
+  const pointer=cache.native.core_continuation_ptr()>>>0;
+  assert(pointer>0&&pointer%8===0&&pointer+120<=cache.memory.buffer.byteLength,
+    'the measured dispatcher uses the real stable native continuation allocation');
+  assert(exports['link.continuation'] instanceof WebAssembly.Global);
+  assert(exports['link.port'] instanceof WebAssembly.Global);
+  exports['link.continuation'].value=pointer;exports['link.port'].value=0;
+}
+
+export function forceNativeInspection(cache,result) {
+  if(!cache.continuationCore)return;
+  const dispatch=cache.dispatch,run=dispatch.run;
+  result.forcedNativeInspection=true;
+  cache.dispatch={...dispatch,run(...args){
+    // SDK begin still validates the real ticket. Only generated directory
+    // routing is disabled, exposing an actual native miss for the existing
+    // intermediate-state oracle; this control makes no warm-route claim.
+    dispatch['link.continuation'].value=0;
+    return Reflect.apply(run,dispatch,args);
+  }};
+}
+
 export function instantiateCore(module,imports) {
   const supplied=imports?.ring3??{};
   const shared=WebAssembly.Module.imports(module).some(item=>item.name.startsWith('support.'))&&
     !WebAssembly.Module.imports(module).filter(item=>item.name.startsWith('support.')&&item.kind==='function').every(item=>typeof supplied[item.name]==='function')?bindings(supplied.memory):{};
   const instance=new WebAssembly.Instance(module,{...imports,
     ring3:{...shared,...linkGlobals(module,supplied),...supplied,
+      numeric:(...args)=>args.length===3?supplied.numeric(args[0],args[2]):supplied.numeric(...args),
       precise:supplied.precise??preciseCallbacks.get(supplied.memory)??(()=>assert.fail('exact-prefix execution requires the actual CPU adapter')),
       'support.abi':supplied['support.abi']??supplied.supportAbi??shared['support.abi']}});
   const memory=instance.exports.memory,ptr=instance.exports.ring3_abi_v1_core_dispatch_code_ptr,
