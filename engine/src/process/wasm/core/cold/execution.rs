@@ -53,6 +53,132 @@ pub(in crate::process) fn probe(
     }
 }
 
+pub(in crate::process) fn precise(
+    instance: &mut EngineInstance,
+    context: &mut Context32,
+    numeric: &mut NumericBank,
+    selected: &mut Option<RegionRef>,
+    cache: &CoreCache32,
+    heat: &mut ColdState,
+    observer: &mut impl ColdObserver,
+) -> StopReason {
+    let Some(source) = selected.as_ref().cloned() else {
+        observer.abandon_instruction();
+        return StopReason::Infrastructure;
+    };
+    let identity = u64::from_le_bytes(context.bytes()[120..128].try_into().unwrap());
+    let Some(memory) = instance.memory.as_ref() else {
+        observer.abandon_instruction();
+        return StopReason::Infrastructure;
+    };
+    if context.bytes()[112..116] != 1_u32.to_le_bytes()
+        || identity != source.identity()
+        || !source.contains_instruction(context.state().eip)
+    {
+        observer.abandon_instruction();
+        return StopReason::Infrastructure;
+    }
+    if !cache.precise_source_current(memory, &source) {
+        observer.abandon_instruction();
+        let reason = if source.is_current(memory) {
+            StopReason::Infrastructure
+        } else {
+            StopReason::CodeInvalidated
+        };
+        context.bytes_mut()[120..128].fill(0);
+        // Keep stale selection metadata for the public begin/reselect protocol;
+        // the cleared Context identity grants no execution capability.
+        return reason;
+    }
+    if !numeric.begin_precise() {
+        observer.abandon_instruction();
+        return StopReason::Infrastructure;
+    }
+    let initial_remaining = context.remaining();
+    let segments = numeric.segment_context();
+    let bypass = observer.bypass_token();
+    context.bytes_mut()[120..128].fill(0);
+    *selected = None;
+    let mut precise_observer = PreciseObserver {
+        observer,
+        cache,
+        source: &source,
+    };
+    let reason = run_observed_progress(
+        instance,
+        context,
+        numeric,
+        &segments,
+        &|modules, pc| modules.gate_at(pc).map(|gate| gate.id),
+        &|memory, pc, progress| {
+            progress.remaining < initial_remaining
+                && ((source.eligible_hot_span(pc, progress.remaining).is_some()
+                    && cache.precise_source_current(memory, &source))
+                    || cache.precise_frontier_contains(
+                        memory,
+                        pc,
+                        progress.remaining,
+                        bypass
+                            .filter(|(_, retired)| *retired == progress.retired)
+                            .map_or(0, |(identity, _)| identity),
+                    ))
+        },
+        heat,
+        &mut precise_observer,
+    );
+    if !matches!(reason, StopReason::NeedCode | StopReason::Budget) {
+        // Some terminal paths (gates/fetch faults/debug state) stop before an
+        // instruction begins. They still end the capture rather than leave an
+        // unobserved host/fault transition between later recorded events.
+        precise_observer.abandon_instruction();
+    }
+    if instance
+        .memory
+        .as_ref()
+        .is_some_and(|memory| cache.precise_source_current(memory, &source))
+    {
+        context.bytes_mut()[120..128].copy_from_slice(&source.identity().to_le_bytes());
+        *selected = Some(source);
+    } else {
+        // core_begin must report a stale selection (4), rather than no selection
+        // (7). Numeric/compiled entry still require a live matching identity.
+        *selected = Some(source);
+    }
+    reason
+}
+
+struct PreciseObserver<'a, O> {
+    observer: &'a mut O,
+    cache: &'a CoreCache32,
+    source: &'a RegionRef,
+}
+
+impl<O: ColdObserver> ColdObserver for PreciseObserver<'_, O> {
+    fn exact_cold(&self) -> bool {
+        true
+    }
+    fn tracks_heat(&self, memory: &AddressSpace, pc: u32) -> bool {
+        !(self.source.contains_instruction(pc) && self.source.is_current(memory))
+            && !self.cache.owned_frontier_contains(memory, pc)
+    }
+    fn begin_instruction(
+        &mut self,
+        memory: &AddressSpace,
+        instruction: &crate::cpu::core::NativeInstruction,
+        hot: bool,
+    ) -> bool {
+        let hot = hot && self.tracks_heat(memory, instruction.pc);
+        self.observer.begin_instruction(memory, instruction, hot);
+        true
+    }
+    fn complete_instruction(&mut self, memory: &AddressSpace, actual_post_pc: u32) {
+        self.observer.complete_instruction(memory, actual_post_pc);
+    }
+    fn abandon_instruction(&mut self) {
+        self.observer.abandon_instruction();
+    }
+}
+
 pub(in crate::process) fn chain_next(
     instance: &mut EngineInstance,
     context: &mut Context32,
@@ -240,6 +366,28 @@ pub(in crate::process) fn run_observed(
     heat: &mut ColdState,
     observer: &mut impl ColdObserver,
 ) -> StopReason {
+    run_observed_progress(
+        instance,
+        context,
+        numeric,
+        segments,
+        gate_at,
+        &|memory, pc, progress| frontier(memory, pc, progress.retired),
+        heat,
+        observer,
+    )
+}
+
+pub(in crate::process) fn run_observed_progress(
+    instance: &mut EngineInstance,
+    context: &mut Context32,
+    numeric: &mut NumericBank,
+    segments: &SegmentContext,
+    gate_at: &impl Fn(&ModuleProcess32, u32) -> Option<u32>,
+    frontier: &impl Fn(&AddressSpace, u32, cold::ColdProgress) -> bool,
+    heat: &mut ColdState,
+    observer: &mut impl ColdObserver,
+) -> StopReason {
     loop {
         let outcome = {
             let EngineInstance {
@@ -248,7 +396,7 @@ pub(in crate::process) fn run_observed(
             let Some(memory) = memory.as_mut() else {
                 return StopReason::Infrastructure;
             };
-            cold::run_observed(
+            cold::run_observed_progress(
                 memory,
                 context,
                 segments,
@@ -287,7 +435,7 @@ pub(in crate::process) fn run_observed(
         let Some(memory) = instance.memory.as_ref() else {
             return StopReason::Infrastructure;
         };
-        if result != 6 {
+        if result != 6 && observer.tracks_heat(memory, instruction.pc) {
             heat.retired(memory, instruction.pc);
         }
         match result {
@@ -357,3 +505,7 @@ mod tests;
 #[cfg(test)]
 #[path = "dispatch_tests.rs"]
 mod dispatch_tests;
+
+#[cfg(test)]
+#[path = "precise_tests.rs"]
+mod precise_tests;

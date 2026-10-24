@@ -6,6 +6,55 @@ use crate::cpu::{
 
 mod execution;
 
+pub(crate) fn core_precise(context: u32) -> u32 {
+    REGISTRY.with(|registry| {
+        let Ok(mut registry) = registry.try_borrow_mut() else {
+            return StopReason::Infrastructure as u32;
+        };
+        let Registry { instance, core, .. } = &mut *registry;
+        let (Some(instance), Some(session)) = (instance.as_mut(), core.as_mut()) else {
+            return StopReason::Infrastructure as u32;
+        };
+        if !session.active || session.context_address() != context as usize {
+            return StopReason::Infrastructure as u32;
+        }
+        // Exact execution contributes source-validated completed instructions to
+        // an active capture. The preceding BLOCK alone confirms no suffix.
+        let result = execution::precise(
+            instance,
+            &mut session.context,
+            &mut session.numeric,
+            &mut session.code,
+            &session.cache,
+            &mut session.cold_state,
+            &mut session.tracing,
+        );
+        session.refresh_trace_bypass(session.context.retired());
+        if result == StopReason::NeedCode {
+            let Some(memory) = instance.memory.as_mut() else {
+                return StopReason::Infrastructure as u32;
+            };
+            let view = memory.core_view();
+            for (offset, value) in [
+                (56, view.mappings),
+                (60, view.permissions),
+                (64, view.backing),
+                (68, view.backing_pages as usize),
+                (72, view.executable_views),
+                (76, view.private_slots),
+                (80, view.transaction_version),
+                (84, view.page_versions),
+                (88, view.code_validation_version),
+            ] {
+                session.context.set_word(offset, value as u32);
+            }
+            session.context.bytes_mut()[96..104]
+                .copy_from_slice(&view.expected_code_version.to_le_bytes());
+        }
+        result as u32
+    })
+}
+
 pub(crate) fn core_cold_run(budget: u32) -> i32 {
     REGISTRY.with(|registry| {
         let Ok(mut registry) = registry.try_borrow_mut() else {

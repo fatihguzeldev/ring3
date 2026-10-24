@@ -5,6 +5,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 mod observed_cold;
 #[cfg(test)]
 mod reform;
+pub(crate) mod spans;
 pub(crate) use observed_cold::{
     ObservedPlan, ObservedPlanFingerprint, WindowFingerprint, WindowPlan,
     compile_observed_with_cold, emit_hot_window, emit_observed_plan, prepare_cold_prefix_plan,
@@ -87,6 +88,7 @@ pub struct CompiledCode {
     instruction_pcs: Box<[u32]>,
     block_pcs: Box<[u32]>,
     blocks: Box<[CodeBlock]>,
+    hot_spans: Box<[HotSpan]>,
     native: Vec<NativeInstruction>,
     trace_root: Option<u32>,
     trace_score: Option<TraceScore>,
@@ -105,6 +107,79 @@ struct CodeBlock {
     end: u32,
     first: u32,
     count: u32,
+}
+
+/// An executable entry whose complete architectural work is bounded in advance.
+/// Source coverage and arbitrary precise ports remain separate authorities.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct HotSpan {
+    pub entry: u32,
+    pub end: u32,
+    pub instructions: u32,
+}
+
+#[cfg(test)]
+mod hot_span_tests {
+    use super::*;
+    use crate::memory::{PageRange, Permissions};
+
+    #[test]
+    fn executable_spans_keep_source_ports_but_require_fixed_complete_work() {
+        let mut memory = AddressSpace::new(2).unwrap();
+        memory
+            .map_zeroed(
+                PageRange::new(GuestAddress(0x1000), 1).unwrap(),
+                Permissions::ALL,
+            )
+            .unwrap();
+        // NOP; CPUID; NOP; REP MOVSB; NOP.
+        memory
+            .write(
+                GuestAddress(0x1000),
+                &[0x90, 0x0f, 0xa2, 0x90, 0xf3, 0xa4, 0x90],
+            )
+            .unwrap();
+        let code = compile(
+            &memory,
+            GuestAddress(0x1000),
+            CompileOptions {
+                instructions: 5,
+                blocks: 8,
+                ..CompileOptions::default()
+            },
+        )
+        .unwrap();
+        assert!(code.contains_instruction(0x1001));
+        assert!(code.supports_entry(0x1001));
+        assert_eq!(code.hot_span(0x1001), None);
+        assert_eq!(
+            code.hot_span(0x1000),
+            Some(HotSpan {
+                entry: 0x1000,
+                end: 0x1003,
+                instructions: 2
+            })
+        );
+        assert_eq!(code.eligible_hot_span(0x1000, 1), None);
+        assert_eq!(code.eligible_hot_span(0x1000, 2), code.hot_span(0x1000));
+        assert_eq!(
+            code.hot_span(0x1003),
+            Some(HotSpan {
+                entry: 0x1003,
+                end: 0x1004,
+                instructions: 1
+            })
+        );
+        assert_eq!(code.hot_span(0x1004), None);
+        assert_eq!(
+            code.hot_span(0x1006),
+            Some(HotSpan {
+                entry: 0x1006,
+                end: 0x1007,
+                instructions: 1
+            })
+        );
+    }
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -141,6 +216,7 @@ impl CompiledCode {
             + std::mem::size_of_val(self.instruction_pcs.as_ref())
             + std::mem::size_of_val(self.block_pcs.as_ref())
             + std::mem::size_of_val(self.blocks.as_ref())
+            + std::mem::size_of_val(self.hot_spans.as_ref())
             + self.native.capacity() * std::mem::size_of::<NativeInstruction>();
         if let Some(history) = &self.observed {
             charge += history.resident_charge();
@@ -171,6 +247,22 @@ impl CompiledCode {
             || self.instruction_pcs.binary_search(&pc).is_ok(),
             |root| root == pc,
         )
+    }
+    pub(crate) fn contains_instruction(&self, pc: u32) -> bool {
+        self.instruction_pcs.binary_search(&pc).is_ok()
+    }
+    pub(crate) fn hot_span(&self, pc: u32) -> Option<HotSpan> {
+        if !self.supports_entry(pc) {
+            return None;
+        }
+        self.hot_spans
+            .binary_search_by_key(&pc, |span| span.entry)
+            .ok()
+            .map(|index| self.hot_spans[index])
+    }
+    pub(crate) fn eligible_hot_span(&self, pc: u32, remaining: u32) -> Option<HotSpan> {
+        self.hot_span(pc)
+            .filter(|span| span.instructions <= remaining)
     }
     pub(crate) fn trace_root(&self) -> Option<u32> {
         self.trace_root
@@ -412,6 +504,19 @@ pub(crate) fn compile_observed_with_growth(
                 return Ok(None);
             }
             let Some(end) = suffix.iter().position(|&pc| pc == next.pc) else {
+                return Ok(None);
+            };
+            &suffix[..end]
+        } else if event.kind == BLOCK
+            && next.kind == BLOCK
+            && event.owner == next.owner
+            && event.pc == next.pc
+            && event.end == next.end
+            && event.offset < next.offset
+        {
+            // Multiple executable spans can share one original source block.
+            // Its next span witnesses only the completed prefix before it.
+            let Some(end) = suffix.iter().position(|&pc| pc == target) else {
                 return Ok(None);
             };
             &suffix[..end]
@@ -870,6 +975,21 @@ fn finish_code(
     let mut instruction_pcs = block_pcs.clone();
     instruction_pcs.sort_unstable();
     instruction_pcs.dedup();
+    let mut hot_spans: Vec<_> = spans::partition(&blocks)
+        .into_iter()
+        .filter(|span| span.fixed_work)
+        .map(|span| HotSpan {
+            entry: span.block.entry,
+            end: span
+                .block
+                .instructions
+                .last()
+                .expect("nonempty executable span")
+                .next,
+            instructions: span.block.instructions.len() as u32,
+        })
+        .collect();
+    hot_spans.sort_unstable_by_key(|span| span.entry);
     CompiledCode {
         identity,
         memory_identity: memory.identity(),
@@ -886,6 +1006,7 @@ fn finish_code(
         instruction_pcs: instruction_pcs.into_boxed_slice(),
         block_pcs: block_pcs.into_boxed_slice(),
         blocks: geometry,
+        hot_spans: hot_spans.into_boxed_slice(),
         wasm,
         sources,
         native,

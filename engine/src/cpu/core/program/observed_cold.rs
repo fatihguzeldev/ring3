@@ -391,6 +391,29 @@ fn capture_graph_with(
                         return Ok(None);
                     };
                     &pcs[..end]
+                } else if events[index].kind == BLOCK
+                    && next.kind == BLOCK
+                    && events[index].owner == next.owner
+                    && events[index].pc == next.pc
+                    && events[index].end == next.end
+                    && events[index].offset < next.offset
+                {
+                    // Executable spans retain the original source-block
+                    // geometry. A later span confirms only the prefix before
+                    // its actual first instruction, not the old whole suffix.
+                    let Some(end) = pcs.iter().position(|&pc| pc == target) else {
+                        return Ok(None);
+                    };
+                    &pcs[..end]
+                } else if events[index].kind == BLOCK && matches!(next_site, Site::Cold(_)) {
+                    // A precise before-op exit can hand off at this very
+                    // instruction (an empty compiled prefix). Only an
+                    // authenticated completed cold record licenses this cut.
+                    if let Some(end) = pcs.iter().position(|&pc| pc == target) {
+                        &pcs[..end]
+                    } else {
+                        pcs
+                    }
                 } else {
                     pcs
                 };
@@ -493,3 +516,6 @@ pub(crate) fn compile_observed_with_cold(
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod span_tests;

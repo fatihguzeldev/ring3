@@ -25,6 +25,7 @@ export_process_calls! {
     core_trace_ready();
     core_trace_root();
     core_numeric(context: u32, ordinal: u32);
+    core_precise(context: u32);
     core_import();
     core_export(reason: u32, work: u32);
     core_capture_windows_call();

@@ -21,9 +21,9 @@ pub use program::{
     compile_with_frontier_query, compile_with_gates,
 };
 pub(crate) use program::{
-    ObservedPlan, ObservedPlanFingerprint, WindowFingerprint, WindowPlan, emit_hot_window,
-    emit_observed_plan, prepare_cold_prefix_plan, prepare_hot_window, prepare_observed_plan,
+    HotSpan, TraceScore, compile_observed, compile_observed_with_cold, compile_observed_with_growth,
 };
 pub(crate) use program::{
-    TraceScore, compile_observed, compile_observed_with_cold, compile_observed_with_growth,
+    ObservedPlan, ObservedPlanFingerprint, WindowFingerprint, WindowPlan, emit_hot_window,
+    emit_observed_plan, prepare_cold_prefix_plan, prepare_hot_window, prepare_observed_plan,
 };

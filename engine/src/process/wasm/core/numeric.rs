@@ -128,6 +128,15 @@ pub(super) struct NumericBank {
 }
 
 impl NumericBank {
+    pub(super) fn begin_precise(&mut self) -> bool {
+        if self.pool.active != 0 {
+            return false;
+        }
+        // The compiled publisher has made the canonical bank authoritative.
+        self.pool = Default::default();
+        true
+    }
+
     pub(super) fn from_instance(instance: &EngineInstance) -> Result<Self, HostError> {
         instance.memory()?;
         let arena = instance.arena();

@@ -107,6 +107,10 @@ pub(super) fn preserves_fp_success(operation: &Operation) -> bool {
     numeric::preserves_fp_success(operation)
 }
 
+pub(in crate::cpu::core) fn variable_work(operation: Operation) -> bool {
+    strings::supports(&operation)
+}
+
 pub(super) fn emit(
     blocks: &[Block],
     entry: u32,

@@ -22,8 +22,9 @@ pub(crate) use core::{
     core_complete_windows_call, core_context_ptr, core_dispatch_code_len, core_dispatch_code_ptr,
     core_dispatch_exception, core_end, core_export, core_finish_exception,
     core_finish_windows_callback, core_import, core_link, core_link_owners_ptr, core_lookup,
-    core_numeric, core_prepare, core_read, core_trace_finish, core_trace_pointer, core_trace_ready,
-    core_trace_root, core_trace_start, core_trace_status_ptr, core_unlink, core_write,
+    core_numeric, core_precise, core_prepare, core_read, core_trace_finish, core_trace_pointer,
+    core_trace_ready, core_trace_root, core_trace_start, core_trace_status_ptr, core_unlink,
+    core_write,
 };
 
 #[cfg(feature = "observability")]

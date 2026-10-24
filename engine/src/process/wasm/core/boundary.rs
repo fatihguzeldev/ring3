@@ -22,14 +22,24 @@ pub(crate) fn core_numeric(context: u32, ordinal: u32) -> u32 {
         if !core.active || core.context_address() as u32 != context {
             return 8;
         }
+        let Some(instance) = instance.as_mut() else {
+            return 8;
+        };
+        let Some(memory) = instance.memory.as_ref() else {
+            return 8;
+        };
+        if !core.code.as_ref().is_some_and(|code| {
+            u64::from_le_bytes(core.context.bytes()[120..128].try_into().unwrap())
+                == code.identity()
+                && core.cache.precise_source_current(memory, code)
+        }) {
+            return 8;
+        }
         let Some(instruction) = core
             .code
             .as_ref()
             .and_then(|code| code.native_instructions().get(ordinal as usize).copied())
         else {
-            return 8;
-        };
-        let Some(instance) = instance.as_mut() else {
             return 8;
         };
         if let Some(code) = core.code.as_ref() {

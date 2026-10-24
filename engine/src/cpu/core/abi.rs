@@ -15,6 +15,8 @@ pub enum StopReason {
     Infrastructure = 8,
     CpuFault = 9,
     SystemEntry = 10,
+    /// Private compiled ingress request. Public wrappers consume this reason.
+    ExactPrefix = 11,
 }
 
 #[derive(Clone, Debug)]

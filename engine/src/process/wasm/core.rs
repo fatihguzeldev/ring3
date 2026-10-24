@@ -10,7 +10,7 @@ pub(crate) use tracing::{
     core_trace_status_ptr,
 };
 
-pub(crate) use cold::core_cold_run;
+pub(crate) use cold::{core_cold_run, core_precise};
 pub(crate) use dispatch::{
     core_chain_cold, core_chain_next, core_chain_probe, core_chain_select, core_dispatch_code_len,
     core_dispatch_code_ptr, core_link, core_unlink,
@@ -103,7 +103,7 @@ impl CoreSession32 {
             None
         };
         let memory = instance.memory.as_mut().ok_or(5_u32)?;
-        if code.is_some_and(|code| !code.is_current(memory)) {
+        if code.is_some_and(|code| !self.cache.precise_source_current(memory, code)) {
             return Err(4);
         }
         let flags = self.context.state().eflags;

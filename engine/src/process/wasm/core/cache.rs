@@ -959,6 +959,51 @@ impl CoreCache32 {
         self.frontier_contains_with_bypass(memory, pc, self.trace_bypass_identity)
     }
 
+    pub(in crate::process) fn precise_source_current(
+        &self,
+        memory: &AddressSpace,
+        source: &RegionRef,
+    ) -> bool {
+        if !source.is_current(memory) {
+            return false;
+        }
+        if source.is_transient() {
+            return true;
+        }
+        self.retained(source)
+            .is_some_and(|entry| entry.slot == 0 || self.reciprocal_slot(source.key, entry))
+    }
+
+    pub(in crate::process) fn precise_frontier_contains(
+        &self,
+        memory: &AddressSpace,
+        pc: u32,
+        remaining: u32,
+        bypass: u64,
+    ) -> bool {
+        // Match lookup's priority. An ineligible higher-priority owner must not
+        // make cold stop only to select that same ineligible entry again.
+        for key in [
+            self.window_entries.get(&pc),
+            self.trace_entries.get(&pc),
+            self.entries.get(&pc),
+        ]
+        .into_iter()
+        .flatten()
+        .filter(|key| key.identity != bypass)
+        {
+            let Some(entry) = self.region(*key) else {
+                continue;
+            };
+            if !entry.code.is_current(memory) {
+                continue;
+            }
+            return (entry.slot == 0 || self.reciprocal_slot(*key, entry))
+                && entry.code.eligible_hot_span(pc, remaining).is_some();
+        }
+        false
+    }
+
     pub(super) fn trace_bypass_identity(&self) -> u64 {
         self.trace_bypass_identity
     }

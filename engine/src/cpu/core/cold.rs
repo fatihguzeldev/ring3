@@ -27,6 +27,9 @@ pub(crate) trait ColdObserver {
     fn exact_cold(&self) -> bool {
         false
     }
+    fn tracks_heat(&self, _memory: &AddressSpace, _pc: u32) -> bool {
+        true
+    }
     fn begin_instruction(
         &mut self,
         _memory: &AddressSpace,
@@ -52,6 +55,12 @@ const HOT_VISITS: u32 = 64;
 pub(crate) enum ColdOutcome {
     Stop(StopReason),
     NeedNative(NativeInstruction),
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct ColdProgress {
+    pub retired: u32,
+    pub remaining: u32,
 }
 
 #[derive(Clone, Copy, Default)]
@@ -262,6 +271,26 @@ pub(crate) fn run_observed(
     cold: &mut ColdState,
     observer: &mut impl ColdObserver,
 ) -> ColdOutcome {
+    run_observed_progress(
+        memory,
+        context,
+        segments,
+        gate_at,
+        &|memory, pc, progress| frontier(memory, pc, progress.retired),
+        cold,
+        observer,
+    )
+}
+
+pub(crate) fn run_observed_progress(
+    memory: &mut AddressSpace,
+    context: &mut Context32,
+    segments: &SegmentContext,
+    gate_at: &impl Fn(u32) -> Option<u32>,
+    frontier: &impl Fn(&AddressSpace, u32, ColdProgress) -> bool,
+    cold: &mut ColdState,
+    observer: &mut impl ColdObserver,
+) -> ColdOutcome {
     if word(context, 112) != 1 || context.bytes()[120..128] != [0; 8] || !segments.is_legacy() {
         return ColdOutcome::Stop(StopReason::Infrastructure);
     }
@@ -291,7 +320,7 @@ pub(crate) fn run_observed(
                 return finish(context, state, retired, remaining, reason);
             }
         }
-        if frontier(memory, pc, retired) {
+        if frontier(memory, pc, ColdProgress { retired, remaining }) {
             return finish(context, state, retired, remaining, StopReason::NeedCode);
         }
         let decoded = match decode.decode(
@@ -380,7 +409,8 @@ pub(crate) fn run_observed(
             next,
             operation,
         };
-        let hot = heat.hot(memory, pc);
+        let track_heat = observer.tracks_heat(memory, pc);
+        let hot = track_heat && heat.hot(memory, pc);
         if hot {
             heat.requested(pc);
         }
@@ -421,7 +451,9 @@ pub(crate) fn run_observed(
             }
             if progress.instruction_completed {
                 observer.complete_instruction(memory, state.eip);
-                heat.retired(memory, pc);
+                if track_heat {
+                    heat.retired(memory, pc);
+                }
                 continue;
             }
             observer.abandon_instruction();
@@ -462,13 +494,17 @@ pub(crate) fn run_observed(
                     return finish(context, state, retired, remaining, reason);
                 }
                 observer.complete_instruction(memory, state.eip);
-                heat.retired(memory, pc);
+                if track_heat {
+                    heat.retired(memory, pc);
+                }
             }
             Ok(false) => {
                 observer.abandon_instruction();
                 #[cfg(any(test, feature = "observability"))]
                 heat.diagnostics.request(diagnostics::Request::Unsupported);
-                heat.requested(pc);
+                if track_heat {
+                    heat.requested(pc);
+                }
                 return finish(
                     context,
                     state,
