@@ -8,7 +8,7 @@ const hash=bytes=>createHash('sha256').update(bytes).digest('hex');
 const registers=[0,2,0,0x3000,0x4800,0,0x1800,0];
 const roundingData=page=>{const d=new DataView(page.buffer);d.setFloat32(0,0,true);d.setFloat32(4,2,true);};
 
-function observe(t,wanted,{helpers=0,precise=0,entries=1,materializers=helpers+precise,writes=0,fast=false,revoked=false,after},checks) {
+function observe(t,wanted,{canonicalMode,helpers=0,precise=0,entries=1,materializers=helpers+precise,writes=0,fast=false,revoked=false,after},checks) {
   const source=t.bytes(t.api.core_code_ptr()>>>0,t.api.core_code_len()>>>0),revision=t.version();
   const id=new DataView(t.engine.memory.buffer).getBigUint64(t.context()+120,true);
   const run=t.check(wanted);
@@ -27,7 +27,8 @@ function observe(t,wanted,{helpers=0,precise=0,entries=1,materializers=helpers+p
   checks.push(()=>{
     assert.equal(witness.body_entries,entries,'internal precise continuation retains one bootstrap; external exact ingress uses only the specified wrapper reentry');
     assert.equal(witness.canonical_calls,helpers,'actual Wasm canonical calls match the independent callback oracle');
-    assert.equal(spine.sites.length,1,'the numerical owner has one actual canonical import callsite, independent of its instruction count');
+    assert.equal(typeof canonicalMode,'boolean','each authored program declares whether it contains a planned canonical operation');
+    assert.equal(spine.sites.length,Number(canonicalMode),'only owners with a planned canonical operation retain the one shared canonical import callsite');
     assert(spine.sites.every(site=>site.function===spine.body),'the canonical spine belongs to the shared instruction body');
     assert.equal(witness.wide_snapshot_calls,0,'a first planned fallback transports no 40-value state snapshot');
     assert.equal(witness.materializer_calls,materializers,
@@ -51,7 +52,7 @@ export function runCanonicalCases(fixture) {
     t.writeExpected(0x3008,'0000a040');
     observe(t,{pc:0x1800,retired:4,budget:4,
       fp:t.fp({opcode:0x15b,fip:0x1005,fdp:0x3008,registers:{7:FIVE}})},
-      {helpers:0,writes:1,fast:true},checks);
+      {canonicalMode:false,helpers:0,writes:1,fast:true},checks);
   });
 
   // 3+2^-62 is an exact normal binary80 value. At PC53, adding zero rounds
@@ -67,7 +68,7 @@ export function runCanonicalCases(fixture) {
       budget===2?{status:0x20,tag:0xfffc,opcode:0x43,fip:0x1002,fdp:0x3004,registers:{0:FIVE}}:
       {status:0x820,opcode:0x37b,fip:0x1005,fdp:0x3010,registers:{0:FIVE}});
     observe(t,{pc:[0x1000,0x1002,0x1005,0,0x1800][budget],retired:budget,budget,fp:expected},
-      {precise:Number(budget!==0),writes:Number(budget===4)},checks);
+      {canonicalMode:true,precise:Number(budget!==0),writes:Number(budget===4)},checks);
   });
 
   fixture('canonical-service-arbitrary-port-imports-full80-top-and-unexecuted-history',{
@@ -80,7 +81,7 @@ export function runCanonicalCases(fixture) {
     t.writeExpected(0x3010,FULL80);
     observe(t,{pc:0x1800,retired:3,budget:3,
       fp:t.fp({status:0x1800,opcode:0x37b,fip:0x1005,fdp:0x3010,
-        registers:{2:FULL80,7:'00000000000000000080'}})}, {precise:1,entries:2,writes:1},checks);
+        registers:{2:FULL80,7:'00000000000000000080'}})}, {canonicalMode:true,precise:1,entries:2,writes:1},checks);
   });
 
   for(const codeStore of[false,true])fixture(`canonical-service-${codeStore?'smc-commits-current-once':'late-fault-preserves-completed-prefix'}`,{
@@ -93,7 +94,7 @@ export function runCanonicalCases(fixture) {
       fault:codeStore?[0,0,0]:[0x6000,0x1020a,0xa0e],
       fp:t.fp(codeStore?{status:0x820,opcode:0x33f,fip:0x1002,fdp:0x1100,registers:{0:THREE}}:
         {status:0x20,tag:0xfffc,opcode:3,fip:0x1000,fdp:0x3000,registers:{0:THREE}})},
-      {precise:1,revoked:codeStore,writes:Number(codeStore),after:()=>{if(codeStore)t.status('core_begin',4);}},checks);
+      {canonicalMode:true,precise:1,revoked:codeStore,writes:Number(codeStore),after:()=>{if(codeStore)t.status('core_begin',4);}},checks);
   });
 
   fixture('canonical-service-planned-fault-publishes-pending-c1-and-empty-ghost',{
@@ -107,7 +108,7 @@ export function runCanonicalCases(fixture) {
     observe(t,{pc:0x1009,retired:4,budget:6,work:4,remaining:2,stop:3,
       fault:[0x6000,0x1020a,0xa0e],fp:t.fp({status:0x220,tag:0xfffc,
         opcode:0x5d8,fip:0x1007,fdp:0x3004,
-        registers:{0:'00000000000000e00040',7:'0010000000000080ff3f'}})}, {helpers:1},checks);
+        registers:{0:'00000000000000e00040',7:'0010000000000080ff3f'}})}, {canonicalMode:true,helpers:1},checks);
   });
 
   // Legal authored repetition supplies a scalable static discriminator. Native
@@ -120,7 +121,7 @@ export function runCanonicalCases(fixture) {
     observe(t,{pc:0x1800,retired:161,budget:161,
       fp:t.fp({tag:0xfff0,opcode:0xc1,fip:0x113e,
         registers:{0:canonical?FULL80:'00000000000080a10740',1:canonical?'00000000000000000000':TWO}})},
-      {precise:canonical?1:0,fast:!canonical},checks);
+      {canonicalMode:false,precise:canonical?1:0,fast:!canonical},checks);
   });
   for(const check of checks)check();
 }
@@ -136,7 +137,7 @@ export function runCanonicalStatusCases(fixture) {
     // processor.rs returns SystemEntry without modifying scalar or numeric
     // values; the generated service alone owns retirement and the next PC.
     observe(t,{pc:0x1003,retired:2,budget:4,work:2,remaining:2,stop:10,flags:0x403,
-      fault:[0x1001,0,vector],fp:t.startingFp},{helpers:1},checks);
+      fault:[0x1001,0,vector],fp:t.startingFp},{canonicalMode:true,helpers:1},checks);
   });
   fixture('canonical-service-unconfigured-rdtsc-rejects-current-without-retirement',{
     segments:[[0x1000,'90 0f31']],registers,stateWitness:true,initialFlags:0x403,
@@ -145,7 +146,7 @@ export function runCanonicalStatusCases(fixture) {
     // harness never configures it. timestamp() therefore fails Infrastructure
     // before processor.rs writes the tentative EAX/EDX state back to Context.
     observe(t,{pc:0x1001,retired:1,budget:4,work:1,remaining:3,stop:8,flags:0x403,
-      fp:t.startingFp},{helpers:1,materializers:0},checks);
+      fp:t.startingFp},{canonicalMode:true,helpers:1,materializers:0},checks);
   });
   for(const check of checks)check();
 }

@@ -38,6 +38,7 @@ export function runActualPrefix(program,name,label,budget,options={},outcome,{in
   const regs=options.regs??[5,3,7,0x3000,0x4800,0,0x8000,0];
   const initial={regs:[...regs],flags:options.flags??2,retired:options.retired??0};
   const expected=typeof outcome==='function'?outcome(initial):outcome;
+  const hotString=name.startsWith('rep-')||name==='move-word-string';
   const pages=new Map([0x1000,0x3000,0x4000,0x5000].map(address=>[address,new Uint8Array(PAGE)]));
   new DataView(pages.get(0x4000).buffer).setUint32(0x800,options.stackReturn??0x8000,true);
   for(const[address,page]of options.initialPages??[]) {
@@ -120,7 +121,6 @@ export function runActualPrefix(program,name,label,budget,options={},outcome,{in
       // plus vector. Address/access/width guest oracles remain identical.
       d.setUint32(116,expected.fault[2]??(((expected.fault[1]&255)<<8)|14),true);
     }
-    if(expected.reason===6)d.setBigUint64(120,0n,true);
     let reason,available=budget,expectedIdentity=identity;
     const activations=[];
     do {
@@ -138,9 +138,12 @@ export function runActualPrefix(program,name,label,budget,options={},outcome,{in
       generated=instantiateCore(instrument?new WebAssembly.Module(instrument(encoded)):new WebAssembly.Module(encoded),imports);
       engine.ok('core_begin');active=true;
     }while(true);
-    if(expected.reason!==6)d.setBigUint64(120,expectedIdentity,true);
+    // The compiled string publisher retains the selected owner's immutable
+    // identity after SMC; the precise executor clears it before native work.
+    // Neither grants another lease for the invalidated source.
+    d.setBigUint64(120,expected.reason===6&&!hotString?0n:expectedIdentity,true);
     const actual=bytes(context,128);
-    const row={name,label,budget,reason,backend:name.startsWith('rep-')||name==='move-word-string'?
+    const row={name,label,budget,reason,backend:hotString?
       'actual-engine-hot-string':'actual-engine-precise',engineSha256:artifact.sha256,
       identity:String(identity),wasmSha256:hash(source),context:Buffer.from(actual).toString('hex'),
       contextBefore:Buffer.from(before).toString('hex'),ramSha256:hash(bytes(backing,capacity*PAGE)),
@@ -163,9 +166,24 @@ export function runActualPrefix(program,name,label,budget,options={},outcome,{in
     assert.deepEqual(bytes(engine.base+FP,128),fpBefore,`${label}: architectural FP image`);
     assert.deepEqual(bytes(engine.base+SIMD,160),simdBefore,`${label}: architectural SIMD image`);
     assert.deepEqual(bytes(engine.base+YMM,144),ymmBefore,`${label}: architectural YMM image`);
-    if(budget>0&&(name.startsWith('rep-')||name==='move-word-string'))
+    if(budget>0&&hotString)
       assert.equal(preciseCalls,0,`${label}: the admitted string kernel owns its exact element work without the precise adapter`);
     after?.({generated,api,memory,context,row});
+    if(expected.reason===6&&hotString){
+      engine.ok('core_end');active=false;
+      const sealed={context:bytes(context,128),state:bytes(engine.base,56),bank:bytes(bank,512),
+        fp:bytes(engine.base+FP,128),simd:bytes(engine.base+SIMD,160),ymm:bytes(engine.base+YMM,144),
+        ram:bytes(backing,capacity*PAGE),pages:bytes(versions,capacity*16),
+        revision:bigint(revision),epoch:bigint(epochPointer)};
+      assert.equal(api.core_begin(),4,`${label}: the stale compiled source cannot acquire a second lease`);
+      for(const[key,value]of Object.entries({context:bytes(context,128),state:bytes(engine.base,56),bank:bytes(bank,512),
+        fp:bytes(engine.base+FP,128),simd:bytes(engine.base+SIMD,160),ymm:bytes(engine.base+YMM,144),
+        ram:bytes(backing,capacity*PAGE),pages:bytes(versions,capacity*16)}))
+        assert.deepEqual(value,sealed[key],`${label}: rejected stale entry changes no ${key} or committed element`);
+      assert.equal(bigint(revision),sealed.revision,`${label}: stale entry performs no second store`);
+      assert.equal(bigint(epochPointer),sealed.epoch,`${label}: stale entry changes no executable stamp`);
+      row.smcOwnerProtocol={identity:String(expectedIdentity),staleBegin:4,reexecution:false};
+    }
     row.semanticOraclePassed=true;return row;
   } finally {
     if(active)engine.ok('core_end');

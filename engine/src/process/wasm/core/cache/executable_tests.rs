@@ -270,18 +270,38 @@ fn true_byte_eviction_revokes_hot_cut_then_allows_source_current_relearning() {
 }
 
 #[test]
-fn intentional_variable_work_does_not_create_a_zero_hot_gain_fragment() {
+fn budgeted_string_fragment_publishes_one_positive_fuel_hot_port() {
     let mut memory = memory();
     memory.write(GuestAddress(ROOT), &[0xf3, 0xa4]).unwrap();
     let cold = vec![completed(&memory, ROOT, ROOT + 2)];
     let events = vec![cold[0].event(0).unwrap()];
-    assert!(
+    let plan =
         prepare_cold_prefix_plan(&memory, CompileOptions::default(), &events, &cold, &|_| {
             false
-        })
-        .unwrap()
-        .is_none()
+        });
+    let plan = plan.unwrap().unwrap();
+    assert_eq!(plan.anchor(), ROOT);
+    assert_eq!(plan.instruction_pcs().collect::<Vec<_>>(), [ROOT]);
+    assert_eq!(
+        plan.hot_ports()
+            .iter()
+            .map(|span| (span.entry, span.instructions))
+            .collect::<Vec<_>>(),
+        [(ROOT, 1)],
+        "REP publishes minimum fuel, not a fixed element or retirement count"
     );
+    let mut cache = CoreCache32::default();
+    let admission = cache.preflight_fragment(&memory, &plan).unwrap();
+    let code = emit_observed_plan(&memory, plan).unwrap().unwrap();
+    assert!(code.eligible_hot_span(ROOT, 0).is_none());
+    assert!(code.eligible_hot_span(ROOT, 1).is_some());
+    assert!(code.eligible_hot_span(ROOT + 1, 1).is_none());
+    let code = cache.commit_fragment(&memory, admission, code).unwrap();
+    assert_eq!(
+        cache.current_hot_port(&memory, ROOT).unwrap().0.identity(),
+        code.identity()
+    );
+    assert!(cache.resident_charge() <= MAX_CODE_BYTES);
 }
 
 #[test]
