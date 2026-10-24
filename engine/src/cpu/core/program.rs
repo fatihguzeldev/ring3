@@ -109,12 +109,14 @@ struct CodeBlock {
     count: u32,
 }
 
-/// An executable entry whose complete architectural work is bounded in advance.
-/// Source coverage and arbitrary precise ports remain separate authorities.
+/// an executable entry with a certified minimum fuel requirement. fixed spans
+/// consume that exact work; isolated budgeted kernels meter their own progress.
+/// source coverage and arbitrary precise ports remain separate authorities.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct HotSpan {
     pub entry: u32,
     pub end: u32,
+    /// minimum work before entry, including one fuel for a budgeted string.
     pub instructions: u32,
     pub port: u32,
 }
@@ -125,7 +127,7 @@ mod hot_span_tests {
     use crate::memory::{PageRange, Permissions};
 
     #[test]
-    fn executable_spans_keep_source_ports_but_require_fixed_complete_work() {
+    fn executable_spans_keep_source_ports_and_budgeted_kernel_minimum_fuel() {
         let mut memory = AddressSpace::new(2).unwrap();
         memory
             .map_zeroed(
@@ -173,7 +175,17 @@ mod hot_span_tests {
                 port: 1,
             })
         );
-        assert_eq!(code.hot_span(0x1004), None);
+        assert_eq!(
+            code.hot_span(0x1004),
+            Some(HotSpan {
+                entry: 0x1004,
+                end: 0x1006,
+                instructions: 1,
+                port: 2,
+            })
+        );
+        assert_eq!(code.eligible_hot_span(0x1004, 0), None);
+        assert_eq!(code.eligible_hot_span(0x1004, 1), code.hot_span(0x1004));
         assert_eq!(
             code.hot_span(0x1006),
             Some(HotSpan {
@@ -957,7 +969,6 @@ fn executable_hot_spans(blocks: &[Block]) -> Vec<HotSpan> {
     let mut hot_spans: Vec<_> = spans::partition(blocks)
         .into_iter()
         .enumerate()
-        .filter(|(_, span)| span.fixed_work)
         .map(|(index, span)| HotSpan {
             entry: span.block.entry,
             end: span
@@ -966,7 +977,7 @@ fn executable_hot_spans(blocks: &[Block]) -> Vec<HotSpan> {
                 .last()
                 .expect("nonempty executable span")
                 .next,
-            instructions: span.block.instructions.len() as u32,
+            instructions: span.work().minimum_work(),
             port: index as u32,
         })
         .collect();

@@ -135,22 +135,21 @@ impl Emitter<'_, '_> {
     fn block(&mut self, id: BlockId) {
         self.current = id;
         let block = &self.graph.blocks[id.0];
-        let fixed_work = self.out.spans[id.0].fixed_work;
+        let minimum_work = self.out.spans[id.0].work().minimum_work();
         self.out.guarded_control = block.terminator == Terminator::GuardedIndirect;
         self.out.address_fact = None;
         // Eligibility precedes predicted entry state and trace recording. A
-        // partial/interior ingress belongs to the one exact executor, not to a
-        // second set of instruction-prefix labels inside the hot body.
+        // partial fixed-span/interior ingress belongs to the exact executor.
+        // budgeted kernels require positive fuel and meter each element inside
+        // their one instruction, retaining exact partial-progress ownership.
         self.out
             .c()
             .local_get(super::ENTRY_OFFSET)
             .i32_const(0)
             .i32_ne()
             .local_get(REMAIN)
-            .i32_const(block.instructions.len() as i32)
+            .i32_const(minimum_work as i32)
             .i32_lt_u()
-            .i32_or()
-            .i32_const(i32::from(!fixed_work))
             .i32_or()
             .if_(BlockType::Empty)
             .local_get(super::ENTRY_OFFSET)

@@ -19,7 +19,7 @@ function check(t,wanted,{precise=wanted.budget===0?0:1}={}) {
   assert.equal(t.result.modules.length,1,'no replacement module hides an unsupported interior port');
   if(adapter){
     assert.equal(actual.preciseCalls,precise,
-      'interior or variable work uses the exact adapter; a complete legal span and zero quota stay hot');
+      'only the specified interior or short fixed-span route uses the exact adapter; admitted budgeted strings stay hot');
     assert.equal(actual.helperCalls,0,'the exact CPU adapter owns canonical numeric operations directly');
   }
   return actual;
@@ -142,10 +142,10 @@ export function runPortCases(fixture) {
     data:page=>page.set([0x11,0x22,0x33]),
   },t=>{
     enter(t,0x1005);const before=t.version();t.writeExpected(0x5000,'1122');
-    check(t,{pc:0x1005,retired:0,budget:2,ecx:1,regs:{6:0x3002,7:0x5002},fp:t.startingFp});
+    check(t,{pc:0x1005,retired:0,budget:2,ecx:1,regs:{6:0x3002,7:0x5002},fp:t.startingFp},{precise:0});
     assert.equal(t.version(),before+2n);
     t.writeExpected(0x5002,'33');
-    check(t,{pc:0x1007,retired:1,budget:1,ecx:0,regs:{6:0x3003,7:0x5003},fp:t.startingFp});
+    check(t,{pc:0x1007,retired:1,budget:1,ecx:0,regs:{6:0x3003,7:0x5003},fp:t.startingFp},{precise:0});
     assert.equal(t.version(),before+3n);
   });
 
@@ -158,7 +158,7 @@ export function runPortCases(fixture) {
     const adapter=usesPreciseAdapter(t);
     t.result.faultProtocol=adapter?'canonical byte width1 plus page-fault vector14':'legacy vector14 with width in access metadata';
     check(t,{pc:0x1005,retired:0,budget:3,work:1,remaining:2,ecx:2,regs:{6:0x3001,7:0x6000},
-      stop:3,fault:[0x6000,0x10201,adapter?0x10e:14],fp:t.startingFp});
+      stop:3,fault:[0x6000,0x10201,adapter?0x10e:14],fp:t.startingFp},{precise:0});
     assert.equal(t.version(),before+1n);
   });
 }

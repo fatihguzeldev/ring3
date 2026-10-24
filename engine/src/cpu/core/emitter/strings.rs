@@ -14,6 +14,36 @@ pub(super) fn supports(operation: &Operation) -> bool {
     )
 }
 
+pub(super) fn normalize_memory_fault(out: &mut Output<'_>) {
+    let width = out
+        .active_effect
+        .and_then(|id| match out.executable.effect(id).operation {
+            Some(Operation::String { width, .. } | Operation::RepeatString { width, .. }) => {
+                Some(width)
+            }
+            _ => None,
+        });
+    let Some(width) = width else {
+        return;
+    };
+    let width = match width {
+        StringWidth::Byte => 1,
+        StringWidth::Word => 2,
+        StringWidth::Dword => 4,
+    };
+    // preserve the exact string executor's diagnostic contract. infrastructure
+    // failures have no architectural page-fault vector to normalize.
+    out.c()
+        .local_get(WRITE_STATUS)
+        .i32_const(1)
+        .i32_eq()
+        .if_(BlockType::Empty)
+        .local_get(super::CTX)
+        .i32_const((width << 8) | 14)
+        .i32_store(super::mem(116, 2))
+        .end();
+}
+
 pub(super) fn emit(out: &mut Output<'_>, operation: Operation, next: u32) {
     let (kind, width, address_size, source_segment, repeat) = match operation {
         Operation::String {
@@ -148,11 +178,11 @@ fn element(
     );
     if source_used {
         out.address(source);
-        out.check_span(width);
+        check_span(out, width);
     }
     if destination_used {
         out.address(destination);
-        out.check_span(width);
+        check_span(out, width);
     }
     match kind {
         StringKind::Move => {
@@ -195,6 +225,19 @@ fn element(
     if destination_used {
         advance(out, 9, width, address_size);
     }
+}
+
+fn check_span(out: &mut Output<'_>, width: u32) {
+    // the compiled flat-address port cannot itself report segment wrap. fall
+    // back before either current-element access, retaining prior elements as
+    // kernel-owned progress so the exact executor reports the real first fault.
+    out.c()
+        .local_get(super::LOGICAL_ADDRESS)
+        .i32_const((u32::MAX - (width - 1)) as i32)
+        .i32_gt_u()
+        .if_(BlockType::Empty);
+    out.exit(StopReason::ExactPrefix, Some(out.pc), 0);
+    out.c().end();
 }
 
 fn compare(out: &mut Output<'_>, width: u32) {

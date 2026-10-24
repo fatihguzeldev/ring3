@@ -140,7 +140,8 @@ export function runActualPrefix(program,name,label,budget,options={},outcome,{in
     }while(true);
     if(expected.reason!==6)d.setBigUint64(120,expectedIdentity,true);
     const actual=bytes(context,128);
-    const row={name,label,budget,reason,backend:'actual-engine-precise',engineSha256:artifact.sha256,
+    const row={name,label,budget,reason,backend:name.startsWith('rep-')||name==='move-word-string'?
+      'actual-engine-hot-string':'actual-engine-precise',engineSha256:artifact.sha256,
       identity:String(identity),wasmSha256:hash(source),context:Buffer.from(actual).toString('hex'),
       contextBefore:Buffer.from(before).toString('hex'),ramSha256:hash(bytes(backing,capacity*PAGE)),
       preciseCalls,helperReads:reads,helperWrites:writes,numericCalls,activations,
@@ -151,8 +152,6 @@ export function runActualPrefix(program,name,label,budget,options={},outcome,{in
       faultMetadataProtocol:expected.fault?(expected.fault[2]===14?'hot-vector-with-width-in-access':'native-width-and-vector'):undefined};
     onRow?.(row);
     assert.equal(reason,expected.reason,`${label}: actual precise stop`);
-    if(budget>0&&(name.startsWith('rep-')||name==='move-word-string'))
-      assert(preciseCalls>0,`${label}: variable-work execution uses the actual precise adapter`);
     assert.deepEqual(actual,wanted,`${label}: complete actual Context including lease/source authority`);
     assert.deepEqual(bytes(backing,capacity*PAGE),ram,`${label}: all actual guest backing bytes`);
     assert.deepEqual(bytes(versions,capacity*16),pageVersions,`${label}: all actual page identities and versions`);
@@ -164,6 +163,8 @@ export function runActualPrefix(program,name,label,budget,options={},outcome,{in
     assert.deepEqual(bytes(engine.base+FP,128),fpBefore,`${label}: architectural FP image`);
     assert.deepEqual(bytes(engine.base+SIMD,160),simdBefore,`${label}: architectural SIMD image`);
     assert.deepEqual(bytes(engine.base+YMM,144),ymmBefore,`${label}: architectural YMM image`);
+    if(budget>0&&(name.startsWith('rep-')||name==='move-word-string'))
+      assert.equal(preciseCalls,0,`${label}: the admitted string kernel owns its exact element work without the precise adapter`);
     after?.({generated,api,memory,context,row});
     row.semanticOraclePassed=true;return row;
   } finally {

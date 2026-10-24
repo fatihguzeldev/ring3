@@ -112,7 +112,7 @@ pub(super) fn preserves_fp_success(operation: &Operation) -> bool {
 }
 
 pub(in crate::cpu::core) fn variable_work(operation: Operation) -> bool {
-    strings::supports(&operation)
+    matches!(operation, Operation::RepeatString { .. })
 }
 
 pub(super) fn emit(
@@ -463,8 +463,8 @@ fn hot_entry(spans: &[super::program::spans::ExecutableSpan], root: Option<u32>)
     }
     let mut entries: Vec<_> = spans
         .iter()
-        .filter(|span| span.fixed_work && root.is_none_or(|pc| span.block.entry == pc))
-        .map(|span| (span.block.entry, span.block.instructions.len() as u32))
+        .filter(|span| root.is_none_or(|pc| span.block.entry == pc))
+        .map(|span| (span.block.entry, span.work().minimum_work()))
         .collect();
     entries.sort_unstable();
     let mut function = Function::new([(1, ValType::I32)]);
@@ -1230,6 +1230,7 @@ impl Output<'_> {
     }
 
     fn memory_exit(&mut self) {
+        strings::normalize_memory_fault(self);
         self.publish_exit(Some(self.pc), self.prefix);
         self.c()
             .i32_const(StopReason::MemoryFault as i32)
