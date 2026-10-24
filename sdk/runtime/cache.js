@@ -1,6 +1,9 @@
 const MAX_CODE_BYTES = 128 * 1024 * 1024;
 const LINK_LOCALS = [...Array.from({length:12},(_,index)=>index+2),
   ...Array.from({length:6},(_,index)=>index+20),99];
+const CONTINUATION_GLOBALS = ['link.continuation','link.port'];
+const CONTINUATION_EXPORTS = ['core_continuation_ptr','core_continuation_format','core_chain_resolve_owned',
+  'core_numeric_owned','core_precise_owned','core_end_owned'];
 const LINK_GLOBALS = ['link.mode','link.valid','link.context',...LINK_LOCALS.map(local=>`link.local${local}`),'trace.arena'];
 const SUPPORT_FUNCTIONS = [
   ['support.flags',8],['support.materialize_numeric',1],['support.resolve_status',5],
@@ -76,6 +79,14 @@ export class CodeCache {
     if (capacity === null) capacity = this.#residentLayout ? null : 4096;
     else if (!Number.isInteger(capacity) || capacity < 1 || capacity >= (this.#residentLayout ? COLD_MARK : 4097))
       throw new Error('invalid core capacity');
+    const continuation = CONTINUATION_EXPORTS.map(name=>typeof this.api[name] === 'function');
+    if (continuation.some(Boolean) && !continuation.every(Boolean)) throw new Error('incomplete core continuation exports');
+    this.continuationCore = continuation.every(Boolean);
+    if (this.continuationCore && !this.linkedCore) throw new Error('continuation core requires linked execution');
+    if (this.continuationCore) {
+      for (const name of CONTINUATION_EXPORTS) this.native[name] = this.api[name];
+      if (this.native.core_continuation_format() !== 1) throw new Error('unsupported core continuation format');
+    }
     this.#bindings = Object.entries(this.native);
     this.budget = budget; this.instructions = instructions; this.blocks = blocks; this.capacity = capacity;
     this.units = new Map(); this.context = 0; this.open = false; this.dirty = false; this.dirtyWork = 0; this.lastStop = 1;
@@ -250,7 +261,7 @@ export class CodeCache {
     if (imports.length !== expected.size || imports.some(item => item.module !== 'ring3' || expected.get(item.name) !== item.kind) ||
         new Set(imports.map(item => item.name)).size !== expected.size) throw new Error('invalid core dispatch imports');
     const bindings = this.linkedCore
-      ? {memory:this.memory,functions:this.table,publishers:this.publishers,probe:this.native.core_chain_select,cold:this.native.core_chain_cold}
+      ? {memory:this.memory,functions:this.table,publishers:this.publishers,probe:this.continuationCore?this.native.core_chain_resolve_owned:this.native.core_chain_select,cold:this.native.core_chain_cold}
       : {memory:this.memory,functions:this.table,next:this.native.core_chain_next};
     const exports = new WebAssembly.Instance(module,{ring3:bindings}).exports;
     if (typeof exports.run !== 'function' || exports.run.length !== 3 || !(exports.regions instanceof WebAssembly.Global) || exports.regions.value !== 0)
@@ -260,12 +271,13 @@ export class CodeCache {
         !cold.every(value => value instanceof WebAssembly.Global && value.value === 0))
       throw new Error('invalid core dispatch cold counters');
     if (this.linkedCore) {
-      if (!(exports.linkAbi instanceof WebAssembly.Global) || ![3,4].includes(exports.linkAbi.value) ||
+      if (!(exports.linkAbi instanceof WebAssembly.Global) || ![3,4,5].includes(exports.linkAbi.value) ||
           !cold.every(value=>value !== undefined)) throw new Error('invalid core link ABI');
-      this.preciseCore = exports.linkAbi.value === 4;
+      if ((exports.linkAbi.value === 5) !== this.continuationCore) throw new Error('incompatible core continuation ABI');
+      this.preciseCore = exports.linkAbi.value >= 4;
       if (this.preciseCore && !this.native.core_precise) throw new Error('missing exact-prefix core export');
       const globals = {};
-      for (const name of LINK_GLOBALS) {
+      for (const name of [...LINK_GLOBALS,...(this.continuationCore?CONTINUATION_GLOBALS:[])]) {
         const value = exports[name];
         if (!(value instanceof WebAssembly.Global) || (value.value !== 0 && value.value !== 0n))
           throw new Error(`invalid core link global ${name}`);
@@ -439,7 +451,7 @@ export class CodeCache {
       ? this.measureCompilation('module',()=>new WebAssembly.Module(encoded))
       : new WebAssembly.Module(encoded);
     const bindings = {memory: this.memory};
-    const available = {read: this.native.core_read, write: this.native.core_write, numeric: this.native.core_numeric};
+    const available = {read: this.native.core_read, write: this.native.core_write, numeric: this.continuationCore ? (context,pc,ordinal)=>this.invokeNumeric(context,pc,ordinal) : this.native.core_numeric};
     if (this.preciseBinding) available.precise = this.preciseBinding;
     const found = new Set();
     for (const item of WebAssembly.Module.imports(module)) {
@@ -459,7 +471,7 @@ export class CodeCache {
       bindings[item.name] = available[item.name];
     }
     if (!['memory', 'read', 'write'].every(name => found.has(name)) ||
-        (this.linkedCore && !LINK_GLOBALS.every(name=>found.has(name)))) throw new Error('incomplete core imports');
+        (this.linkedCore && ![...LINK_GLOBALS,...(this.continuationCore?CONTINUATION_GLOBALS:[])].every(name=>found.has(name)))) throw new Error('incomplete core imports');
     if (this.preciseCore && !found.has('precise')) throw new Error('incomplete exact-prefix core imports');
     if (this.#support && !SUPPORT_IMPORTS.every(name=>found.has(name)))
       throw new Error('incomplete core support imports');
@@ -522,6 +534,12 @@ export class CodeCache {
     let regions;
     let chainedColdRuns = 0, chainedColdWork = 0, chainedColdRetired = 0;
     try {
+    if (this.continuationCore) {
+      this.continuationPointer = this.native.core_continuation_ptr() >>> 0;
+      this.#ticket(this.context);
+      this.#linkGlobals['link.continuation'].value = this.continuationPointer;
+      this.#linkGlobals['link.port'].value = 0;
+    }
       if (this.compilation && !unit.transient) this.recordSourceWitness(unit);
       if (this.chain && !unit.transient) {
         if (this.table.get(unit.slot) !== (this.linkedCore ? unit.link : unit.run) ||
@@ -541,9 +559,22 @@ export class CodeCache {
       try {
         if(this.linkedCore && this.#linkGlobals['link.valid'].value !== 0) unit.publish(this.context);
       } catch(error) {publicationFailure=error;}
-      const ended = this.native.core_end(); this.open = false;
+      let ended, authorityFailure;
+      try {
+        if (this.continuationCore) {
+          let ticket;
+          try {ticket = this.#ticket(this.context);}
+          catch (error) {authorityFailure = error;}
+          ended = ticket ? this.native.core_end_owned(this.context,ticket.slot,ticket.generation,stop??8) : this.native.core_end();
+        } else ended = this.native.core_end();
+        if (this.continuationCore && ended !== 0) this.native.core_end();
+      } catch (error) {
+        if (this.continuationCore) this.native.core_end();
+        throw error;
+      } finally {this.open = false;}
       if (unit.transient) {this.transient = null; this.transientRuns++;}
       if (!failure && publicationFailure) throw publicationFailure;
+      if (!failure && authorityFailure) throw authorityFailure;
       if (ended !== 0 && !failure) throw new Error(`core_end returned ${ended}`);
     }
     const result = this.finishRun(stop,before,regions,'compiled',startPc,chainedColdRuns,chainedColdWork,chainedColdRetired,
@@ -581,11 +612,27 @@ export class CodeCache {
     this.installRecordedTrace();
     return result;
   }
+  #ticket(context) {
+    const pointer = this.continuationPointer, buffer = this.memory.buffer;
+    if (!this.open || context !== this.context || !pointer || pointer % 8 || pointer+120 > buffer.byteLength)
+      throw new Error('invalid CPU continuation allocation');
+    const view = new DataView(buffer);
+    if (view.getUint32(pointer,true) !== 1 || view.getUint32(pointer+4,true) !== 1 ||
+        view.getUint32(pointer+8,true) !== context ||
+        view.getBigUint64(pointer+16,true) !== view.getBigUint64(pointer+104,true))
+      throw new Error('invalid CPU continuation lease');
+    return {slot:view.getUint32(pointer+76,true),generation:view.getBigUint64(pointer+88,true)};
+  }
+  invokeNumeric(context,pc,ordinal) {
+    const ticket = this.#ticket(context);
+    return this.native.core_numeric_owned(context,ticket.slot,ticket.generation,pc,ordinal);
+  }
   invokePrecise(context) {
     if (!this.open || context !== this.context || !this.native.core_precise)
       throw new Error('invalid exact-prefix CPU lease');
     const retired = this.word(40), remaining = this.word(44);
-    const stop = this.native.core_precise(context) >>> 0;
+    const ticket = this.continuationCore ? this.#ticket(context) : null;
+    const stop = (ticket ? this.native.core_precise_owned(context,ticket.slot,ticket.generation) : this.native.core_precise(context)) >>> 0;
     const work = remaining-this.word(44), completed = (this.word(40)-retired) >>> 0;
     if (work < 0 || completed > work || stop < 1 || stop > 10)
       throw new Error('invalid exact-prefix execution result');

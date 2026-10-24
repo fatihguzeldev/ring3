@@ -1,3 +1,4 @@
+mod continuation;
 mod link;
 
 pub fn emit_dispatch() -> Vec<u8> {

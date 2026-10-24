@@ -9,7 +9,9 @@ pub(in crate::cpu::core) const MODE: u32 = 0;
 pub(in crate::cpu::core) const VALID: u32 = 1;
 pub(in crate::cpu::core) const CONTEXT: u32 = 2;
 pub(in crate::cpu::core) const TRACE_ARENA: u32 = 22;
-pub(in crate::cpu::core) const GLOBAL_COUNT: u32 = 23;
+pub(in crate::cpu::core) const CONTINUATION: u32 = 23;
+pub(in crate::cpu::core) const PORT: u32 = 24;
+pub(in crate::cpu::core) const GLOBAL_COUNT: u32 = 25;
 pub(in crate::cpu::core) const FIELDS: &[(u32, ValType)] = &[
     (2, ValType::I32),
     (3, ValType::I32),
@@ -45,13 +47,15 @@ pub(in crate::cpu::core) fn name(index: u32) -> String {
         VALID => "link.valid".into(),
         CONTEXT => "link.context".into(),
         TRACE_ARENA => "trace.arena".into(),
+        CONTINUATION => "link.continuation".into(),
+        PORT => "link.port".into(),
         _ => format!("link.local{}", FIELDS[(index - 3) as usize].0),
     }
 }
 
 pub(in crate::cpu::core) fn imports(imports: &mut ImportSection) {
     for index in 0..GLOBAL_COUNT {
-        let val_type = if index < 3 || index == TRACE_ARENA {
+        let val_type = if index < 3 || index >= TRACE_ARENA {
             ValType::I32
         } else {
             FIELDS[(index - 3) as usize].1
@@ -74,7 +78,7 @@ pub(in crate::cpu::core) fn define_globals(
     base: u32,
 ) {
     for index in 0..GLOBAL_COUNT {
-        let val_type = if index < 3 || index == TRACE_ARENA {
+        let val_type = if index < 3 || index >= TRACE_ARENA {
             ValType::I32
         } else {
             FIELDS[(index - 3) as usize].1
@@ -101,7 +105,7 @@ pub(in crate::cpu::core) fn define_globals(
             mutable: false,
             shared: false,
         },
-        &ConstExpr::i32_const(4),
+        &ConstExpr::i32_const(5),
     );
     exports.export("linkAbi", ExportKind::Global, base + GLOBAL_COUNT);
 }

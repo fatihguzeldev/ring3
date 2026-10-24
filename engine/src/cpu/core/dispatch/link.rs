@@ -47,6 +47,7 @@ pub(super) fn emit() -> Vec<u8> {
     types.ty().function([ValType::I32], [ValType::I32]);
     types.ty().function([ValType::I32; 3], [ValType::I32]);
     types.ty().function([ValType::I32], []);
+    types.ty().function([ValType::I32; 4], [ValType::I32]);
     let support_types = support::types(&mut types);
     module.section(&types);
     let mut imports = ImportSection::new();
@@ -79,6 +80,7 @@ pub(super) fn emit() -> Vec<u8> {
     module.section(&imports);
     let mut functions = FunctionSection::new();
     functions.function(2);
+    functions.function(4);
     let mut globals = GlobalSection::new();
     for _ in 0..4 {
         globals.global(
@@ -99,7 +101,7 @@ pub(super) fn emit() -> Vec<u8> {
         exports.export(name, ExportKind::Global, index as u32);
     }
     link::define_globals(&mut globals, &mut exports, STATE_BASE);
-    support::define(&mut functions, support_types, &mut globals, &mut exports, 3);
+    support::define(&mut functions, support_types, &mut globals, &mut exports, 4);
     module.section(&functions);
     module.section(&globals);
     module.section(&exports);
@@ -171,7 +173,18 @@ pub(super) fn emit() -> Vec<u8> {
         .local_get(0)
         .global_get(state(10))
         .global_get(state(13))
+        .local_get(REMAINING)
+        .call(3)
+        .local_tee(NEXT)
+        .i32_eqz()
+        .if_(BlockType::Result(ValType::I32))
+        .local_get(0)
+        .global_get(state(10))
+        .global_get(state(13))
         .call(0)
+        .else_()
+        .local_get(NEXT)
+        .end()
         .local_set(NEXT)
         .local_get(NEXT)
         .i32_const(COLD_MARK as i32)
@@ -280,7 +293,8 @@ pub(super) fn emit() -> Vec<u8> {
         .end();
     let mut bodies = CodeSection::new();
     bodies.function(&run);
-    support::bodies(&mut bodies, 3);
+    bodies.function(&super::continuation::emit(STATE_BASE));
+    support::bodies(&mut bodies, 4);
     module.section(&bodies);
     let mut names = NameSection::new();
     names.module("ring3.dispatch");
@@ -288,7 +302,8 @@ pub(super) fn emit() -> Vec<u8> {
     functions.append(0, "guest.probe");
     functions.append(1, "guest.cold");
     functions.append(2, "guest.chain");
-    support::names(&mut functions, 3);
+    functions.append(3, "guest.continuation");
+    support::names(&mut functions, 4);
     names.functions(&functions);
     module.section(&names);
     module.finish()
