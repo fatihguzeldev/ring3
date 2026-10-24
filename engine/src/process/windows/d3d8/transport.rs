@@ -1,4 +1,6 @@
-use super::{D3D8Error32, D3D8Runtime32, objects::ObjectKind32, runtime::ReplyKind32};
+use super::{
+    D3D8Error32, D3D8ReadbackOwner32, D3D8Runtime32, objects::ObjectKind32, runtime::ReplyKind32,
+};
 use crate::{
     abi::graphics::d3d8::{ReadbackStatus, readback_receipt},
     graphics::{
@@ -180,32 +182,36 @@ impl EngineInstance {
                 runtime.readback_input = None;
             }
         }
-        if matches!(status, DeviceStatus::Lost | DeviceStatus::Removed)
-            && let Some(reply) = &mut self.d3d8_reply
-            && reply.epoch == epoch
-            && matches!(
-                reply.kind,
-                ReplyKind32::Readback(_) | ReplyKind32::LockReadback(_)
-            )
-        {
-            reply.kind = ReplyKind32::Ready(HResult::DEVICE_LOST.0);
+        if matches!(status, DeviceStatus::Lost | DeviceStatus::Removed) {
+            self.fail_d3d8_readbacks_for_epoch(epoch, HResult::DEVICE_LOST.0);
         }
         Ok(progress)
     }
     pub fn d3d8_complete_readback(&mut self, bytes: &[u8]) -> Result<(), HostError> {
+        self.complete_d3d8_readback(bytes, None)
+    }
+
+    pub(super) fn d3d8_complete_owned_readback(
+        &mut self,
+        bytes: &[u8],
+        owner: D3D8ReadbackOwner32,
+    ) -> Result<(), HostError> {
+        self.complete_d3d8_readback(bytes, Some(owner))
+    }
+
+    fn complete_d3d8_readback(
+        &mut self,
+        bytes: &[u8],
+        owner: Option<D3D8ReadbackOwner32>,
+    ) -> Result<(), HostError> {
         self.memory()?;
         let receipt = readback_receipt(bytes).map_err(|_| HostError::InvalidRequest)?;
-        let reply = self
-            .d3d8_reply
-            .ok_or(HostError::D3D8(D3D8Error32::StaleReply))?;
-        if reply.epoch != receipt.id.epoch {
-            return Err(HostError::D3D8(D3D8Error32::StaleReply));
-        }
-        if !matches!(reply.kind,ReplyKind32::Readback(id)|ReplyKind32::LockReadback(id) if id==receipt.id)
-        {
-            return Err(HostError::D3D8(D3D8Error32::StaleReply));
-        }
-        self.checked_pending_call(reply.owner, reply.token)?;
+        let owner = if let Some(owner) = owner {
+            self.checked_d3d8_readback_owner(owner, receipt.id)?;
+            owner
+        } else {
+            self.d3d8_readback_owner(receipt.id)?
+        };
         let device = self
             .d3d8
             .as_mut()
@@ -228,12 +234,7 @@ impl EngineInstance {
             device
                 .cancel_readback(receipt.id, generation, failure)
                 .map_err(device_error)?;
-            if let Some(reply) = &mut self.d3d8_reply
-                && reply.epoch == receipt.id.epoch
-                && matches!(reply.kind,ReplyKind32::Readback(id)|ReplyKind32::LockReadback(id) if id==receipt.id)
-            {
-                reply.kind = ReplyKind32::Ready(HResult::from(failure).0);
-            }
+            self.fail_d3d8_readback_owner(owner, receipt.id, HResult::from(failure).0)?;
         } else {
             device
                 .complete_readback(receipt.id, generation, receipt.bytes)

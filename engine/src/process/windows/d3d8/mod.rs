@@ -21,7 +21,7 @@ mod termination;
 mod transfers;
 mod transport;
 mod types;
-pub(in crate::process) use runtime::D3D8Reply32;
+pub(in crate::process) use runtime::{D3D8ReadbackOwner32, D3D8Reply32};
 
 #[cfg(test)]
 mod tests;

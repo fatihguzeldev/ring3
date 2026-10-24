@@ -19,6 +19,12 @@ use crate::{
 const KEY: u64 = 91;
 
 fn front_buffer_call() -> (EngineInstance, u32, u32, ReadbackId, SurfaceRef) {
+    front_buffer_call_with_threads(false)
+}
+
+fn front_buffer_call_with_threads(
+    threaded: bool,
+) -> (EngineInstance, u32, u32, ReadbackId, SurfaceRef) {
     let (mut context, memory, device) = runtime();
     let mode = DisplayMode32 {
         width: 64,
@@ -49,6 +55,18 @@ fn front_buffer_call() -> (EngineInstance, u32, u32, ReadbackId, SurfaceRef) {
             PageRange::new(GuestAddress(0x3000_0000), 16).unwrap(),
         )
         .unwrap();
+    if threaded {
+        engine.configure_cpu_clock(1_000_000_000, 0).unwrap();
+        engine
+            .configure_synchronization(Default::default())
+            .unwrap();
+        engine.map(0x10000, 1, 3).unwrap();
+        let primary = engine
+            .threads
+            .prepare_primary_thread(0x10000, PageRange::new(GuestAddress(0x8000), 1).unwrap())
+            .unwrap();
+        engine.threads.commit_primary_thread(primary);
+    }
     let (generation, token) = capture_gate(
         &mut engine,
         MethodGate {
@@ -66,6 +84,150 @@ fn front_buffer_call() -> (EngineInstance, u32, u32, ReadbackId, SurfaceRef) {
     };
     (engine, generation, token, id, surface)
 }
+
+#[test]
+fn exact_readback_for_a_parked_thread_preserves_the_other_threads_pending_call() {
+    use crate::windows::{WindowsApi32, thread::ThreadSchedule32};
+
+    let (mut engine, generation, token, id, surface) = front_buffer_call_with_threads(true);
+    let data: Vec<u8> = (0..64 * 64 * 4).map(|index| (index % 251) as u8).collect();
+    let encoded = receipt(&engine, id, ReadbackStatus::Complete, &data);
+    let parent_state = engine.arena()[..STATE_SIZE].to_vec();
+    let parent_exit = engine.arena()[EXIT_OFFSET..EXIT_OFFSET + EXIT_SIZE].to_vec();
+    let parent_extended =
+        crate::process::cpu::context::ExtendedCpuState::capture(engine.arena()).unwrap();
+    let parent_owner = engine.pending_call.as_ref().unwrap().owner;
+
+    let child_handle = engine.create_test_thread_at_gate(0x9000, 0x9100).unwrap();
+    assert_eq!(
+        engine.schedule_windows_thread().unwrap(),
+        ThreadSchedule32::Running { thread: 2 }
+    );
+    assert!(engine.d3d8_reply.is_none());
+    assert!(engine.pending_call.is_none());
+
+    // A different real gate remains pending while the host returns the parked
+    // thread's GPU bytes. Its captured CPU state must not be switched or edited.
+    engine.map(0xa000, 1, 3).unwrap();
+    engine.map(0xb000, 1, 7).unwrap();
+    engine.arena_mut().unwrap()[TRANSFER_OFFSET..TRANSFER_OFFSET + 2]
+        .copy_from_slice(&[0x0f, 0x0b]);
+    engine.upload(0xb000, 2).unwrap();
+    let gate = WindowsApi32::WaitForSingleObject.id();
+    for (index, value) in [0xb000, 2, 0xb000, gate].into_iter().enumerate() {
+        let offset = TRANSFER_OFFSET + index * 4;
+        engine.arena_mut().unwrap()[offset..offset + 4].copy_from_slice(&value.to_le_bytes());
+    }
+    let child_generation = engine.compile_with_gates(1, 1).unwrap();
+    engine.write32(0xa000, 0xb100).unwrap();
+    engine.write32(0xa004, child_handle).unwrap();
+    engine.write32(0xa008, 33).unwrap();
+    let mut state = State32 {
+        eip: 0xb000,
+        ..State32::default()
+    };
+    state.registers[4] = 0xa000;
+    encode_state_current(&state, &mut engine.arena_mut().unwrap()[..STATE_SIZE]).unwrap();
+    encode_exit_v3(
+        &ExecutionExit {
+            retired: 1,
+            reason: ExitReason::Gate { id: gate },
+        },
+        &mut engine.arena_mut().unwrap()[EXIT_OFFSET..EXIT_OFFSET + EXIT_SIZE],
+    )
+    .unwrap();
+    let child_token = engine
+        .capture_windows_call(KEY, child_generation)
+        .unwrap()
+        .token;
+    assert_ne!(child_token, token);
+    let child_owner = engine.pending_call.as_ref().unwrap().owner;
+    let active = engine.arena().to_vec();
+
+    // Authenticate all receipt identities before the positive assertion. An
+    // unrelated active call must never make a forged parked receipt acceptable.
+    for (offset, width) in [(16, 8), (24, 8), (44, 4), (48, 8)] {
+        let mut wrong = encoded[..64].to_vec();
+        if width == 8 {
+            let value = u64::from_le_bytes(wrong[offset..offset + 8].try_into().unwrap());
+            wrong[offset..offset + 8].copy_from_slice(&(value + 1).to_le_bytes());
+        } else {
+            let value = u32::from_le_bytes(wrong[offset..offset + 4].try_into().unwrap());
+            wrong[offset..offset + 4].copy_from_slice(&(value + 1).to_le_bytes());
+        }
+        assert_eq!(
+            engine.begin_d3d8_readback_input(&wrong),
+            Err(HostError::D3D8(D3D8Error32::StaleReply))
+        );
+        assert_eq!(engine.arena(), active);
+        assert_eq!(engine.pending_call.as_ref().unwrap().token, child_token);
+        assert_eq!(engine.pending_call.as_ref().unwrap().owner, child_owner);
+    }
+
+    // OLD active-thread-only validation fails here with StaleReply, although
+    // the exact readback, pending owner/token and captured parent frame survive.
+    engine.begin_d3d8_readback_input(&encoded[..64]).unwrap();
+    for (offset, chunk) in data.chunks(4096).enumerate() {
+        engine
+            .append_d3d8_readback_input((offset * 4096) as u32, chunk)
+            .unwrap();
+    }
+    engine.finish_d3d8_readback_input().unwrap();
+    assert_eq!(engine.arena(), active);
+    assert_eq!(engine.pending_call.as_ref().unwrap().token, child_token);
+    assert_eq!(engine.pending_call.as_ref().unwrap().owner, child_owner);
+    assert!(engine.d3d8_reply.is_none());
+    assert_eq!(
+        engine
+            .d3d8
+            .as_ref()
+            .unwrap()
+            .device_by_epoch(id.epoch)
+            .unwrap()
+            .resources()
+            .bytes(surface)
+            .unwrap(),
+        data
+    );
+    assert_eq!(
+        engine.begin_d3d8_readback_input(&encoded[..64]),
+        Err(HostError::D3D8(D3D8Error32::StaleReply))
+    );
+    assert_eq!(engine.arena(), active);
+
+    engine
+        .complete_call(KEY, child_generation, child_token, 0)
+        .unwrap();
+    assert_eq!(
+        engine.schedule_windows_thread().unwrap(),
+        ThreadSchedule32::Running { thread: 1 }
+    );
+    let resumed = decode_state(&engine.arena()[..STATE_SIZE]).unwrap();
+    let mut expected = decode_state(&parent_state).unwrap();
+    expected.eip = 0x9100;
+    expected.registers[0] = 0;
+    expected.registers[4] += 12;
+    assert_eq!(resumed, expected);
+    assert!(parent_extended.matches(engine.arena()));
+    assert!(engine.pending_call.is_none());
+    assert!(engine.d3d8_reply.is_none());
+    assert_eq!(
+        parent_owner,
+        crate::process::calls::call::PendingOwner::Replacement(generation)
+    );
+    assert_eq!(
+        crate::abi::x86::decode_exit(&parent_exit).unwrap().reason,
+        ExitReason::Gate {
+            id: MethodGate {
+                interface: InterfaceKind::Device,
+                slot: 30
+            }
+            .id()
+        }
+    );
+}
+
+mod parked;
 
 pub(super) fn capture_gate(
     engine: &mut EngineInstance,

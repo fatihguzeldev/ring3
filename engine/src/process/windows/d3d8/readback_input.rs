@@ -1,14 +1,13 @@
-use super::{D3D8Error32, runtime::ReplyKind32};
+use super::{D3D8Error32, D3D8ReadbackOwner32};
 use crate::{
     abi::graphics::d3d8::{READBACK_HEADER_SIZE, ReadbackHeader, ReadbackStatus, readback_header},
-    process::{CallError, EngineInstance, HostError, calls::call::PendingOwner},
+    process::{CallError, EngineInstance, HostError},
 };
 
 pub(super) struct ReadbackInput32 {
     header: ReadbackHeader,
     bytes: Vec<u8>,
-    owner: PendingOwner,
-    token: u32,
+    owner: D3D8ReadbackOwner32,
     generation: u64,
 }
 
@@ -29,12 +28,7 @@ impl EngineInstance {
         if runtime.readback_input.is_some() {
             return Err(HostError::Call(CallError::Busy));
         }
-        let reply = self.d3d8_reply.ok_or(stale())?;
-        if !matches!(reply.kind,ReplyKind32::Readback(id)|ReplyKind32::LockReadback(id) if id==decoded.id)
-        {
-            return Err(stale());
-        }
-        self.checked_pending_call(reply.owner, reply.token)?;
+        let owner = self.d3d8_readback_owner(decoded.id)?;
         let device = runtime
             .device_by_epoch(decoded.id.epoch)
             .map_err(HostError::D3D8)?;
@@ -63,8 +57,7 @@ impl EngineInstance {
         self.d3d8.as_mut().unwrap().readback_input = Some(ReadbackInput32 {
             header: decoded,
             bytes,
-            owner: reply.owner,
-            token: reply.token,
+            owner,
             generation,
         });
         Ok(())
@@ -94,7 +87,7 @@ impl EngineInstance {
             return Err(HostError::InvalidRequest);
         }
         let staged = self.d3d8.as_mut().unwrap().readback_input.take().unwrap();
-        let result = self.d3d8_complete_readback(&staged.bytes);
+        let result = self.d3d8_complete_owned_readback(&staged.bytes, staged.owner);
         if result.is_err() {
             self.d3d8.as_mut().unwrap().readback_input = Some(staged);
         }
@@ -117,14 +110,7 @@ impl EngineInstance {
             .as_ref()
             .ok_or(HostError::D3D8(D3D8Error32::NotConfigured))?;
         let staged = runtime.readback_input.as_ref().ok_or(stale())?;
-        self.checked_pending_call(staged.owner, staged.token)?;
-        let reply = self.d3d8_reply.ok_or(stale())?;
-        if reply.owner != staged.owner
-            || reply.token != staged.token
-            || !matches!(reply.kind,ReplyKind32::Readback(id)|ReplyKind32::LockReadback(id) if id==staged.header.id)
-        {
-            return Err(stale());
-        }
+        self.checked_d3d8_readback_owner(staged.owner, staged.header.id)?;
         let device = runtime
             .device_by_epoch(staged.header.id.epoch)
             .map_err(HostError::D3D8)?;

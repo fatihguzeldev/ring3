@@ -25,6 +25,13 @@ pub(in crate::process) struct D3D8Reply32 {
     pub(super) kind: ReplyKind32,
     pub(super) window: Option<super::super::user32::User32Callback32>,
 }
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(in crate::process) struct D3D8ReadbackOwner32 {
+    pub thread: u32,
+    pub owner: PendingOwner,
+    pub token: u32,
+}
 #[derive(Clone, Copy)]
 pub(super) enum ReplyKind32 {
     Retry,
@@ -36,6 +43,26 @@ pub(super) enum ReplyKind32 {
     Window,
 }
 impl D3D8Reply32 {
+    pub(in crate::process) fn readback_owner(&self, id: ReadbackId) -> Option<(PendingOwner, u32)> {
+        (self.epoch == id.epoch
+            && matches!(self.kind, ReplyKind32::Readback(request) | ReplyKind32::LockReadback(request) if request == id))
+            .then_some((self.owner, self.token))
+    }
+
+    pub(in crate::process) fn fail_readback(
+        &mut self,
+        epoch: u64,
+        id: Option<ReadbackId>,
+        result: u32,
+    ) {
+        if self.epoch == epoch
+            && matches!(self.kind, ReplyKind32::Readback(request) | ReplyKind32::LockReadback(request)
+                if id.is_none_or(|id| id == request))
+        {
+            self.kind = ReplyKind32::Ready(result);
+        }
+    }
+
     pub(in crate::process) fn ready(&self, runtime: &D3D8Runtime32) -> bool {
         let device = runtime.device_by_epoch(self.epoch).ok();
         match self.kind {

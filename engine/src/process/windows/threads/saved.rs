@@ -51,6 +51,66 @@ pub(super) struct SavedThread32 {
     detection: Option<Box<[crate::process::cpu::events::detection::DetectionSlot32; 1]>>,
 }
 impl SavedThread32 {
+    pub(super) fn d3d8_readback_owner(
+        &self,
+        id: crate::graphics::d3d8::commands::ReadbackId,
+    ) -> Result<Option<(PendingOwner, u32)>, HostError> {
+        use crate::{
+            abi::{
+                arena::{EXIT_OFFSET, STATE_OFFSET},
+                x86::{EXIT_SIZE, STATE_SIZE},
+            },
+            process::CallError,
+        };
+        let Some((owner, token)) = self.d3d8_reply.and_then(|reply| reply.readback_owner(id))
+        else {
+            return Ok(None);
+        };
+        if self
+            .callback
+            .as_ref()
+            .is_some_and(|callback| callback.contains_outer_token(token))
+        {
+            return Err(HostError::Call(CallError::Busy));
+        }
+        let pending = self
+            .pending
+            .as_ref()
+            .ok_or(HostError::Call(CallError::InvalidToken))?;
+        if token == 0 || pending.token != token || pending.owner != owner {
+            return Err(HostError::Call(CallError::InvalidToken));
+        }
+        if self.arena[STATE_OFFSET..STATE_OFFSET + STATE_SIZE] != pending.state
+            || self.arena[EXIT_OFFSET..EXIT_OFFSET + EXIT_SIZE] != pending.exit
+            || !pending.extended.matches(&self.arena)
+        {
+            return Err(HostError::Call(CallError::StateChanged));
+        }
+        Ok(Some((owner, token)))
+    }
+
+    pub(super) fn fail_d3d8_readback(
+        &mut self,
+        owner: PendingOwner,
+        token: u32,
+        id: crate::graphics::d3d8::commands::ReadbackId,
+        result: u32,
+    ) -> bool {
+        if let Some(reply) = self.d3d8_reply.as_mut()
+            && reply.readback_owner(id) == Some((owner, token))
+        {
+            reply.fail_readback(id.epoch, Some(id), result);
+            return true;
+        }
+        false
+    }
+
+    pub(super) fn fail_d3d8_readbacks_for_epoch(&mut self, epoch: u64, result: u32) {
+        if let Some(reply) = self.d3d8_reply.as_mut() {
+            reply.fail_readback(epoch, None, result);
+        }
+    }
+
     pub(super) fn empty(engine: &EngineInstance, arena: [u8; ARENA_SIZE]) -> Self {
         Self {
             artifact: None,
