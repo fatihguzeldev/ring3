@@ -60,9 +60,58 @@ pub(crate) struct WindowPlan {
     cross_owner_edges: usize,
     completed_cycles: usize,
     cycle_instructions: usize,
+    prefix_spans: usize,
+}
+
+// bucket selection only; exact fingerprint equality remains the authority.
+fn policy_hash(
+    memory: u64,
+    options: CompileOptions,
+    graph: &ObservedHistory,
+    sources: &[SourceAuthority],
+    extra: impl IntoIterator<Item = u64>,
+) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut hash = std::collections::hash_map::DefaultHasher::new();
+    memory.hash(&mut hash);
+    options.instructions.hash(&mut hash);
+    options.blocks.hash(&mut hash);
+    options.wasm_bytes.hash(&mut hash);
+    for (pc, instruction) in &graph.nodes {
+        pc.hash(&mut hash);
+        instruction.next.hash(&mut hash);
+    }
+    graph.edges.hash(&mut hash);
+    graph.ports.hash(&mut hash);
+    for source in sources {
+        source.identity.hash(&mut hash);
+        source.first.hash(&mut hash);
+        source.versions.hash(&mut hash);
+    }
+    for word in extra {
+        word.hash(&mut hash);
+    }
+    hash.finish()
 }
 
 impl WindowFingerprint {
+    pub(crate) fn policy_hash(&self) -> u64 {
+        policy_hash(
+            self.memory_identity,
+            self.options,
+            &self.graph,
+            &self.sources,
+            self.ports.iter().flat_map(|port| {
+                [
+                    u64::from(port.entry),
+                    u64::from(port.end),
+                    u64::from(port.instructions),
+                    u64::from(port.port),
+                ]
+            }),
+        )
+    }
+
     pub(crate) fn same_graph(&self, other: &Self) -> bool {
         self.memory_identity == other.memory_identity
             && self.options == other.options
@@ -156,7 +205,7 @@ impl WindowPlan {
         self.fingerprint.ports.clone()
     }
     pub(crate) fn has_executable_gain(&self) -> bool {
-        self.completed_cycles >= 2 && self.cross_owner_edges != 0
+        (self.completed_cycles >= 2 || self.prefix_spans != 0) && self.cross_owner_edges != 0
     }
     pub(crate) fn cross_owner_edge_count(&self) -> usize {
         self.cross_owner_edges
@@ -401,6 +450,7 @@ fn prepare_root_window(
         cross_owner_edges: recurrence.transfers,
         completed_cycles: recurrence.completed,
         cycle_instructions: recurrence.word.len(),
+        prefix_spans: 0,
     }))
 }
 
@@ -460,6 +510,18 @@ pub(crate) fn emit_hot_window(
 }
 
 impl ObservedPlanFingerprint {
+    pub(crate) fn policy_hash(&self) -> u64 {
+        policy_hash(
+            self.memory_identity,
+            self.options,
+            &self.graph,
+            &self.sources,
+            std::iter::once(u64::from(self.anchor))
+                .chain(self.graph.starts.iter().map(|&pc| u64::from(pc)))
+                .chain(self.parents.iter().copied()),
+        )
+    }
+
     pub(crate) fn metadata_charge(&self) -> usize {
         self.sources.capacity() * std::mem::size_of::<SourceAuthority>()
             + self
@@ -810,3 +872,6 @@ mod window_tests;
 
 #[cfg(test)]
 mod interior_tests;
+
+mod prefixes;
+pub(crate) use prefixes::{ExecutionCandidate, for_each_execution_candidate};

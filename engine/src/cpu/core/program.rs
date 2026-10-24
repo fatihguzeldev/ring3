@@ -7,9 +7,9 @@ mod observed_cold;
 mod reform;
 pub(crate) mod spans;
 pub(crate) use observed_cold::{
-    ObservedPlan, ObservedPlanFingerprint, WindowFingerprint, WindowPlan,
-    compile_observed_with_cold, emit_hot_window, emit_observed_plan, prepare_cold_prefix_plan,
-    prepare_hot_window, prepare_observed_plan,
+    ExecutionCandidate, ObservedPlan, ObservedPlanFingerprint, WindowFingerprint, WindowPlan,
+    compile_observed_with_cold, emit_hot_window, emit_observed_plan, for_each_execution_candidate,
+    prepare_cold_prefix_plan, prepare_hot_window, prepare_observed_plan,
 };
 
 static NEXT_IDENTITY: AtomicU64 = AtomicU64::new(1);

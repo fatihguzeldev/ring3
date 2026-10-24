@@ -5,8 +5,9 @@ use crate::cpu::core::trace::{
 
 mod plan;
 pub(crate) use plan::{
-    ObservedPlan, ObservedPlanFingerprint, WindowFingerprint, WindowPlan, emit_hot_window,
-    emit_observed_plan, prepare_cold_prefix_plan, prepare_hot_window, prepare_observed_plan,
+    ExecutionCandidate, ObservedPlan, ObservedPlanFingerprint, WindowFingerprint, WindowPlan,
+    emit_hot_window, emit_observed_plan, for_each_execution_candidate, prepare_cold_prefix_plan,
+    prepare_hot_window, prepare_observed_plan,
 };
 
 #[derive(Clone, Debug, PartialEq)]
@@ -216,6 +217,8 @@ struct CertifiedTransition {
     owner: u64,
     successor_owner: u64,
     begins_site: bool,
+    ends_site: bool,
+    site_index: usize,
 }
 
 enum CaptureFlow {
@@ -329,6 +332,30 @@ fn capture_graph_with(
     cold: &[CompletedColdObservation],
     transition: &mut impl FnMut(CertifiedTransition) -> CaptureFlow,
 ) -> Result<Option<CapturedGraph>, CompileError> {
+    capture_graph_walk(
+        memory,
+        root,
+        options,
+        events,
+        owners,
+        expected_source_version,
+        cold,
+        false,
+        transition,
+    )
+}
+
+fn capture_graph_walk(
+    memory: &AddressSpace,
+    root: GuestAddress,
+    options: CompileOptions,
+    events: &[TraceEvent],
+    owners: &[&CompiledCode],
+    expected_source_version: u64,
+    cold: &[CompletedColdObservation],
+    compiled_only: bool,
+    transition: &mut impl FnMut(CertifiedTransition) -> CaptureFlow,
+) -> Result<Option<CapturedGraph>, CompileError> {
     if validate_options(options).is_err()
         || events.is_empty()
         || events.len() > CAPACITY
@@ -356,6 +383,9 @@ fn capture_graph_with(
     'timeline: for (index, site) in sites.iter().enumerate() {
         match site {
             Site::Cold(observation) => {
+                if compiled_only {
+                    continue;
+                }
                 if sites
                     .get(index + 1)
                     .is_some_and(|next| observation.actual_post_pc() != next.first())
@@ -392,6 +422,8 @@ fn capture_graph_with(
                         owner: 0,
                         successor_owner: sites.get(index + 1).map_or(0, Site::owner),
                         begins_site: true,
+                        ends_site: true,
+                        site_index: index,
                     }),
                     CaptureFlow::Stop
                 ) {
@@ -402,6 +434,15 @@ fn capture_graph_with(
                 let Some(next_site) = sites.get(index + 1) else {
                     continue;
                 };
+                if compiled_only
+                    && matches!(next_site, Site::Cold(_))
+                    && pcs.contains(&next_site.first())
+                {
+                    // a precise handoff inside this suffix cannot certify the
+                    // complete span. a foreign cold target does confirm the
+                    // full terminal span, but remains outside every candidate.
+                    continue;
+                }
                 let next = &events[index + 1];
                 let target = next_site.first();
                 let selected = if events[index].kind == BLOCK && next.kind == NUMERIC {
@@ -441,6 +482,12 @@ fn capture_graph_with(
                 starts.insert(pcs[0]);
                 starts.insert(target);
                 for (position, &pc) in selected.iter().enumerate() {
+                    if compiled_only
+                        && nodes.len() == options.instructions
+                        && !nodes.contains_key(&pc)
+                    {
+                        break 'timeline;
+                    }
                     let Some(instruction) =
                         captured_node(memory, &mut nodes, &mut sources, pc, options.instructions)
                     else {
@@ -478,6 +525,8 @@ fn capture_graph_with(
                                 next_site.owner()
                             },
                             begins_site: position == 0,
+                            ends_site: position + 1 == selected.len(),
+                            site_index: index,
                         }),
                         CaptureFlow::Stop
                     ) {
@@ -490,7 +539,7 @@ fn capture_graph_with(
             return Ok(None);
         }
     }
-    if nodes.is_empty() || !nodes.contains_key(&root.0) {
+    if nodes.is_empty() || (!compiled_only && !nodes.contains_key(&root.0)) {
         return Ok(None);
     }
     let ports: BTreeSet<_> = nodes.keys().copied().collect();

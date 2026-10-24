@@ -18,6 +18,16 @@ pub(crate) const BLOCK: u32 = 1;
 pub(crate) const NUMERIC: u32 = 2;
 pub(crate) const COLD_COMPLETE: u32 = 3;
 
+/// trusted native owner-selection ingress, separate from the generated POD.
+/// event_index names the first not-yet-recorded event at the actual handoff.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct RecordedIngress {
+    pub event_index: usize,
+    pub origin: Option<u32>,
+    pub target: u32,
+    pub owner: u64,
+}
+
 #[derive(Debug)]
 pub(crate) struct PendingColdObservation {
     instruction: super::NativeInstruction,
