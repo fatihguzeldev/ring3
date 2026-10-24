@@ -588,8 +588,17 @@ fn real_charged_byte_pressure_evicts_and_releases_links_before_initial_extent_is
             .identity(),
     };
     let newest_pc = newest.entrypoints()[0];
-    let replacement = compile(&memory, newest_pc, limits).unwrap();
+    let mut replacement = compile(&memory, newest_pc, limits).unwrap();
     let replacement_bytes = replacement.wasm().len();
+    // Set declared storage strictly inside the actual available/self-displaced
+    // interval; generated metadata density must not decide this test's pressure.
+    let wasm_capacity = replacement.set_wasm_capacity_for_test(replacement_bytes);
+    let charge = CoreCache32::code_charge(&replacement, replacement.entrypoints().len());
+    let slack = MAX_CODE_BYTES - cache.resident_charge();
+    let displaced_charge = cache.retained(&newest).unwrap().charge;
+    let target = (slack + displaced_charge / 2).max(charge);
+    assert!(target > slack && target <= slack + displaced_charge);
+    replacement.set_wasm_capacity_for_test(wasm_capacity + target - charge);
     assert!(
         cache.resident_charge()
             + CoreCache32::code_charge(&replacement, replacement.entrypoints().len())

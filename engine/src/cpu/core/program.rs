@@ -216,6 +216,15 @@ impl CompiledCode {
     pub(crate) fn reserve_wasm_capacity_for_test(&mut self, additional: usize) {
         self.wasm.reserve(additional);
     }
+    #[cfg(test)]
+    pub(crate) fn set_wasm_capacity_for_test(&mut self, capacity: usize) -> usize {
+        assert!(capacity >= self.wasm.len());
+        let mut bytes = Vec::with_capacity(capacity);
+        bytes.extend_from_slice(&self.wasm);
+        self.wasm = bytes;
+        assert!(self.wasm.capacity() >= capacity);
+        self.wasm.capacity()
+    }
     /// Declared owned storage, including reserved capacities. Cache directories,
     /// Rc control words, allocator overhead and opaque browser JIT storage are
     /// accounted separately or remain outside this metric.
