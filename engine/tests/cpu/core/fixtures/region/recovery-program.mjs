@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
 import {readGeneratedModule,inspectSharedCallbackSpine} from './structure.mjs';
+import {inspectCompletedHandoffs} from './completed-structure.mjs';
 
 const ROOT=0x1000,TARGET=0x1800,FLAGS=0x403;
 const registers=[0x13579bdf,2,0x2468ace0,0x3000,0x4800,0x89abcdef,TARGET,0x76543210];
@@ -45,7 +46,9 @@ function format(bytes) {
   const zero=(index,local)=>at(index,0x41)&&run.ops[index].value===0&&at(index+1,0x21,local);
   const tokenZero=index=>at(index,0x42)&&run.ops[index].value===0n&&at(index+1,0x21,177);
   const callbackSpine=inspectSharedCallbackSpine(bytes);
-  const projectionStarts=[],resetOrigins={blockEntry:[],inlineCommit:[],environment:[],sharedService:[],shared:[],unclassified:[]};
+  const completedHandoffs=inspectCompletedHandoffs(module);
+  const completedResets=new Set(completedHandoffs.adapters.map(adapter=>adapter.validResetOffset));
+  const projectionStarts=[],resetOrigins={blockEntry:[],inlineCommit:[],environment:[],sharedService:[],shared:[],completedHandoff:[],unclassified:[]};
   for(let i=0;i<run.ops.length;i++)if(at(i,0x21,85)&&at(i-1,0x41)&&run.ops[i-1].value===0){
     const offset=run.ops[i].offset;projectionStarts.push(offset);
     const viewReset=zero(i-3,84)&&zero(i+1,86)&&zero(i+3,153)&&zero(i+5,154)&&zero(i+7,178);
@@ -60,6 +63,7 @@ function format(bytes) {
       at(i+11,0x41)&&run.ops[i+11].value===1&&at(i+12,0x21,84))resetOrigins.environment.push(offset);
     else if(at(i-3,16)&&dataIndices.has(run.ops[i-3].call)&&at(i-2,0x21,177)&&
       at(i+1,0x20)&&at(i+2,0x21,158))resetOrigins.shared.push(offset);
+    else if(completedResets.has(offset))resetOrigins.completedHandoff.push(offset);
     else resetOrigins.unclassified.push(offset);
   }
   const getterCalls=run.ops.filter(node=>node.op===16&&dataIndices.has(node.call)).map(node=>node.offset);
@@ -88,7 +92,7 @@ function format(bytes) {
       exported:[...module.exports.values()].includes(index)};
   });
   return{bytes:bytes.length,bodyBytes:run.raw.length,operators:run.ops.length,
-    mainGetters:main.length,projectionStarts,resetOrigins,getterCalls,functions,callbackSpine,
+    mainGetters:main.length,projectionStarts,resetOrigins,getterCalls,functions,callbackSpine,completedHandoffs,
     metadataSections:sections.length,metadata,bases};
 }
 
@@ -174,6 +178,12 @@ export function runRecoveryProgramCases(fixture) {
           'the actual shared callback packet proves full transfer, FP materialization policy, exclusive callbacks, authority reload and quota-qualified reentry');
         assert.equal(proof.resetOrigins.sharedService.length,1,
           'one positively verified SERVICE>=2 packet drops the local view for all emitted callback kinds');
+        assert.deepEqual(proof.completedHandoffs.errors,[],
+          'completed publication has the actual pool guard, sparse typed stores, pending header and neutral legacy tail');
+        assert.equal(proof.completedHandoffs.adapters.length,1,
+          'the authored complete block has one direct typed handoff');
+        assert.equal(proof.resetOrigins.completedHandoff.length,1,
+          'the positively verified direct handoff releases one local FP view');
         assert.equal(proof.resetOrigins.unclassified.length,0,'every VALID clear has an exact emitted purpose');
         if(count===128)assert(encoded.length<115789,
           `the accepted128-add format must be smaller than the retained Step24 body: ${encoded.length}`);

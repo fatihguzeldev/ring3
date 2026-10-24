@@ -43,18 +43,19 @@ import {runBudgetedStringCases} from './region/budgeted-string.mjs';
 import {runIntegerConversionCases} from './region/integer-conversion.mjs';
 import {runInteriorWindowCases} from './region/interior-window.mjs';
 import {runExecutionWindowCanonicalCases} from './region/execution-window-canonical.mjs';
+import {runCompletedHandoffCases} from './region/completed-handoff.mjs';
 import {runObservedCases,runObservedBaselineCases,runObservedPrefixCases,runObservedRepeatedCases,runObservedCanonicalCases,runObservedExitCases,runObservedRefusalCases} from './region/observed.mjs';
 
 const [enginePath,reportPath,mode]=process.argv.slice(2);
-assert(enginePath&&reportPath&&(mode===undefined||mode==='--integer-conversion'||mode==='--interior-window'||mode==='--budgeted-string'||mode==='--exact-suffix-window'||mode==='--exact-suffix'||mode==='--recovery-compact'||mode==='--recovery-program'||mode==='--executable-interior'||mode==='--execution-proofs'||mode==='--executable-values'||mode==='--mixed-values'||mode==='--mixed-fp-values'||mode==='--execution-window'||mode==='--execution-window-canonical'||mode==='--family-pool'||mode==='--family-pool-ordinary'||mode==='--family-residency'||mode==='--family-plan'||mode==='--family-entry'||mode==='--family-growth'||mode?.startsWith('--observed')||mode==='--flow-convergence'||mode==='--arithmetic-owner'||mode==='--arithmetic-owner-baseline'||mode==='--access-epoch'||mode==='--access-epoch-baseline'||mode==='--arithmetic'||mode==='--arithmetic-baseline'||mode==='--canonical'||mode==='--canonical-baseline'||mode==='--canonical-status'||mode==='--entry'||mode==='--entry-baseline'||mode==='--entry-nested'||mode==='--entry-unmatched'||mode==='--structure'||mode==='--graph'||mode==='--groups'||mode==='--native-stores'||mode==='--pool'||mode==='--pool-baseline'||mode==='--transport'||mode==='--transport-baseline'||mode==='--execution'||mode==='--execution-flags'||mode==='--execution-loads'||mode==='--execution-guards'||mode==='--execution-multiply'||mode==='--execution-flags-oracle'),
-  'usage: region.mjs engine.wasm fresh-report.json [--execution-window|--execution-window-canonical|--family-pool|--family-pool-ordinary|--family-residency|--family-plan|--arithmetic|--arithmetic-baseline|--arithmetic-owner|--arithmetic-owner-baseline|--access-epoch|--access-epoch-baseline|--canonical|--canonical-baseline|--canonical-status|--entry|--entry-baseline|--entry-nested|--entry-unmatched|--structure|--graph|--groups|--native-stores|--pool|--pool-baseline|--transport|--transport-baseline|--execution|--execution-flags|--execution-loads|--execution-guards|--execution-multiply|--execution-flags-oracle]');
+assert(enginePath&&reportPath&&(mode===undefined||mode==='--completed-handoff'||mode==='--integer-conversion'||mode==='--interior-window'||mode==='--budgeted-string'||mode==='--exact-suffix-window'||mode==='--exact-suffix'||mode==='--recovery-compact'||mode==='--recovery-program'||mode==='--executable-interior'||mode==='--execution-proofs'||mode==='--executable-values'||mode==='--mixed-values'||mode==='--mixed-fp-values'||mode==='--execution-window'||mode==='--execution-window-canonical'||mode==='--family-pool'||mode==='--family-pool-ordinary'||mode==='--family-residency'||mode==='--family-plan'||mode==='--family-entry'||mode==='--family-growth'||mode?.startsWith('--observed')||mode==='--flow-convergence'||mode==='--arithmetic-owner'||mode==='--arithmetic-owner-baseline'||mode==='--access-epoch'||mode==='--access-epoch-baseline'||mode==='--arithmetic'||mode==='--arithmetic-baseline'||mode==='--canonical'||mode==='--canonical-baseline'||mode==='--canonical-status'||mode==='--entry'||mode==='--entry-baseline'||mode==='--entry-nested'||mode==='--entry-unmatched'||mode==='--structure'||mode==='--graph'||mode==='--groups'||mode==='--native-stores'||mode==='--pool'||mode==='--pool-baseline'||mode==='--transport'||mode==='--transport-baseline'||mode==='--execution'||mode==='--execution-flags'||mode==='--execution-loads'||mode==='--execution-guards'||mode==='--execution-multiply'||mode==='--execution-flags-oracle'),
+  'usage: region.mjs engine.wasm fresh-report.json [--completed-handoff|--execution-window|--execution-window-canonical|--family-pool|--family-pool-ordinary|--family-residency|--family-plan|--arithmetic|--arithmetic-baseline|--arithmetic-owner|--arithmetic-owner-baseline|--access-epoch|--access-epoch-baseline|--canonical|--canonical-baseline|--canonical-status|--entry|--entry-baseline|--entry-nested|--entry-unmatched|--structure|--graph|--groups|--native-stores|--pool|--pool-baseline|--transport|--transport-baseline|--execution|--execution-flags|--execution-loads|--execution-guards|--execution-multiply|--execution-flags-oracle]');
 const artifact=readEngine(enginePath),hash=bytes=>createHash('sha256').update(bytes).digest('hex');
 const hex=bytes=>Buffer.from(bytes).toString('hex');
 const unhex=text=>Uint8Array.from(Buffer.from(text.replaceAll(' ',''),'hex'));
 closeSync(openSync(reportPath,'wx'));
 const report={schema:1,complete:false,engineSha256:artifact.sha256,
   scope:'actual generated mixed integer/x87 CFG with exact instruction-prefix, publication and fault oracles; no timing claim',
-  sources:Object.fromEntries(['./region/recovery-compact.mjs','./region/integer-conversion.mjs','./region/interior-window.mjs','./region/budgeted-string.mjs','./region/exact-suffix-window.mjs','./region/exact-suffix.mjs','./region/recovery-program.mjs','./region/executable-interior.mjs','./region/mixed-fp-values.mjs','./region/mixed-values.mjs','./region/execution-proofs.mjs','./region/executable-values.mjs','./region/execution-window.mjs','./region/execution-window-canonical.mjs','./region/family-pool.mjs','./region/family-residency.mjs','./region/family-plan.mjs','./region/family-growth.mjs','./region/family-entry.mjs','../../../support/core_wasm/cold_observed.mjs','./region.mjs','./region/observed.mjs','./region/observed-witness.mjs','./region/observed-auto.mjs','./region/observed-growth.mjs','./region/flow.mjs','./region/access-epoch.mjs','./region/arithmetic.mjs','./link.mjs','./region/structure.mjs','./region/control.mjs','./region/link.mjs','./region/status.mjs','./region/quota.mjs','./region/ownership.mjs','./region/ports.mjs','./region/graph.mjs','./region/groups.mjs','./region/native-store.mjs','./region/pool.mjs','./region/execution.mjs','./region/execution-flags.mjs','./region/canonical.mjs','./region/entry.mjs','./region/witness.mjs','./pool-state.mjs',
+  sources:Object.fromEntries(['./region/completed-handoff.mjs','./region/recovery-compact.mjs','./region/integer-conversion.mjs','./region/interior-window.mjs','./region/budgeted-string.mjs','./region/exact-suffix-window.mjs','./region/exact-suffix.mjs','./region/recovery-program.mjs','./region/executable-interior.mjs','./region/mixed-fp-values.mjs','./region/mixed-values.mjs','./region/execution-proofs.mjs','./region/executable-values.mjs','./region/execution-window.mjs','./region/execution-window-canonical.mjs','./region/family-pool.mjs','./region/family-residency.mjs','./region/family-plan.mjs','./region/family-growth.mjs','./region/family-entry.mjs','../../../support/core_wasm/cold_observed.mjs','./region.mjs','./region/observed.mjs','./region/observed-witness.mjs','./region/observed-auto.mjs','./region/observed-growth.mjs','./region/flow.mjs','./region/access-epoch.mjs','./region/arithmetic.mjs','./link.mjs','./region/structure.mjs','./region/control.mjs','./region/link.mjs','./region/status.mjs','./region/quota.mjs','./region/ownership.mjs','./region/ports.mjs','./region/graph.mjs','./region/groups.mjs','./region/native-store.mjs','./region/pool.mjs','./region/execution.mjs','./region/execution-flags.mjs','./region/canonical.mjs','./region/entry.mjs','./region/witness.mjs','./pool-state.mjs',
     '../../../support/wasm/engine.mjs','../../../../../sdk/runtime/engine.js','../../../../../sdk/runtime/cache.js']
     .map(path=>[path,hash(readFileSync(new URL(path,import.meta.url)))])),cases:[]};
 const checkpoint=()=>writeFileSync(reportPath,JSON.stringify(report,null,2));
@@ -74,7 +75,7 @@ function fp(initial,{status=0,tag=0xffff,opcode=0,fip=0,fdp=0,registers={},cs=0x
 
 function fixture(name,{segments,entry=0x1000,registers=[0,2,0,0x3000,0x4800,0,0,0],control=0x27f,
   compileInstructions=256,compileBlocks=32,initialFlags=2,
-  initialFp,missing=[],stateWitness=false,witnessData,data=page=>{view(page).setFloat32(0,3,true);view(page).setFloat32(4,2,true);}}={},body) {
+  initialFp,missing=[],stateWitness=false,witnessData,moduleTransform,data=page=>{view(page).setFloat32(0,3,true);view(page).setFloat32(4,2,true);}}={},body) {
   stage=name;
   const result={name,controls:[],modules:[],runs:[],numericCalls:[],preciseCalls:[]};report.cases.push(result);checkpoint();
   const instance=instantiateCore(artifact.module,{ring3_observability:{now_ns:()=>0n}});
@@ -95,11 +96,13 @@ function fixture(name,{segments,entry=0x1000,registers=[0,2,0,0x3000,0x4800,0,0,
   };
   const prepare=pc=>{
     status('core_prepare',0,pc,compileInstructions,compileBlocks);context=api.core_context_ptr()>>>0;
-    const encoded=bytes(api.core_code_ptr()>>>0,api.core_code_len()>>>0),module=new WebAssembly.Module(encoded);
+    const encoded=bytes(api.core_code_ptr()>>>0,api.core_code_len()>>>0);
+    const executable=moduleTransform?moduleTransform(encoded):encoded,module=new WebAssembly.Module(executable);
     encodedModule=encoded;
     const imports=coreImports(module);
     const moduleRecord={pc,sha256:hash(encoded),bytes:encoded.length,imports};result.modules.push(moduleRecord);
-    const diagnostic=stateWitness?instrumentStateWitness(encoded,coreSupportSource(memory)):undefined;
+    if(moduleTransform)moduleRecord.transformedSha256=hash(executable);
+    const diagnostic=stateWitness?instrumentStateWitness(executable,coreSupportSource(memory)):undefined;
     const support=diagnostic?instantiateSupport(memory,diagnostic.supportBytes):undefined;
     groupWitnessProof=diagnostic?.groupProof;
     if(diagnostic)moduleRecord.instrumentedSha256=hash(diagnostic.bytes);
@@ -242,7 +245,9 @@ function exchangeCase(name,eax,structural=false) {
 }
 
 try {
-  if(mode==='--recovery-compact') {
+  if(mode==='--completed-handoff') {
+    stage='completed-state-handoff';runCompletedHandoffCases(fixture);checkpoint();
+  } else if(mode==='--recovery-compact') {
     stage='compact-cold-recovery-program';runRecoveryCompactCases(fixture);checkpoint();
   } else if(mode==='--recovery-program') {
     stage='shared-bounded-recovery-program';runRecoveryProgramCases(fixture);checkpoint();
