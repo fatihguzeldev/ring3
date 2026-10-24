@@ -320,7 +320,7 @@ fn explicit_lru_overlay_eviction_preserves_sources_and_allows_later_hot_rebuild(
     for pc in [0x1005, CALLEE, SOURCE] {
         cache.lookup(&memory, pc).unwrap();
     }
-    assert_eq!(cache.oldest, Some(trace.key.index));
+    assert_eq!(cache.oldest(), Some(trace.key.index));
     cache.remove(trace.key);
     assert!(cache.retained(&trace).is_none());
     assert_eq!(cache.link_owners[4], 0);

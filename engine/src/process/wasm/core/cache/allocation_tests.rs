@@ -234,8 +234,8 @@ fn near_budget_family_growth_reuses_deleted_aliases_without_exceeding_residency(
     assert_eq!(cache.snapshot()[0], before[0] + 1);
     assert_eq!(cache.snapshot()[2..5], [0, 0, 0]);
     assert_eq!(cache.snapshot()[5], before[5]);
-    assert_eq!(cache.oldest, Some(second.key.index));
-    assert_eq!(cache.newest, Some(grown.key.index));
+    assert_eq!(cache.oldest(), Some(second.key.index));
+    assert_eq!(cache.newest(), Some(grown.key.index));
     assert!(cache.retained(&first).is_none());
     assert_eq!(cache.link_owners[7], 0);
     cache.install_link(&grown, 7).unwrap();

@@ -64,7 +64,7 @@ fn family(memory: &AddressSpace, path: &[(u32, u32)], parents: &[&CompiledCode])
     emit_observed_plan(memory, plan).unwrap().unwrap()
 }
 
-fn fixture() -> (AddressSpace, CoreCache32, RegionRef, RegionRef) {
+pub(super) fn fixture() -> (AddressSpace, CoreCache32, RegionRef, RegionRef) {
     let mut memory = AddressSpace::new(3).unwrap();
     for pc in [ROOT, CALLEE, OTHER] {
         memory
@@ -147,7 +147,7 @@ fn plan(
     .unwrap()
 }
 
-fn install(
+pub(super) fn install(
     memory: &AddressSpace,
     cache: &mut CoreCache32,
     caller: &CompiledCode,

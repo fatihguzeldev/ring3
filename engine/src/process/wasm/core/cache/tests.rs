@@ -93,15 +93,16 @@ fn bounds(cache: &CoreCache32) {
             .all(|key| cache.region(*key).is_some())
     );
     let mut seen = std::collections::HashSet::new();
-    let (mut previous, mut current) = (None, cache.oldest);
+    let (mut previous, mut current) = (None, cache.oldest());
     while let Some(index) = current {
         assert!(seen.insert(index), "LRU has a cycle");
-        let entry = cache.regions[index].as_ref().unwrap();
-        assert_eq!(entry.older, previous);
+        assert!(cache.regions[index].is_some());
+        let entry = &cache.route_owners[index];
+        assert_eq!(CoreCache32::route_index(entry.older), previous);
         previous = Some(index);
-        current = entry.newer;
+        current = CoreCache32::route_index(entry.newer);
     }
-    assert_eq!(previous, cache.newest);
+    assert_eq!(previous, cache.newest());
     assert_eq!(seen.len(), count);
     let free: std::collections::HashSet<_> = cache.free.iter().copied().collect();
     assert_eq!(free.len(), cache.free.len());
@@ -253,7 +254,7 @@ fn lru_touch_selects_the_untouched_owner_for_explicit_eviction() {
     let second = cache.insert(compiled(&memory, filler(1)));
     let third = cache.insert(compiled(&memory, filler(2)));
     assert!(same(&cache.lookup(&memory, filler(0)).unwrap(), &first));
-    assert_eq!(cache.oldest, Some(second.key.index));
+    assert_eq!(cache.oldest(), Some(second.key.index));
     cache.remove(second.key);
     assert!(cache.lookup(&memory, filler(1)).is_none());
     assert!(same(&cache.lookup(&memory, filler(0)).unwrap(), &first));
@@ -461,7 +462,7 @@ fn linked_lookup_is_source_checked_and_touches_the_same_lru() {
         &cache.lookup_linked(&memory, filler(0)).unwrap().0,
         &first
     ));
-    assert_eq!(cache.oldest, Some(second.key.index));
+    assert_eq!(cache.oldest(), Some(second.key.index));
     cache.remove(second.key);
     let newest = cache.insert(compiled(&memory, filler(3)));
     assert!(cache.lookup_linked(&memory, filler(1)).is_none());
@@ -577,7 +578,7 @@ fn real_charged_byte_pressure_evicts_and_releases_links_before_initial_extent_is
     );
     assert!(!cache.retained(&first).is_some());
     assert!(cache.install_link(&first, 1).is_err());
-    let oldest_index = cache.oldest.unwrap();
+    let oldest_index = cache.oldest().unwrap();
     let oldest = RegionKey {
         index: oldest_index,
         identity: cache.regions[oldest_index]
@@ -759,8 +760,8 @@ fn frontier_contains_current_indexed_entries_even_without_installed_links() {
             .to_vec()
     );
     assert_eq!(cache.retained(&first).unwrap().slot, 0);
-    assert_eq!(cache.oldest, Some(first.key.index));
-    assert_eq!(cache.newest, Some(second.key.index));
+    assert_eq!(cache.oldest(), Some(first.key.index));
+    assert_eq!(cache.newest(), Some(second.key.index));
     assert_eq!(cache.oldest_linked_slot(), 7);
     assert_eq!(cache.snapshot(), snapshot);
     assert_eq!(cache.frontier(&AddressSpace::new(1).unwrap()), []);
@@ -793,8 +794,8 @@ fn frontier_omits_stale_and_identically_remapped_sources_without_removing_owners
         assert_eq!(cache.snapshot(), snapshot);
         assert!(cache.retained(&old).is_some());
         assert_eq!(cache.link_owners[1], old.identity());
-        assert_eq!(cache.oldest, Some(old.key.index));
-        assert_eq!(cache.newest, Some(current.key.index));
+        assert_eq!(cache.oldest(), Some(old.key.index));
+        assert_eq!(cache.newest(), Some(current.key.index));
         bounds(&cache);
     }
 }
@@ -834,8 +835,8 @@ fn frontier_membership_accepts_linked_and_unlinked_entries_without_touching_lru(
     assert!(!cache.frontier_contains(&memory, 0x1001));
     assert!(!cache.frontier_contains(&memory, 0xdead_0000));
     assert_eq!(cache.retained(&second).unwrap().slot, 0);
-    assert_eq!(cache.oldest, Some(first.key.index));
-    assert_eq!(cache.newest, Some(second.key.index));
+    assert_eq!(cache.oldest(), Some(first.key.index));
+    assert_eq!(cache.newest(), Some(second.key.index));
     assert_eq!(cache.oldest_linked_slot(), 1);
     assert_eq!(cache.snapshot(), snapshot);
     assert_eq!(cache.link_owners.as_slice(), links);
@@ -868,8 +869,8 @@ fn frontier_membership_rejects_foreign_stale_and_remapped_sources_without_remova
         assert_eq!(cache.snapshot(), snapshot);
         assert_eq!((cache.regions.len() - cache.free.len()), 2);
         assert_eq!(cache.link_owners[1], first.identity());
-        assert_eq!(cache.oldest, Some(first.key.index));
-        assert_eq!(cache.newest, Some(second.key.index));
+        assert_eq!(cache.oldest(), Some(first.key.index));
+        assert_eq!(cache.newest(), Some(second.key.index));
         bounds(&cache);
     }
 }
@@ -1055,7 +1056,7 @@ fn transition_lookup_caches_four_targets_and_self_edges_without_changing_owners(
                     .get(cache.entries_epoch, pc),
                 Some(target.key)
             );
-            assert_eq!(cache.newest, Some(target.key.index));
+            assert_eq!(cache.newest(), Some(target.key.index));
         }
     }
     assert!(matches!(
@@ -1135,7 +1136,7 @@ fn cached_transition_lookup_rechecks_live_links_without_an_index_change() {
         cache.lookup_transition(&memory, &source, 0x1000),
         TransitionLookup::Miss
     ));
-    assert_eq!(cache.newest, Some(target.key.index));
+    assert_eq!(cache.newest(), Some(target.key.index));
     cache.install_link(&target, 4).unwrap();
     assert!(matches!(
         cache.lookup_transition(&memory, &source, 0x1000),
@@ -1208,7 +1209,7 @@ fn repeated_compiled_edges_keep_immutable_owners_and_never_request_reformation()
         ] {
             assert!(matches!(cache.lookup_transition(&memory,from,pc),
                 TransitionLookup::Linked(ref code,selected) if same(code,to)&&selected==slot));
-            assert_eq!(cache.newest, Some(to.key.index));
+            assert_eq!(cache.newest(), Some(to.key.index));
         }
     }
     assert_eq!(cache.snapshot(), snapshot);
@@ -1230,12 +1231,12 @@ fn transition_lookup_keeps_unlinked_lookup_recency_without_replacing_owners() {
     let last = cache.insert(compiled(&memory, filler(1)));
     cache.install_link(&source, 1).unwrap();
     cache.install_link(&last, 3).unwrap();
-    assert_eq!(cache.newest, Some(last.key.index));
+    assert_eq!(cache.newest(), Some(last.key.index));
     assert!(matches!(
         cache.lookup_transition(&memory, &source, 0x1000),
         TransitionLookup::Miss
     ));
-    assert_eq!(cache.newest, Some(target.key.index));
+    assert_eq!(cache.newest(), Some(target.key.index));
 
     cache.install_link(&target, 2).unwrap();
     assert!(matches!(
@@ -1341,13 +1342,13 @@ fn transition_lookup_selects_a_shadowing_target_and_stops_before_a_stale_source(
     ));
     memory.write(GuestAddress(filler(0)), &[0x40]).unwrap();
     let snapshot = cache.snapshot();
-    let newest = cache.newest;
+    let newest = cache.newest();
     assert!(matches!(
         cache.lookup_transition(&memory, &source, 0x1000),
         TransitionLookup::Stop
     ));
 
     assert_eq!(cache.snapshot(), snapshot);
-    assert_eq!(cache.newest, newest);
+    assert_eq!(cache.newest(), newest);
     bounds(&cache);
 }

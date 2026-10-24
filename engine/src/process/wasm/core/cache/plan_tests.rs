@@ -178,12 +178,12 @@ fn connected_current_families_preflight_before_emission_then_replace_every_alias
     let baseline_bytes = baseline.wasm().to_vec();
     let before = cache.snapshot();
     let before_owners = cache.link_owners.to_vec();
-    let before_order = (cache.oldest, cache.newest);
+    let before_order = (cache.oldest(), cache.newest());
     let plan = connected_plan(&memory, &[&callee, &caller], CompileOptions::default());
     let admission = cache.preflight_observed(&memory, &plan).unwrap();
     assert_eq!(cache.snapshot(), before);
     assert_eq!(&*cache.link_owners, before_owners);
-    assert_eq!((cache.oldest, cache.newest), before_order);
+    assert_eq!((cache.oldest(), cache.newest()), before_order);
     let next = emit(&memory, plan);
     let encoded = next.wasm().len();
     let next = cache.commit_observed(&memory, admission, next).unwrap();
@@ -400,7 +400,7 @@ fn frontier_query_ignores_runtime_bypass_and_does_not_mutate_source_or_lru() {
         )
         .unwrap();
     let before = cache.snapshot();
-    let order = (cache.oldest, cache.newest);
+    let order = (cache.oldest(), cache.newest());
     cache.bypass_trace(caller.identity());
     assert!(cache.lookup(&memory, ROOT).is_none());
     assert!(cache.owned_frontier_contains(&memory, ROOT));
@@ -413,5 +413,5 @@ fn frontier_query_ignores_runtime_bypass_and_does_not_mutate_source_or_lru() {
     assert!(!cache.owned_frontier_contains(&memory, ROOT + 1));
     assert!(!cache.owned_frontier_contains(&memory, ROOT + 5));
     assert_eq!(cache.snapshot(), before);
-    assert_eq!((cache.oldest, cache.newest), order);
+    assert_eq!((cache.oldest(), cache.newest()), order);
 }

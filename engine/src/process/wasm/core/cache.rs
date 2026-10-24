@@ -1,3 +1,4 @@
+use crate::cpu::core::continuation as route;
 use crate::{
     cpu::core::{
         CompileError, CompileOptions, CompiledCode, ObservedPlan, ObservedPlanFingerprint,
@@ -12,6 +13,9 @@ use std::{
     ops::Deref,
     rc::Rc,
 };
+
+#[path = "cache/continuation.rs"]
+mod continuation;
 
 // Initial directory extents, not independent residency limits.
 const MAX_REGIONS: usize = 4096;
@@ -42,10 +46,13 @@ pub(super) struct CoreCache32 {
     bytes: usize,
     owner_charge: usize,
     binding_epoch: u64,
-    oldest: Option<usize>,
-    newest: Option<usize>,
+    route_header: Box<route::Header>,
+    route_owners: Vec<route::Owner>,
+    route_rows: Vec<route::Row>,
+    route_count: usize,
     link_owners: Vec<u64>,
     slot_regions: Vec<u32>,
+    slot_generations: Vec<u64>,
     compiled: u64,
     admitted_encoded_bytes: u64,
     count_evictions: u64,
@@ -156,8 +163,6 @@ struct CachedRegion {
     code: Rc<CompiledCode>,
     admitted_entries: Vec<GuestAddress>,
     indexed_entries: usize,
-    older: Option<usize>,
-    newer: Option<usize>,
     slot: u32,
     linked_entries: LinkedEntries,
     rejected_entries: HashMap<u32, EntryRejection, RandomState>,
@@ -282,10 +287,13 @@ impl Default for CoreCache32 {
             bytes: 0,
             owner_charge: 0,
             binding_epoch: 1,
-            oldest: None,
-            newest: None,
+            route_header: Box::default(),
+            route_owners: vec![route::Owner::default(); MAX_REGIONS],
+            route_rows: Vec::new(),
+            route_count: 0,
             link_owners: vec![0; MAX_LINK_SLOT + 1],
             slot_regions: vec![NO_REGION; MAX_LINK_SLOT + 1],
+            slot_generations: vec![0; MAX_LINK_SLOT + 1],
             compiled: 0,
             admitted_encoded_bytes: 0,
             count_evictions: 0,
@@ -350,6 +358,10 @@ impl CoreCache32 {
             + self.free.capacity() * size_of::<usize>()
             + self.link_owners.capacity() * size_of::<u64>()
             + self.slot_regions.capacity() * size_of::<u32>()
+            + size_of::<route::Header>()
+            + self.route_owners.capacity() * size_of::<route::Owner>()
+            + self.route_rows.capacity() * size_of::<route::Row>()
+            + self.slot_generations.capacity() * size_of::<u64>()
             + Self::hash_charge::<u32, RegionKey>(self.entries_capacity)
             + Self::hash_charge::<u32, RegionKey>(self.trace_entries_capacity)
             + Self::hash_charge::<u32, RegionKey>(self.window_entries_capacity)
@@ -382,8 +394,13 @@ impl CoreCache32 {
             }
         };
         let minimum_directory = size_of::<Self>()
-            + MAX_REGIONS * (size_of::<Option<CachedRegion>>() + size_of::<usize>())
-            + (MAX_LINK_SLOT + 1) * (size_of::<u64>() + size_of::<u32>())
+            + MAX_REGIONS
+                * (size_of::<Option<CachedRegion>>()
+                    + size_of::<usize>()
+                    + size_of::<route::Owner>())
+            + (MAX_LINK_SLOT + 1) * (size_of::<u64>() * 2 + size_of::<u32>())
+            + size_of::<route::Header>()
+            + Self::route_capacity(code.hot_spans().count()) * size_of::<route::Row>()
             + Self::hash_charge::<u32, RegionKey>(table_capacity(entries))
             + if trace {
                 0
@@ -416,6 +433,16 @@ impl CoreCache32 {
         entries: usize,
         instructions: usize,
         kind: DirectoryKind,
+    ) -> usize {
+        self.projected_directory_routes(entries, instructions, kind, instructions)
+    }
+
+    fn projected_directory_routes(
+        &self,
+        entries: usize,
+        instructions: usize,
+        kind: DirectoryKind,
+        routes: usize,
     ) -> usize {
         let extent = if self.free.is_empty() {
             self.regions.len().saturating_mul(2).min(MAX_REGION_EXTENT)
@@ -451,6 +478,12 @@ impl CoreCache32 {
             + self.free.capacity().max(extent) * size_of::<usize>()
             + self.link_owners.capacity().max(extent + 1) * size_of::<u64>()
             + self.slot_regions.capacity().max(extent + 1) * size_of::<u32>()
+            + self.slot_generations.capacity().max(extent + 1) * size_of::<u64>()
+            + size_of::<route::Header>()
+            + self.route_owners.capacity().max(extent) * size_of::<route::Owner>()
+            + self.route_rows.capacity().max(Self::route_capacity(
+                self.route_count.saturating_add(routes),
+            )) * size_of::<route::Row>()
             + Self::hash_charge::<u32, RegionKey>(entry_capacity)
             + Self::hash_charge::<u32, RegionKey>(trace_capacity)
             + Self::hash_charge::<u32, RegionKey>(coverage_capacity)
@@ -478,7 +511,16 @@ impl CoreCache32 {
         slots.append(&mut self.slot_regions);
         slots.resize(extent + 1, NO_REGION);
         self.slot_regions = slots;
+        let mut generations = Vec::with_capacity(extent + 1);
+        generations.append(&mut self.slot_generations);
+        generations.resize(extent + 1, 0);
+        self.slot_generations = generations;
+        let mut route_owners = Vec::with_capacity(extent);
+        route_owners.append(&mut self.route_owners);
+        route_owners.resize(extent, route::Owner::default());
+        self.route_owners = route_owners;
         self.advance_binding_epoch();
+        self.refresh_route_pointers();
     }
 
     fn compact_directories(&mut self) {
@@ -488,6 +530,7 @@ impl CoreCache32 {
         self.trace_entries_capacity = Self::rebuild_map(&mut self.trace_entries);
         self.window_entries_capacity = Self::rebuild_map(&mut self.window_entries);
         self.coverage_capacity = Self::rebuild_map(&mut self.coverage);
+        self.rebuild_routes(Self::route_capacity(self.route_count));
         let used_region = self
             .regions
             .iter()
@@ -515,8 +558,13 @@ impl CoreCache32 {
             self.link_owners.shrink_to_fit();
             self.slot_regions.truncate(extent + 1);
             self.slot_regions.shrink_to_fit();
+            self.slot_generations.truncate(extent + 1);
+            self.slot_generations.shrink_to_fit();
+            self.route_owners.truncate(extent);
+            self.route_owners.shrink_to_fit();
             self.advance_binding_epoch();
         }
+        self.refresh_route_pointers();
     }
 
     fn make_resident_space(
@@ -545,11 +593,26 @@ impl CoreCache32 {
         instructions: usize,
         kind: DirectoryKind,
     ) {
+        self.make_resident_space_routes(charge, entries, instructions, kind, instructions);
+    }
+
+    fn make_resident_space_routes(
+        &mut self,
+        charge: usize,
+        entries: usize,
+        instructions: usize,
+        kind: DirectoryKind,
+        routes: usize,
+    ) {
+        assert_eq!(
+            self.route_header.active, 0,
+            "executable admission is outside the CPU lease"
+        );
         let mut compact_at = usize::MAX;
         while self
             .owner_charge
             .saturating_add(charge)
-            .saturating_add(self.projected_directory_kind(entries, instructions, kind))
+            .saturating_add(self.projected_directory_routes(entries, instructions, kind, routes))
             > MAX_CODE_BYTES
             || self.free.is_empty() && self.regions.len() == MAX_REGION_EXTENT
         {
@@ -561,18 +624,16 @@ impl CoreCache32 {
             if count <= compact_at {
                 self.compact_directories();
                 compact_at = count / 2;
-                if self
-                    .owner_charge
-                    .saturating_add(charge)
-                    .saturating_add(self.projected_directory_kind(entries, instructions, kind))
-                    <= MAX_CODE_BYTES
+                if self.owner_charge.saturating_add(charge).saturating_add(
+                    self.projected_directory_routes(entries, instructions, kind, routes),
+                ) <= MAX_CODE_BYTES
                     && (!self.free.is_empty() || self.regions.len() < MAX_REGION_EXTENT)
                 {
                     break;
                 }
             }
             let index = self
-                .oldest
+                .oldest()
                 .expect("validated owner fits an empty resident cache");
             let identity = self.regions[index].as_ref().unwrap().code.identity();
             self.remove(RegionKey { index, identity });
@@ -581,6 +642,7 @@ impl CoreCache32 {
         if self.free.is_empty() {
             self.grow_directories();
         }
+        self.reserve_routes(routes);
         match kind {
             DirectoryKind::Family => {
                 self.trace_entries.reserve(entries);
@@ -1103,14 +1165,21 @@ impl CoreCache32 {
             1,
             self.entries_capacity,
         )) - Self::hash_charge::<u32, RegionKey>(self.entries_capacity);
+        let route_capacity = self
+            .route_rows
+            .capacity()
+            .max(Self::route_capacity(self.route_count + 1));
+        let extra_routes = (route_capacity - self.route_rows.capacity()) * size_of::<route::Row>();
         if self
             .resident_charge()
             .saturating_add(extra_entries)
             .saturating_add(extra_index)
+            .saturating_add(extra_routes)
             > MAX_CODE_BYTES
         {
             return Ok(OwnedEntryLookup::Declined);
         }
+        self.reserve_routes(1);
         if let Some(previous) = self.entries.get(&pc).copied() {
             if self
                 .region(previous)
@@ -1143,6 +1212,7 @@ impl CoreCache32 {
         self.owner_charge += extra;
         entry.indexed_entries += 1;
         entry.rejected_entries.remove(&pc);
+        self.refresh_route_pc(pc);
         self.touch(owner.key.index);
         Ok(OwnedEntryLookup::Ready(owner))
     }
@@ -1272,7 +1342,7 @@ impl CoreCache32 {
     }
 
     pub(super) fn oldest_linked_slot(&self) -> u32 {
-        let mut current = self.oldest;
+        let mut current = self.oldest();
         while let Some(index) = current {
             let entry = self.regions[index].as_ref().unwrap();
             let key = RegionKey {
@@ -1282,7 +1352,7 @@ impl CoreCache32 {
             if self.reciprocal_slot(key, entry) {
                 return entry.slot;
             }
-            current = entry.newer;
+            current = Self::route_index(self.route_owners[index].newer);
         }
         0
     }
@@ -1447,6 +1517,7 @@ impl CoreCache32 {
                 entry.slot,
             )
         });
+        self.route_owners[key.index].validation = memory.code_validation_version();
         self.touch(key.index);
         linked
     }
@@ -1477,9 +1548,16 @@ impl CoreCache32 {
         if owner != 0 || self.slot_regions[slot as usize] != NO_REGION {
             return Err(LinkError::Inconsistent);
         }
+        let generation = self.slot_generations[slot as usize]
+            .checked_add(1)
+            .ok_or(LinkError::Inconsistent)?;
         self.regions[code.key.index].as_mut().unwrap().slot = slot;
+        self.slot_generations[slot as usize] = generation;
         self.link_owners[slot as usize] = identity;
         self.slot_regions[slot as usize] = code.key.index as u32;
+        self.route_owners[code.key.index].slot = slot;
+        self.route_owners[code.key.index].generation = generation;
+        self.route_owners[code.key.index].flags |= route::BOUND;
         self.advance_binding_epoch();
         // An overlay can have been retained but unavailable while an SDK slot
         // was unlinked. Cached baseline edges must reconsider trace priority
@@ -1513,9 +1591,16 @@ impl CoreCache32 {
         if !self.region(key).is_some_and(|entry| entry.slot == slot) {
             return Err(LinkError::Inconsistent);
         }
+        let generation = self.slot_generations[slot as usize]
+            .checked_add(1)
+            .ok_or(LinkError::Inconsistent)?;
         self.regions[key.index].as_mut().unwrap().slot = 0;
+        self.slot_generations[slot as usize] = generation;
         self.link_owners[slot as usize] = 0;
         self.slot_regions[slot as usize] = NO_REGION;
+        self.route_owners[key.index].slot = 0;
+        self.route_owners[key.index].generation = 0;
+        self.route_owners[key.index].flags &= !route::BOUND;
         self.advance_binding_epoch();
         Ok(())
     }
@@ -1553,16 +1638,19 @@ impl CoreCache32 {
             }
         }
         let charge = Self::code_charge(&code, entries.capacity());
-        if window {
-            self.make_resident_space_kind(
-                charge,
-                entries.len(),
-                code.instruction_count(),
-                DirectoryKind::Window,
-            );
-        } else {
-            self.make_resident_space(charge, entries.len(), code.instruction_count(), trace);
-        }
+        self.make_resident_space_routes(
+            charge,
+            entries.len(),
+            code.instruction_count(),
+            if window {
+                DirectoryKind::Window
+            } else if trace {
+                DirectoryKind::Family
+            } else {
+                DirectoryKind::Baseline
+            },
+            code.hot_spans().count(),
+        );
         let index = self.free.pop().unwrap();
         let identity = code.identity();
         let key = RegionKey { index, identity };
@@ -1588,8 +1676,6 @@ impl CoreCache32 {
             indexed_entries: entries.len(),
             admitted_entries: entries,
             code: Rc::clone(&code),
-            older: self.newest,
-            newer: None,
             slot: 0,
             linked_entries: LinkedEntries::default(),
             rejected_entries: HashMap::with_hasher(RandomState::default()),
@@ -1597,12 +1683,33 @@ impl CoreCache32 {
             trace_heat: [TraceHeat::default(); 4],
             charge,
         });
-        if let Some(newest) = self.newest {
-            self.regions[newest].as_mut().unwrap().newer = Some(index);
+        let newest = self.route_header.newest;
+        self.route_owners[index] = route::Owner {
+            identity,
+            generation: 0,
+            validation: 0,
+            slot: 0,
+            older: newest,
+            newer: 0,
+            flags: if window { route::WINDOW } else { 0 },
+        };
+        if let Some(newest) = Self::route_index(newest) {
+            self.route_owners[newest].newer = index as u32 + 1;
         } else {
-            self.oldest = Some(index);
+            self.route_header.oldest = index as u32 + 1;
         }
-        self.newest = Some(index);
+        self.route_header.newest = index as u32 + 1;
+        let pcs: Vec<_> = self.regions[index]
+            .as_ref()
+            .unwrap()
+            .admitted_entries
+            .iter()
+            .map(|pc| pc.0)
+            .collect();
+        for pc in pcs {
+            self.refresh_route_pc(pc);
+        }
+        self.refresh_route_pointers();
         self.compiled = self.compiled.saturating_add(1);
         self.admitted_encoded_bytes = self
             .admitted_encoded_bytes
@@ -1633,30 +1740,29 @@ impl CoreCache32 {
     }
 
     fn touch(&mut self, index: usize) {
-        if self.newest == Some(index) {
+        if self.newest() == Some(index) {
             return;
         }
-        let entry = self.regions[index].as_ref().unwrap();
+        let entry = self.route_owners[index];
         let (older, newer) = (entry.older, entry.newer);
         self.detach(older, newer);
-        let newest = self.newest.unwrap();
-        self.regions[newest].as_mut().unwrap().newer = Some(index);
-        let entry = self.regions[index].as_mut().unwrap();
-        entry.older = self.newest;
-        entry.newer = None;
-        self.newest = Some(index);
+        let newest = self.newest().unwrap();
+        self.route_owners[newest].newer = index as u32 + 1;
+        self.route_owners[index].older = newest as u32 + 1;
+        self.route_owners[index].newer = 0;
+        self.route_header.newest = index as u32 + 1;
     }
 
-    fn detach(&mut self, older: Option<usize>, newer: Option<usize>) {
-        if let Some(older) = older {
-            self.regions[older].as_mut().unwrap().newer = newer;
+    fn detach(&mut self, older: u32, newer: u32) {
+        if let Some(older) = Self::route_index(older) {
+            self.route_owners[older].newer = newer;
         } else {
-            self.oldest = newer;
+            self.route_header.oldest = newer;
         }
-        if let Some(newer) = newer {
-            self.regions[newer].as_mut().unwrap().older = older;
+        if let Some(newer) = Self::route_index(newer) {
+            self.route_owners[newer].older = older;
         } else {
-            self.newest = older;
+            self.route_header.newest = older;
         }
     }
 
@@ -1668,10 +1774,14 @@ impl CoreCache32 {
         self.advance_entries_epoch();
         self.advance_binding_epoch();
         let entry = self.regions[key.index].take().unwrap();
-        self.detach(entry.older, entry.newer);
+        let row = self.route_owners[key.index];
+        self.detach(row.older, row.newer);
+        self.route_owners[key.index] = route::Owner::default();
         self.bytes -= entry.code.wasm().len();
         self.owner_charge -= entry.charge;
         if self.reciprocal_slot(key, &entry) {
+            self.slot_generations[entry.slot as usize] =
+                self.slot_generations[entry.slot as usize].saturating_add(1);
             self.link_owners[entry.slot as usize] = 0;
             self.slot_regions[entry.slot as usize] = NO_REGION;
         }
@@ -1694,6 +1804,9 @@ impl CoreCache32 {
             if self.coverage.get(&pc) == Some(&key) {
                 self.coverage.remove(&pc);
             }
+        }
+        for pc in &entry.admitted_entries {
+            self.refresh_route_pc(pc.0);
         }
         self.free.push(key.index);
     }
@@ -1782,3 +1895,7 @@ mod allocation_tests;
 #[cfg(test)]
 #[path = "cache/window_tests.rs"]
 mod window_tests;
+
+#[cfg(test)]
+#[path = "cache/continuation_tests.rs"]
+mod continuation_tests;

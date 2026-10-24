@@ -113,7 +113,7 @@ fn every_validated_family_port_shares_one_identity_slot_byte_budget_and_lru_node
     }
     assert!(cache.lookup(&memory, 0x1001).is_none());
     assert_eq!(cache.snapshot(), before);
-    assert_eq!(cache.oldest, cache.newest);
+    assert_eq!(cache.oldest(), cache.newest());
     invariants(&cache, &code);
     cache.bypass_trace(code.identity());
     assert!(cache.lookup(&memory, 0x1000).is_none());
