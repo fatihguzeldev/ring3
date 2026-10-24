@@ -64,6 +64,74 @@ fn shared_cpu_resources_consume_the_same_global_residency_budget() {
     assert_eq!(full.free.len(), full.regions.len());
 }
 
+#[test]
+fn shared_cpu_storage_forces_byte_eviction_before_the_next_owner_is_admitted() {
+    let memory = memory();
+    let support = crate::cpu::core::emit_dispatch();
+    let shared = crate::cpu::core::cold::DECODED_RESERVATION
+        + crate::cpu::core::recovery_workspace::RecoveryWorkspace::RESERVATION
+        + support.capacity()
+        + size_of::<Vec<u8>>();
+    let mut cache = CoreCache32::default();
+    cache.reserve_shared_resources(shared).unwrap();
+    assert!(shared > 64 << 10);
+
+    let mut first_code = compiled(&memory, filler(0));
+    let first_bytes = first_code.wasm().to_vec();
+    first_code.set_wasm_capacity_for_test(MAX_CODE_BYTES / 2);
+    assert_eq!(first_code.wasm(), first_bytes);
+    let first = cache.admit(&memory, first_code).unwrap();
+    cache.install_link(&first, 1).unwrap();
+    let before = cache.snapshot();
+    assert_eq!(before[3], 0, "the first owner fits without byte pressure");
+
+    let mut next_code = compiled(&memory, filler(1));
+    let next_bytes = next_code.wasm().to_vec();
+    let capacity = next_code.set_wasm_capacity_for_test(next_bytes.len());
+    let fixed = CoreCache32::code_charge(&next_code, next_code.entrypoints().len()) - capacity;
+    let headroom = MAX_CODE_BYTES - before[8] as usize;
+    let incoming_charge = headroom + (64 << 10);
+    assert!(incoming_charge > fixed + next_bytes.len());
+    next_code.set_wasm_capacity_for_test(incoming_charge - fixed);
+    assert_eq!(next_code.wasm(), next_bytes);
+    assert_eq!(
+        CoreCache32::code_charge(&next_code, next_code.entrypoints().len()),
+        incoming_charge
+    );
+    assert!(before[8] as usize + incoming_charge > MAX_CODE_BYTES);
+    assert!(incoming_charge < MAX_CODE_BYTES / 2);
+
+    // Both artifacts are valid and individually fit. Their actual owned Vec
+    // capacities plus the fixed CPU allocation require retiring the old owner.
+    // No estimate from the admission projector supplies this expectation.
+    let next = cache.admit(&memory, next_code).unwrap();
+    let after = cache.snapshot();
+    assert_eq!(after[0], before[0] + 1);
+    assert_eq!(after[2], before[2]);
+    assert_eq!(after[3], before[3] + 1);
+    assert_eq!(after[4], before[4]);
+    assert_eq!(after[5], 1);
+    assert!(after[8] <= MAX_CODE_BYTES as u64);
+    assert_eq!(after[9], MAX_CODE_BYTES as u64);
+    assert_eq!(cache.shared_charge, shared);
+    assert!(cache.retained(&first).is_none());
+    assert_eq!(cache.link_owners[1], 0);
+    assert_eq!(cache.slot_regions[1], NO_REGION);
+    assert!(cache.install_link(&first, 1).is_err());
+    assert!(cache.lookup(&memory, filler(0)).is_none());
+    assert!(first.is_current(&memory));
+    assert_eq!(first.wasm(), first_bytes);
+    assert_eq!(next.wasm(), next_bytes);
+    cache.install_link(&next, 2).unwrap();
+    let (selected, slot) = cache.lookup_linked(&memory, filler(1)).unwrap();
+    assert_eq!(slot, 2);
+    assert!(same(&selected, &next));
+    assert_eq!(cache.link_owners[2], next.identity());
+    assert_eq!(cache.slot_regions[2] as usize, next.key.index);
+    assert!(next.is_current(&memory));
+    bounds(&cache);
+}
+
 fn compiled(memory: &AddressSpace, pc: u32) -> CompiledCode {
     compile(
         memory,

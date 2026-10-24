@@ -566,6 +566,7 @@ impl CoreCache32 {
             ),
         };
         size_of::<Self>()
+            + self.shared_charge
             + self.regions.capacity().max(extent) * size_of::<Option<CachedRegion>>()
             + self.free.capacity().max(extent) * size_of::<usize>()
             + self.link_owners.capacity().max(extent + 1) * size_of::<u64>()
