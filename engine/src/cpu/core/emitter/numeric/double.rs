@@ -59,7 +59,17 @@ pub(super) fn bound(out: &mut Output<'_>, value: u32, depth: u32) {
 }
 
 pub(super) fn arithmetic(out: &mut Output<'_>, kind: X87Binary, depth: u32) {
-    if kind == X87Binary::Multiply && out.fp_schedule.at(out.before_frame.unwrap()).exact_mul {
+    let exact_product = out.fp_schedule.at(out.before_frame.unwrap()).exact_mul;
+    arithmetic_plan(out, kind, depth, exact_product);
+}
+
+pub(super) fn arithmetic_plan(
+    out: &mut Output<'_>,
+    kind: X87Binary,
+    depth: u32,
+    exact_product: bool,
+) {
+    if kind == X87Binary::Multiply && exact_product {
         // Two admitted native24 significands have at most 48 product bits. Their
         // finite binary32 exponent range fits normal binary64, including signed
         // zero. This arm runs only under the actual PC53 control selection.

@@ -10,6 +10,12 @@ const SIGNIFICAND: u32 = 46;
 const PACKED: u32 = 47;
 
 pub(super) fn pack(out: &mut Output<'_>, low: u32, high: u32, format: X87Format) {
+    pack_at(out, low, high, format, 0);
+}
+
+/// Pack into the caller's failure block. The caller may surround the pack with
+/// an additional precision-mode branch without changing its failure target.
+pub(super) fn pack_at(out: &mut Output<'_>, low: u32, high: u32, format: X87Format, depth: u32) {
     let (precision, bias, maximum) = match format {
         X87Format::Float32 => (24_u32, 127_u32, 255_u32),
         X87Format::Float64 => (53, 1023, 2047),
@@ -41,12 +47,12 @@ pub(super) fn pack(out: &mut Output<'_>, low: u32, high: u32, format: X87Format)
         .i32_and()
         .i32_or()
         .i32_eqz()
-        .br_if(0)
+        .br_if(depth)
         .local_get(EXPONENT)
         .i32_const((16383 - bias) as i32)
         .i32_sub()
         .local_set(EXPONENT);
-    normal_output(out, maximum, 0);
+    normal_output(out, maximum, depth);
     out.c()
         .local_get(SIGNIFICAND)
         .i64_const(i64::from(shift))
@@ -136,7 +142,7 @@ pub(super) fn pack(out: &mut Output<'_>, low: u32, high: u32, format: X87Format)
         .i64_extend_i32_u()
         .i64_shr_u()
         .local_set(PACKED);
-    normal_output(out, maximum, 1);
+    normal_output(out, maximum, depth + 1);
     out.c()
         .end()
         .i64_const(0)

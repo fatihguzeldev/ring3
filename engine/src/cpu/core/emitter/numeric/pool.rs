@@ -346,7 +346,7 @@ fn input_pointer(out: &mut Output<'_>, logical: u8) -> bool {
     true
 }
 
-fn proof_bit(kind: ProofKind) -> i32 {
+pub(super) fn proof_bit(kind: ProofKind) -> i32 {
     match kind {
         ProofKind::ExactF64 => 1,
         ProofKind::BoundedF64 => 2,

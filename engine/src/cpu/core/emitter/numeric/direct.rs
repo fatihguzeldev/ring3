@@ -101,7 +101,7 @@ pub(super) fn begin(out: &mut Output<'_>, operation: Operation, _next: u32) -> b
                     .local_set(STATUS)
                     .else_();
                 frame::load_raw(out, 0, SIG, X);
-                ieee::pack(out, SIG, X, format);
+                ieee::pack_at(out, SIG, X, format, 1);
                 out.c().end();
             } else {
                 frame::load_raw(out, 0, SIG, X);
@@ -327,7 +327,7 @@ fn prepare(out: &mut Output<'_>) {
     }
 }
 
-fn raw_normal_or_zero(out: &mut Output<'_>, cell: u32, depth: u32) {
+pub(super) fn raw_normal_or_zero(out: &mut Output<'_>, cell: u32, depth: u32) {
     out.c()
         .local_get(frame::HIGH + cell)
         .i32_const(0x7fff)
@@ -354,7 +354,7 @@ fn raw_normal_or_zero(out: &mut Output<'_>, cell: u32, depth: u32) {
         .br_if(depth);
 }
 
-fn normal_or_zero(out: &mut Output<'_>, bits: u32, depth: u32) {
+pub(super) fn normal_or_zero(out: &mut Output<'_>, bits: u32, depth: u32) {
     out.c()
         .local_get(bits)
         .i32_const(0x7fff_ffff)
@@ -376,15 +376,21 @@ fn normal_or_zero(out: &mut Output<'_>, bits: u32, depth: u32) {
 
 fn to_f64(out: &mut Output<'_>, logical: u8, value: u32, depth: u32) {
     let cell = u32::from(frame::input_cell(out, logical));
+    raw_to_f64(out, frame::LOW + cell, frame::HIGH + cell, value, depth);
+}
+
+/// Exact conversion primitive for an already validated normal/zero raw80 value.
+/// The executable value consumer supplies SSA operands rather than storage cells.
+pub(super) fn raw_to_f64(out: &mut Output<'_>, low: u32, high: u32, value: u32, depth: u32) {
     out.c()
-        .local_get(frame::LOW + cell)
+        .local_get(low)
         .local_tee(SIG)
         .i64_const(0x7ff)
         .i64_and()
         .i64_const(0)
         .i64_ne()
         .br_if(depth)
-        .local_get(frame::HIGH + cell)
+        .local_get(high)
         .local_tee(EXP)
         .i32_const(0x7fff)
         .i32_and()
@@ -580,9 +586,13 @@ pub(super) fn control_guard(out: &mut Output<'_>, depth: u32) {
         .i32_eq()
         .local_set(DOUBLE);
 }
-fn arithmetic(out: &mut Output<'_>, kind: X87Binary) {
+pub(super) fn arithmetic(out: &mut Output<'_>, kind: X87Binary) {
+    let exact_product = out.fp_schedule.at(out.before_frame.unwrap()).exact_mul;
+    arithmetic_plan(out, kind, exact_product);
+}
+pub(super) fn arithmetic_plan(out: &mut Output<'_>, kind: X87Binary, exact_product: bool) {
     out.c().local_get(DOUBLE).if_(BlockType::Empty);
-    double::arithmetic(out, kind, 1);
+    double::arithmetic_plan(out, kind, 1, exact_product);
     out.c().else_();
     arithmetic_single(out, kind, 1);
     out.c().end();

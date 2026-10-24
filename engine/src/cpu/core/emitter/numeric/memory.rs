@@ -16,6 +16,37 @@ pub(super) fn prepare(
     aligned: bool,
     destination: u32,
 ) {
+    prepare_address(out, address, width, write, aligned, destination, None);
+}
+
+pub(super) fn prepare_value(
+    out: &mut Output<'_>,
+    address: &crate::cpu::core::region::values::executable::AddressValue,
+    width: u32,
+    write: bool,
+    aligned: bool,
+    destination: u32,
+) {
+    prepare_address(
+        out,
+        address.address,
+        width,
+        write,
+        aligned,
+        destination,
+        Some(address),
+    );
+}
+
+fn prepare_address(
+    out: &mut Output<'_>,
+    address: EffectiveAddress,
+    width: u32,
+    write: bool,
+    aligned: bool,
+    destination: u32,
+    value: Option<&crate::cpu::core::region::values::executable::AddressValue>,
+) {
     let segment = address.resolved_segment();
     out.c()
         .local_get(BANK)
@@ -27,7 +58,11 @@ pub(super) fn prepare(
     if write && segment == SegmentRegister::Cs {
         out.c().br(0);
     }
-    out.address(address);
+    if let Some(value) = value {
+        out.executable_address(value);
+    } else {
+        out.address(address);
+    }
     let grouped = out.group_geometry(address, width, write);
     if grouped {
         out.c()
