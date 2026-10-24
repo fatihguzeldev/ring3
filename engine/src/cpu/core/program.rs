@@ -6,8 +6,9 @@ mod observed_cold;
 #[cfg(test)]
 mod reform;
 pub(crate) use observed_cold::{
-    ObservedPlan, ObservedPlanFingerprint, compile_observed_with_cold, emit_observed_plan,
-    prepare_cold_prefix_plan, prepare_observed_plan,
+    ObservedPlan, ObservedPlanFingerprint, WindowFingerprint, WindowPlan,
+    compile_observed_with_cold, emit_hot_window, emit_observed_plan, prepare_cold_prefix_plan,
+    prepare_hot_window, prepare_observed_plan,
 };
 
 static NEXT_IDENTITY: AtomicU64 = AtomicU64::new(1);
@@ -91,6 +92,7 @@ pub struct CompiledCode {
     trace_score: Option<TraceScore>,
     observed: Option<Arc<observed_cold::ObservedHistory>>,
     observed_fingerprint: Option<ObservedPlanFingerprint>,
+    window_fingerprint: Option<WindowFingerprint>,
     #[cfg(test)]
     roots: Box<[GuestAddress]>,
 }
@@ -146,6 +148,9 @@ impl CompiledCode {
         if let Some(fingerprint) = &self.observed_fingerprint {
             charge += fingerprint.metadata_charge();
         }
+        if let Some(fingerprint) = &self.window_fingerprint {
+            charge += fingerprint.metadata_charge() + fingerprint.graph_charge();
+        }
         #[cfg(test)]
         {
             charge += std::mem::size_of_val(self.roots.as_ref());
@@ -178,6 +183,12 @@ impl CompiledCode {
     }
     pub(crate) fn observed_fingerprint(&self) -> Option<&ObservedPlanFingerprint> {
         self.observed_fingerprint.as_ref()
+    }
+    pub(crate) fn is_execution_window(&self) -> bool {
+        self.window_fingerprint.is_some()
+    }
+    pub(crate) fn window_fingerprint(&self) -> Option<&WindowFingerprint> {
+        self.window_fingerprint.as_ref()
     }
     pub(crate) fn observed_grows(&self, previous: &Self) -> bool {
         self.memory_identity == previous.memory_identity
@@ -882,6 +893,7 @@ fn finish_code(
         trace_score: trace.map(|(_, score)| score),
         observed: None,
         observed_fingerprint: None,
+        window_fingerprint: None,
         #[cfg(test)]
         roots: _roots.into(),
     }

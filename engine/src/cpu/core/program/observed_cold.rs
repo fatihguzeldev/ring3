@@ -5,8 +5,8 @@ use crate::cpu::core::trace::{
 
 mod plan;
 pub(crate) use plan::{
-    ObservedPlan, ObservedPlanFingerprint, emit_observed_plan, prepare_cold_prefix_plan,
-    prepare_observed_plan,
+    ObservedPlan, ObservedPlanFingerprint, WindowFingerprint, WindowPlan, emit_hot_window,
+    emit_observed_plan, prepare_cold_prefix_plan, prepare_hot_window, prepare_observed_plan,
 };
 
 #[derive(Clone, Debug, PartialEq)]

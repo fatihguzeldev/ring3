@@ -42,6 +42,240 @@ pub(crate) struct ObservedPlan {
     entries: Vec<GuestAddress>,
 }
 
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct WindowFingerprint {
+    memory_identity: u64,
+    anchor: u32,
+    options: CompileOptions,
+    graph: Arc<ObservedHistory>,
+    sources: Vec<SourceAuthority>,
+}
+
+pub(crate) struct WindowPlan {
+    fingerprint: WindowFingerprint,
+    sources: Vec<CodeSnapshot>,
+    blocks: Vec<Block>,
+    entries: Vec<GuestAddress>,
+    cross_owner_edges: usize,
+}
+
+impl WindowFingerprint {
+    pub(crate) fn same_graph(&self, other: &Self) -> bool {
+        self.memory_identity == other.memory_identity
+            && self.options == other.options
+            && self.graph.nodes == other.graph.nodes
+            && self.graph.edges == other.graph.edges
+            && self.graph.ports == other.graph.ports
+            && self.sources == other.sources
+    }
+
+    pub(crate) fn metadata_charge(&self) -> usize {
+        self.sources.capacity() * std::mem::size_of::<SourceAuthority>()
+            + self
+                .sources
+                .iter()
+                .map(|source| source.versions.capacity() * std::mem::size_of::<(u64, u64)>())
+                .sum::<usize>()
+    }
+
+    pub(crate) fn graph_charge(&self) -> usize {
+        self.graph.resident_charge()
+    }
+
+    pub(crate) fn resident_charge(&self) -> usize {
+        std::mem::size_of::<Self>() + self.metadata_charge() + self.graph_charge()
+    }
+}
+
+impl WindowPlan {
+    pub(crate) fn anchor(&self) -> u32 {
+        self.fingerprint.anchor
+    }
+    pub(crate) fn fingerprint(&self) -> &WindowFingerprint {
+        &self.fingerprint
+    }
+    pub(crate) fn instruction_pcs(&self) -> impl Iterator<Item = u32> + '_ {
+        self.fingerprint.graph.nodes.iter().map(|(pc, _)| *pc)
+    }
+    pub(crate) fn entrypoints(&self) -> &[GuestAddress] {
+        &self.entries
+    }
+    pub(crate) fn has_executable_gain(&self) -> bool {
+        self.cross_owner_edges != 0
+    }
+    pub(crate) fn cross_owner_edge_count(&self) -> usize {
+        self.cross_owner_edges
+    }
+    pub(crate) fn is_current(&self, memory: &AddressSpace) -> bool {
+        memory.identity() == self.fingerprint.memory_identity
+            && self
+                .sources
+                .iter()
+                .all(|source| memory.is_code_current(source))
+    }
+}
+
+fn retained_site_pc(owner: &CompiledCode, event: &TraceEvent, last: bool) -> Option<u32> {
+    match event.kind {
+        NUMERIC => Some(event.pc),
+        BLOCK => {
+            let index = owner
+                .blocks
+                .binary_search_by_key(&event.pc, |block| block.pc)
+                .ok()?;
+            let block = &owner.blocks[index];
+            let offset = if last {
+                block.count.checked_sub(1)?
+            } else {
+                event.offset
+            };
+            owner
+                .block_pcs
+                .get((block.first + offset) as usize)
+                .copied()
+        }
+        _ => None,
+    }
+}
+
+pub(crate) fn prepare_hot_window(
+    memory: &AddressSpace,
+    root: GuestAddress,
+    options: CompileOptions,
+    events: &[TraceEvent],
+    owners: &[&CompiledCode],
+    expected_source_version: u64,
+    cold: &[CompletedColdObservation],
+) -> Result<Option<WindowPlan>, CompileError> {
+    if !cold.is_empty() || events.iter().any(|event| event.kind == COLD_COMPLETE) {
+        return Ok(None);
+    }
+    let Some(CapturedGraph { graph, sources }) = capture_graph(
+        memory,
+        root,
+        options,
+        events,
+        owners,
+        expected_source_version,
+        cold,
+    )?
+    else {
+        return Ok(None);
+    };
+    let retained: BTreeMap<_, _> = owners
+        .iter()
+        .map(|owner| (owner.identity(), *owner))
+        .collect();
+    let mut cross_owner_edges = BTreeSet::new();
+    for pair in events.windows(2) {
+        let [before, after] = pair else {
+            unreachable!()
+        };
+        if before.owner == after.owner || before.owner == 0 || after.owner == 0 {
+            continue;
+        }
+        let Some(source) = retained
+            .get(&before.owner)
+            .and_then(|owner| retained_site_pc(owner, before, true))
+        else {
+            return Ok(None);
+        };
+        let Some(target) = retained
+            .get(&after.owner)
+            .and_then(|owner| retained_site_pc(owner, after, false))
+        else {
+            return Ok(None);
+        };
+        // a final retained event only confirms its predecessor; it does not
+        // certify executing its own node or eliminating that owner boundary.
+        if graph.nodes.contains_key(&source)
+            && graph.nodes.contains_key(&target)
+            && graph.edges.contains(&(source, target))
+        {
+            cross_owner_edges.insert((source, target));
+        }
+    }
+    if cross_owner_edges.is_empty() {
+        return Ok(None);
+    }
+    let Some(plan) = form_plan(memory, root.0, options, graph, sources, Vec::new()) else {
+        return Ok(None);
+    };
+    let ObservedPlan {
+        fingerprint,
+        sources,
+        blocks,
+        ..
+    } = plan;
+    Ok(Some(WindowPlan {
+        fingerprint: WindowFingerprint {
+            memory_identity: fingerprint.memory_identity,
+            anchor: root.0,
+            options,
+            graph: fingerprint.graph,
+            sources: fingerprint.sources,
+        },
+        sources,
+        blocks,
+        entries: vec![root],
+        cross_owner_edges: cross_owner_edges.len(),
+    }))
+}
+
+pub(crate) fn emit_hot_window(
+    memory: &AddressSpace,
+    plan: WindowPlan,
+) -> Result<Option<CompiledCode>, CompileError> {
+    if !plan.is_current(memory) || !plan.has_executable_gain() {
+        return Ok(None);
+    }
+    let WindowPlan {
+        fingerprint,
+        sources,
+        blocks,
+        entries,
+        ..
+    } = plan;
+    let native = collect_native(&blocks);
+    let score = TraceScore {
+        instructions: fingerprint.graph.nodes.len(),
+        internal_edges: fingerprint
+            .graph
+            .edges
+            .iter()
+            .filter(|(source, target)| {
+                fingerprint.graph.contains_node(*source) && fingerprint.graph.contains_node(*target)
+            })
+            .count(),
+    };
+    let identity = next_identity()?;
+    let wasm = super::super::super::emitter::emit_observed(
+        &blocks,
+        fingerprint.anchor,
+        identity,
+        &native,
+        &fingerprint.graph.edges,
+    );
+    if wasm.len() > fingerprint.options.wasm_bytes
+        || sources.iter().any(|source| !memory.is_code_current(source))
+    {
+        return Ok(None);
+    }
+    let mut code = finish_code(
+        memory,
+        blocks,
+        identity,
+        wasm,
+        native,
+        sources,
+        &entries,
+        Some((fingerprint.anchor, score)),
+    );
+    code.entries = entries;
+    code.window_fingerprint = Some(fingerprint);
+    Ok(Some(code))
+}
+
 impl ObservedPlanFingerprint {
     pub(crate) fn metadata_charge(&self) -> usize {
         self.sources.capacity() * std::mem::size_of::<SourceAuthority>()
@@ -368,3 +602,5 @@ pub(crate) fn emit_observed_plan(
 
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod window_tests;
