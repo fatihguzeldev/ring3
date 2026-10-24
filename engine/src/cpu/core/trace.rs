@@ -11,6 +11,9 @@ pub(crate) const BYPASS_PENDING: u64 = 28;
 pub(crate) const EVENTS: u64 = 32;
 pub(crate) const EVENT_SIZE: u64 = 24;
 pub(crate) const CAPACITY: usize = 129;
+pub(crate) const SAMPLE_COUNTDOWN: u64 = EVENTS + EVENT_SIZE * CAPACITY as u64;
+pub(crate) const SAMPLE_PENDING: u64 = SAMPLE_COUNTDOWN + 4;
+pub(crate) const SAMPLE_INTERVAL: u32 = 1024;
 pub(crate) const BLOCK: u32 = 1;
 pub(crate) const NUMERIC: u32 = 2;
 pub(crate) const COLD_COMPLETE: u32 = 3;
@@ -105,6 +108,8 @@ pub(crate) struct TraceArena {
     pub bypass_retired: u32,
     pub bypass_pending: u32,
     pub events: [TraceEvent; CAPACITY],
+    pub sample_countdown: u32,
+    pub sample_pending: u32,
 }
 
 impl Default for TraceArena {
@@ -130,6 +135,8 @@ impl TraceArena {
                 offset: 0,
                 owner: 0,
             }; CAPACITY],
+            sample_countdown: SAMPLE_INTERVAL,
+            sample_pending: 0,
         }
     }
 
@@ -140,6 +147,11 @@ impl TraceArena {
         self.limit = CAPACITY as u32;
         self.overflow = 0;
         self.events.fill(TraceEvent::default());
+        self.sample_pending = 0;
+    }
+
+    pub(crate) fn take_sample(&mut self) -> bool {
+        std::mem::take(&mut self.sample_pending) == 1
     }
 
     pub fn deactivate(&mut self) {
@@ -183,7 +195,9 @@ const _: () = {
     assert!(std::mem::offset_of!(TraceArena, bypass_retired) == BYPASS_RETIRED as usize);
     assert!(std::mem::offset_of!(TraceArena, bypass_pending) == BYPASS_PENDING as usize);
     assert!(std::mem::offset_of!(TraceArena, events) == EVENTS as usize);
-    assert!(std::mem::size_of::<TraceArena>() == EVENTS as usize + EVENT_SIZE as usize * CAPACITY);
+    assert!(std::mem::offset_of!(TraceArena, sample_countdown) == SAMPLE_COUNTDOWN as usize);
+    assert!(std::mem::offset_of!(TraceArena, sample_pending) == SAMPLE_PENDING as usize);
+    assert!(std::mem::size_of::<TraceArena>() == SAMPLE_PENDING as usize + 4);
 };
 
 #[cfg(test)]
@@ -210,6 +224,24 @@ mod tests {
             (17, 23, 1)
         );
         assert_eq!(arena.events[0], TraceEvent::default());
+    }
+
+    #[test]
+    fn sampling_feedback_is_one_shot_and_countdown_survives_capture_lifetimes() {
+        let mut arena = TraceArena::new();
+        assert_eq!(arena.sample_countdown, SAMPLE_INTERVAL);
+        assert!(!arena.take_sample());
+        arena.sample_pending = 1;
+        assert!(arena.take_sample());
+        assert!(!arena.take_sample());
+        arena.sample_countdown = 17;
+        arena.sample_pending = 1;
+        arena.begin();
+        assert_eq!(arena.sample_countdown, 17);
+        assert!(!arena.take_sample());
+        assert_eq!(arena.limit, CAPACITY as u32);
+        arena.deactivate();
+        assert_eq!(arena.sample_countdown, 17);
     }
 
     #[test]

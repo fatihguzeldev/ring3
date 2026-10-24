@@ -81,7 +81,7 @@ function callbacks(calls,identity,ordinal,count) {
 export function runExecutionWindowCanonicalCases(artifact,report) {
   const code=new Uint8Array(4096);
   program(code,A,'d8c1 ffe6','ffe7');program(code,B,'b8ffffffff 0fa2 ffe7','ffe6');
-  coldFixture(artifact,report,'stable-fragment-canonical-ordinal-without-parent-absorption',{
+  coldFixture(artifact,report,'automatic-window-canonical-ordinal-without-parent-absorption',{
     code,registers:REGS,flags:FLAGS,
   },world=>{
     world.cache.instructions=2048;world.cache.blocks=128;
@@ -112,8 +112,8 @@ export function runExecutionWindowCanonicalCases(artifact,report) {
       instructions:[129,129],limitBlocks:128,
       parents:parents.map(parent=>({id:String(parent.id),pc:parent.pc,slot:parent.slot,bytes:parent.bytes,sha256:parent.sha256}))};
 
-    // All 1100 CPUID callbacks execute in the original B dictionary. Learning
-    // generated connectivity does not replace either immutable fragment.
+    // training still executes all callbacks in the original dictionary;
+    // automatic installation occurs only after that lease completes.
     world.reset({pc:B,registers:REGS,flags:FLAGS,fp:initial});
     const before=world.snapshot(),helpers=world.helperCalls.length,formed=world.execute(5500,B);
     coldLiteral(world,before,formed,{pc:B,retired:5500,budget:5500,registers:ZEROED,flags:FLAGS,
@@ -122,32 +122,36 @@ export function runExecutionWindowCanonicalCases(artifact,report) {
     assert.equal(formed.id,parentA.id);assert.equal(formed.regions,2200);
     assert.equal(formed.chainedColdWork,0);assert.equal(formed.chainedColdRetired,0);
     callbacks(world.helperCalls.slice(helpers),parentB.id,0,1100);
-    const admissions=world.cache.admissions,generated=world.cache.generatedModuleBytes;
-    assert.equal(admissions,2);assert.equal(world.cache.units.size,2);
+    world.result.trainingSemanticComplete=true;
+    const windows=[...world.cache.units.values()].filter(unit=>!parents.some(parent=>parent.id===unit.id));
+    assert.equal(windows.length,1,'a canonical boundary does not prevent automatic hot-window formation');
+    const window=windows[0],admissions=world.cache.admissions,generated=world.cache.generatedModuleBytes;
+    assert.equal(admissions,3);assert.equal(world.cache.units.size,3);
     for(let replay=0;replay<2;replay++) {
       world.reset({pc:A,registers:REGS,flags:FLAGS,fp:initial});
       const warmBefore=world.snapshot(),warmHelpers=world.helperCalls.length,warm=world.execute(45,A);
       coldLiteral(world,warmBefore,warm,{pc:A,retired:45,budget:45,registers:ZEROED,flags:FLAGS,
         fp:fp(initial,{value:VALUE.twentyOne,fip:A}),writes:[],versionWrites:0});
-      assert.equal(warm.id,parentB.id);assert.equal(warm.regions,18);
+      assert.equal(warm.id,window.id);assert(warm.regions<=2);
       assert.equal(warm.chainedColdWork,0);assert.equal(warm.chainedColdRetired,0);
-      callbacks(world.helperCalls.slice(warmHelpers),parentB.id,0,9);
-      assert.equal(world.resolverCalls,warmBefore.resolverCalls,
-        'canonical callbacks adopt the current ticket without per-edge native resolution');
+      callbacks(world.helperCalls.slice(warmHelpers),window.id,1,9);
+      assert(world.resolverCalls-warmBefore.resolverCalls<=1,
+        'only the initial caller-to-window edge can need native resolution');
     }
     world.result.semanticComplete=true;
     for(const budget of[3,4]) {
       world.reset({pc:A,registers:REGS,flags:FLAGS,fp:initial});
-      const prefixBefore=world.snapshot(),prefixHelpers=world.helperCalls.length,run=world.executeSource(budget,A);
+      const prefixBefore=world.snapshot(),prefixHelpers=world.helperCalls.length,run=world.execute(budget,A);
       coldLiteral(world,prefixBefore,run,{pc:B+(budget===3?5:7),retired:budget,budget,
         registers:budget===3?[0xffffffff,...REGS.slice(1)]:ZEROED,flags:FLAGS,
         fp:fp(initial,{value:VALUE.five,fip:A}),writes:[],versionWrites:0});
-      assert.equal(run.id,parentB.id);assert.equal(run.regions,2);
-      callbacks(world.helperCalls.slice(prefixHelpers),parentB.id,0,budget===3?0:1);
+      assert(run.regions<=2);
+      if(budget===4)callbacks(world.helperCalls.slice(prefixHelpers),run.id,run.id===window.id?1:0,1);
+      else assert.equal(world.helperCalls.length,prefixHelpers);
     }
-    stable(world,parentA);stable(world,parentB);
+    stable(world,parentA,{skip:[window.pc]});stable(world,parentB,{skip:[window.pc]});
     assert.equal(world.cache.admissions,admissions);assert.equal(world.cache.generatedModuleBytes,generated);
-    assert.equal(world.cache.units.size,2);world.result.windowSemanticComplete=true;
+    assert.equal(world.cache.units.size,3);world.result.windowSemanticComplete=true;
   });
 
   coldFixture(artifact,report,'manual-root-only-canonical-trace-rebases-its-own-ordinal-and-exact-prefixes',{

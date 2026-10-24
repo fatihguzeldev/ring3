@@ -45,6 +45,35 @@ fn store_local(c: &mut InstructionSink<'_>, offset: u64, local: u32) {
         .i32_store(mem(offset, 2));
 }
 
+fn sample(c: &mut InstructionSink<'_>, candidate: u64) {
+    if candidate == 0 {
+        return;
+    } // window roots already own a fused body.
+    load64(c, OWNER, d::OWNER_ID);
+    load64(c, HEADER, d::CURRENT_ID);
+    c.i64_ne().if_(BlockType::Empty);
+    load(c, ARENA, trace::SAMPLE_COUNTDOWN);
+    c.i32_const(1)
+        .i32_sub()
+        .local_set(LEFT)
+        .local_get(ARENA)
+        .local_get(LEFT)
+        .i32_store(mem(trace::SAMPLE_COUNTDOWN, 2))
+        .local_get(LEFT)
+        .i32_eqz()
+        .if_(BlockType::Empty)
+        .local_get(ARENA)
+        .i32_const(trace::SAMPLE_INTERVAL as i32)
+        .i32_store(mem(trace::SAMPLE_COUNTDOWN, 2))
+        .local_get(ARENA)
+        .i32_const(1)
+        .i32_store(mem(trace::SAMPLE_PENDING, 2))
+        .i32_const(0)
+        .return_()
+        .end()
+        .end();
+}
+
 pub(super) fn emit(state_base: u32) -> Function {
     // Parameters: Context, actual PC, actual retired count, available work.
     let mut f = Function::new([(12, ValType::I32), (1, ValType::I64)]);
@@ -243,6 +272,8 @@ pub(super) fn emit(state_base: u32) -> Function {
         owner(&mut c, NEWEST);
         c.i32_load(mem(d::OWNER_NEWER, 2));
         miss(&mut c);
+        // sample only a completely validated route, before any LRU/ticket writes.
+        sample(&mut c, candidate);
         c.local_get(OLDER).if_(BlockType::Empty);
         owner(&mut c, OLDER);
         c.local_get(NEWER).i32_store(mem(d::OWNER_NEWER, 2));
@@ -260,6 +291,8 @@ pub(super) fn emit(state_base: u32) -> Function {
             .i32_const(0)
             .i32_store(mem(d::OWNER_NEWER, 2));
         store_local(&mut c, d::NEWEST, INDEX);
+        c.else_();
+        sample(&mut c, candidate);
         c.end();
         store_local(&mut c, d::CURRENT_INDEX, INDEX);
         store_local(&mut c, d::CURRENT_SLOT, SLOT);

@@ -84,6 +84,10 @@ function fixture(artifact,report,name,options,body) {
       probes++;const returned=raw.core_chain_resolve_owned(...args);
       result.selections.push({operation:'resolve-owned',args,returned});return returned;
     }}:{}),
+    ...(typeof raw.core_chain_resolve_executable_owned==='function'?{core_chain_resolve_executable_owned:(...args)=>{
+      probes++;const returned=raw.core_chain_resolve_executable_owned(...args);
+      result.selections.push({operation:'resolve-executable-owned',args,returned});return returned;
+    }}:{}),
   };
   const status=(operation,wanted,...args)=>{const actual=raw[operation](...args)>>>0;
     result.controls.push({operation,wanted,actual,args});assert.equal(actual,wanted,`${name}: ${operation}`);return actual;};
@@ -131,7 +135,10 @@ function fixture(artifact,report,name,options,body) {
         const parsed=readGeneratedModule(dispatchSource),diagnostic=instrumentWitnessModule(dispatchSource,parsed,true);
         const probeImport=parsed.imports.find(item=>item.name==='probe');assert(probeImport,'real dispatcher probe import');
         const probeType=parsed.types[probeImport.type];
-        const probe=probeType.parameters.length===3?cacheResolver(cache):api.core_chain_probe;
+        const probe=options.automaticResolver&&api.core_chain_resolve_executable_owned
+          ? (context,pc,retired)=>api.core_chain_resolve_executable_owned(context,pc,retired,
+            cache.dispatch['link.local12'].value>>>0)
+          :probeType.parameters.length===3?cacheResolver(cache):api.core_chain_probe;
         assert.equal(typeof probe,'function','the exact dispatcher selection ABI has its native capability');
         const support=new WebAssembly.Instance(new WebAssembly.Module(diagnostic.bytes),{ring3:{memory,
           functions:cache.table,publishers:cache.publishers,probe,cold:raw.core_chain_cold}}).exports;

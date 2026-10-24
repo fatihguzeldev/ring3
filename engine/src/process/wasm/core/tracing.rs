@@ -1,9 +1,10 @@
 use super::{CoreSession32, REGISTRY, Registry, cache::RegionRef, compile_status};
 use crate::{
     cpu::core::{
-        CompileError, CompileOptions, ObservedPlan,
+        CompileError, CompileOptions, ObservedPlan, WindowPlan,
         cold::ColdObserver,
-        compile_observed_with_growth, emit_observed_plan, prepare_cold_prefix_plan,
+        compile_observed_with_growth, emit_hot_window, emit_observed_plan,
+        prepare_cold_prefix_plan, prepare_hot_window,
         trace::{self, CompletedColdObservation, PendingColdObservation, TraceArena, TraceEvent},
     },
     memory::{AddressSpace, GuestAddress},
@@ -105,6 +106,7 @@ impl TraceController {
     }
 
     pub(super) fn end(&mut self) {
+        self.arena.sample_pending = 0;
         if self.root.is_some() {
             self.arena.deactivate();
             self.ended = true;
@@ -114,6 +116,7 @@ impl TraceController {
 
     fn clear_capture(&mut self) {
         self.arena.deactivate();
+        self.arena.sample_pending = 0;
         self.root = None;
         self.installed_root = None;
         self.owners.clear();
@@ -189,6 +192,7 @@ impl ColdObserver for TraceController {
 
 impl CoreSession32 {
     pub(super) fn trace_selection(&mut self, memory: &AddressSpace, pc: u32) {
+        let sampled = self.tracing.arena.take_sample();
         let Some(code) = self.code.as_ref() else {
             return;
         };
@@ -196,9 +200,22 @@ impl CoreSession32 {
             self.tracing.observe(code);
             return;
         }
-        // Connectivity is installed in the continuation directory. A fully
-        // owned edge needs no replacement body or compilation heat capture.
-        let _ = (memory, pc);
+        if !code.is_current(memory)
+            || self
+                .cache
+                .current_hot_port(memory, pc)
+                .is_none_or(|(current, _)| current.identity() != code.identity())
+        {
+            return;
+        }
+        let candidate = if sampled {
+            self.cache.sample_candidate(code, pc)
+        } else {
+            self.cache.trace_candidate(code, pc)
+        };
+        if candidate {
+            self.tracing.start(memory, code.clone(), pc, false);
+        }
     }
 
     pub(super) fn refresh_trace_bypass(&mut self, retired: u32) {
@@ -329,17 +346,34 @@ pub(crate) fn core_trace_finish(root: u32, instructions: u32, blocks: u32) -> u3
                 ..CompileOptions::default()
             };
             if !manual {
-                // The completed cold run owns only new source. Existing
-                // immutable fragments stay linked; their history is never
-                // unioned into a replacement executable during automatic work.
-                prepare_cold_prefix_plan(memory, options, &events, &core.tracing.cold, &|pc| {
-                    core.cache.current_hot_port(memory, pc).is_some()
-                })
-                .and_then(|plan| {
-                    plan.map(|plan| admit_fragment(&mut core.cache, memory, plan))
-                        .transpose()
-                        .map(Option::flatten)
-                })
+                if core.tracing.cold.is_empty() {
+                    // only two identical completed root cycles can become a window;
+                    // the planner never unions unexecuted parent history.
+                    prepare_hot_window(
+                        memory,
+                        GuestAddress(root),
+                        options,
+                        &events,
+                        &owners,
+                        core.tracing.source_version,
+                        &core.tracing.cold,
+                    )
+                    .and_then(|plan| {
+                        plan.map(|plan| admit_window(&mut core.cache, memory, plan))
+                            .transpose()
+                            .map(Option::flatten)
+                    })
+                } else {
+                    // mixed/cold captures retain the bounded unowned frontier path.
+                    prepare_cold_prefix_plan(memory, options, &events, &core.tracing.cold, &|pc| {
+                        core.cache.current_hot_port(memory, pc).is_some()
+                    })
+                    .and_then(|plan| {
+                        plan.map(|plan| admit_fragment(&mut core.cache, memory, plan))
+                            .transpose()
+                            .map(Option::flatten)
+                    })
+                }
             } else {
                 compile_observed_with_growth(
                     memory,
@@ -384,6 +418,24 @@ fn admit_fragment(
         Ok(Some(code)) => cache.commit_fragment(memory, admission, code).map(Some),
         Ok(None) | Err(CompileError::WasmLimit) => {
             cache.reject_fragment(admission);
+            Ok(None)
+        }
+        Err(error) => Err(error),
+    }
+}
+
+fn admit_window(
+    cache: &mut super::cache::CoreCache32,
+    memory: &AddressSpace,
+    plan: WindowPlan,
+) -> Result<Option<RegionRef>, CompileError> {
+    let Some(admission) = cache.preflight_window(memory, &plan) else {
+        return Ok(None);
+    };
+    match emit_hot_window(memory, plan) {
+        Ok(Some(code)) => cache.commit_window(memory, admission, code).map(Some),
+        Ok(None) | Err(CompileError::WasmLimit) => {
+            cache.reject_window(admission);
             Ok(None)
         }
         Err(error) => Err(error),

@@ -77,7 +77,7 @@ function stable(world,parent,{skip=[]}={}) {
 
 export function runExecutionWindowCases(artifact,report) {
   const code=new Uint8Array(4096);program(code,A,'ffe6','ffe7');program(code,B,'ffe7','ffe6');
-  coldFixture(artifact,report,'compiled-cross-family-edges-keep-immutable-bodies',{
+  coldFixture(artifact,report,'automatic-hot-window-removes-cross-family-boundaries',{
     code,registers:REGS,flags:FLAGS,
   },world=>{
     world.cache.instructions=2048;world.cache.blocks=128;
@@ -101,8 +101,8 @@ export function runExecutionWindowCases(artifact,report) {
     world.result.parentHistories={blocks:[65,65],instructions:[129,129],limitBlocks:128,
       parents:parents.map(parent=>({id:String(parent.id),pc:parent.pc,slot:parent.slot,bytes:parent.bytes,sha256:parent.sha256}))};
 
-    // Repeated already-owned transitions learn directory connectivity without
-    // re-emitting either full parent or a duplicate execution window.
+    // The ordinary SDK path must optimize an already compiled cycle without
+    // inheriting either parent's unrelated 65-block source history.
     world.reset({pc:B,registers:REGS,flags:FLAGS,fp:initial});
     const before=world.snapshot(),helpers=world.helperCalls.length,formed=world.execute(4400,B);
     coldLiteral(world,before,formed,{pc:B,retired:4400,budget:4400,registers:REGS,flags:FLAGS,
@@ -110,35 +110,43 @@ export function runExecutionWindowCases(artifact,report) {
       identity:world.bigint(world.context,120)});
     assert.equal(formed.id,parentA.id,'the final executed family is A before postlease installation');
     assert.equal(formed.regions,2200);assert.equal(formed.chainedColdWork,0);assert.equal(formed.chainedColdRetired,0);
+    world.result.trainingSemanticComplete=true;
+    const windows=[...world.cache.units.values()].filter(unit=>!parents.some(parent=>parent.id===unit.id));
+    assert.equal(windows.length,1,'ordinary already-hot transitions must install one automatic execution window');
+    const window=windows[0],record=world.moduleRecords.get(window.id),decoded=lookup(record.source);
+    assert.deepEqual(decoded.entries.map(entry=>entry.pc),[A,A+2,B,B+2]);
+    assert.equal(decoded.blocks,2,'only actual hot blocks belong to the new executable');
     const admissions=world.cache.admissions,generated=world.cache.generatedModuleBytes;
-    assert.equal(admissions,2,'a fully owned compiled graph does not create an automatic window');
-    assert.equal(world.cache.units.size,2);
+    assert.equal(admissions,3);assert.equal(world.cache.units.size,3);
     for(let replay=0;replay<2;replay++) {
-      world.reset({pc:A,registers:REGS,flags:FLAGS,fp:initial});
-      const warmBefore=world.snapshot(),warm=world.execute(36,A);
-      coldLiteral(world,warmBefore,warm,{pc:A,retired:36,budget:36,registers:REGS,flags:FLAGS,
-        fp:fp(initial,{value:VALUE.thirtyNine,fip:B}),writes:[],versionWrites:0});
-      assert.equal(warm.id,parentB.id);assert.equal(warm.regions,18);
+      const root=window.pc;
+      assert([A,B].includes(root));
+      world.reset({pc:root,registers:REGS,flags:FLAGS,fp:initial});
+      const warmBefore=world.snapshot(),warm=world.execute(4400,root);
+      coldLiteral(world,warmBefore,warm,{pc:root,retired:4400,budget:4400,registers:REGS,flags:FLAGS,
+        fp:fp(initial,{value:VALUE.fourFourZeroThree,fip:root===A?B:A}),writes:[],versionWrites:0});
+      assert.equal(warm.id,window.id);assert.equal(warm.regions,1,'the entire hot cycle stays in one actual body');
       assert.equal(warm.chainedColdWork,0);assert.equal(warm.chainedColdRetired,0);
       assert.equal(world.resolverCalls,warmBefore.resolverCalls,
-        'learned cross-fragment transitions run without native ownership resolution');
+        'internal hot edges need no native ownership resolution');
     }
     world.result.semanticComplete=true;
     assert.equal(world.helperCalls.length,helpers);
     for(const budget of[0,1]) {
-      world.reset({pc:A,registers:REGS,flags:FLAGS,fp:initial});
-      const prefixBefore=world.snapshot(),run=world.execute(budget,A);
-      coldLiteral(world,prefixBefore,run,{pc:A+(budget?2:0),retired:budget,budget,registers:REGS,flags:FLAGS,
-        fp:budget?fp(initial,{value:VALUE.five,fip:A}):initial,writes:[],versionWrites:0});
-      assert.equal(run.id,parentA.id);assert.equal(run.regions,1);
+      const root=window.pc;
+      world.reset({pc:root,registers:REGS,flags:FLAGS,fp:initial});
+      const prefixBefore=world.snapshot(),run=world.execute(budget,root);
+      coldLiteral(world,prefixBefore,run,{pc:root+(budget?2:0),retired:budget,budget,registers:REGS,flags:FLAGS,
+        fp:budget?fp(initial,{value:VALUE.five,fip:root}):initial,writes:[],versionWrites:0});
+      assert.equal(run.regions,1);
     }
-    stable(world,parentA);stable(world,parentB);
+    stable(world,parentA,{skip:[window.pc]});stable(world,parentB,{skip:[window.pc]});
     assert.equal(world.cache.admissions,admissions);assert.equal(world.cache.generatedModuleBytes,generated);
-    assert.equal(world.cache.units.size,2);world.result.windowSemanticComplete=true;
+    assert.equal(world.cache.units.size,3);world.result.windowSemanticComplete=true;
   });
 
-  // Keep the independent root-only/wrong-entry/bypass controls on the explicit
-  // legacy trace API. Automatic formation no longer creates such executors.
+  // Keep independent root-only/wrong-entry/bypass compatibility controls on
+  // the explicit legacy trace API as well as automatic formation above.
   coldFixture(artifact,report,'manual-root-only-trace-preserves-quota-and-wrong-root-capability-controls',{
     code,registers:REGS,flags:FLAGS,referencePrepared:true,
   },world=>{

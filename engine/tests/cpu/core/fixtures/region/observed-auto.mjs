@@ -25,16 +25,14 @@ function registers(before,iterations) {
   result[0]=iterations;result[1]=0;return result;
 }
 
-// Explicit manual trace compatibility has separate observed.mjs controls.
-// Ordinary already-owned CALL/RET edges learn connectivity without emitting a
-// historical union or changing either fragment's source/ordinal dictionary.
+// Explicit manual compatibility has separate observed.mjs controls. Ordinary
+// already-owned CALL/RET cycles must form a bounded executable automatically.
 export function runObservedAutoCases(artifact,report,{baseline=false}={}) {
-  observedFixture(artifact,report,'observed-production-owned-edges-keep-stable-fragments',{},world=>{
+  observedFixture(artifact,report,'automatic-call-ret-cycle-keeps-mixed-state-in-one-window',{automaticResolver:true},world=>{
     const {cache,result,root,callee,context}=world;
     const original=[...world.units.values()].map(({unit,module})=>({unit,module,
       run:unit.run,link:unit.link,publish:unit.publish,slot:unit.slot}));
     assert.equal(cache.units.size,2);assert.equal(cache.admissions,2);
-    const generated=cache.generatedModuleBytes;
     assert.equal(typeof world.api.core_chain_resolve_owned,'function',
       'the actual stable-fragment resolver is present');
 
@@ -42,35 +40,45 @@ export function runObservedAutoCases(artifact,report,{baseline=false}={}) {
     const before=world.snapshot(),selected=world.select(ROOT),run=cache.execute(selected);
     const training=observedLiteral(world,before,run,{pc:0x100c,retired:6*TRAINING+1,
       budget:6*TRAINING+1,registers:registers(before,TRAINING),flags:0x46,
-      writes:TRAINING,stackReturn:0x1005,fpValue:integer80(3+2*TRAINING),fpPc:CALLEE});
+      writes:TRAINING,stackReturn:0x1005,fpValue:integer80(3+2*TRAINING),fpPc:CALLEE,
+      identity:([...cache.units.values()].find(unit=>unit.id!==root.id&&unit.id!==callee.id)??root).id});
     assert.equal(run.id,root.id);
     result.trainingSemanticComplete=true;
 
-    for(let replay=0;replay<2;replay++) {
-      world.reset(9);cache.budget=54;
+    const windows=[...cache.units.values()].filter(unit=>unit.id!==root.id&&unit.id!==callee.id);
+    assert.equal(windows.length,1,'the normal SDK path installs one bounded hot execution window');
+    const window=windows[0];
+    assert.equal(world.select(window.pc),window);world.install();
+    const generated=cache.generatedModuleBytes,admissions=cache.admissions,traffic=[];
+
+    for(const iterations of[9,129]) {
+      world.reset(iterations);cache.budget=6*iterations;
       const testBefore=world.snapshot(),resolveBefore=world.probes;
       const test=cache.execute(world.select(ROOT));
-      const completed=observedLiteral(world,testBefore,test,{pc:0x100b,retired:54,budget:54,
-        registers:registers(testBefore,9),flags:0x46,writes:9,stackReturn:0x1005,
-        fpValue:integer80(21),fpPc:CALLEE});
-      assert.equal(test.id,root.id,'the actual final caller retains its original dictionary');
+      const completed=observedLiteral(world,testBefore,test,{pc:0x100b,retired:6*iterations,budget:6*iterations,
+        registers:registers(testBefore,iterations),flags:0x46,writes:iterations,stackReturn:0x1005,
+        fpValue:integer80(3+2*iterations),fpPc:CALLEE});
+      assert.equal(test.id,window.id,'the final executed code is the actual automatic window');
       assert.equal(completed.counters.body_entries,test.regions);
+      assert(test.regions<=2,'at most the caller prefix and one window execute, independent of loop count');
       assert.equal(completed.counters.canonical_calls,0);
       assert.equal(completed.counters.wide_snapshot_calls,0);
       assert.equal(completed.counters.normalizer_calls,0);
-      assert.equal(world.probes,resolveBefore,'warm fragment transitions require no native ownership resolution');
+      assert(world.probes-resolveBefore<=1,'only the first caller-to-window route can need native resolution');
+      traffic.push(completed);
     }
     result.semanticComplete=true;
-
-    const overlays=[...cache.units.values()].filter(unit=>unit.id!==root.id&&unit.id!==callee.id);
-    assert.equal(overlays.length,0,'fully owned automatic captures emit no replacement executor');
-    assert.equal(cache.admissions,2);assert.equal(cache.units.size,2);
+    for(const name of['record_reads','record_writes'])
+      assert.equal(traffic[1].counters[name],traffic[0].counters[name],
+        'more mixed CALL/RET iterations add no FP pool imports or spills');
+    assert.equal(cache.admissions,admissions);assert.equal(cache.units.size,3);
     assert.equal(cache.generatedModuleBytes,generated);
     assert.equal(cache.transientAdmissions,0);assert.equal(cache.transientRuns,0);
     const owners=world.raw.core_link_owners_ptr();
     for(const saved of original) {
       for(const pc of saved.unit===root?[ROOT,0x1005,0x1008,0x1009]:[CALLEE,0x1102]) {
-        assert.equal(world.select(pc),saved.unit,'explicit secondary-port admission retains the immutable fragment');
+        if(pc===window.pc)continue;
+        assert.equal(world.select(pc),saved.unit,'nonoverridden secondary ports retain the immutable fragment');
         assert.equal(world.bigint(context,120),saved.unit.id);
         assert.equal(hash(world.encoded()),saved.module.sha256);
       }
@@ -80,9 +88,9 @@ export function runObservedAutoCases(artifact,report,{baseline=false}={}) {
       assert.equal(cache.table.get(saved.slot),saved.link);assert.equal(cache.publishers.get(saved.slot),saved.publish);
       assert.equal(world.bigint(owners,saved.slot*8),saved.unit.id);
     }
-    assert.equal(cache.admissions,2);assert.equal(cache.generatedModuleBytes,generated);
+    assert.equal(cache.admissions,admissions);assert.equal(cache.generatedModuleBytes,generated);
     result.automatic={trainingIterations:TRAINING,trainingRegions:run.regions,
-      admissions:cache.admissions,units:cache.units.size,overlays:[],nativeResolves:world.probes,
+      admissions:cache.admissions,units:cache.units.size,windows:[String(window.id)],nativeResolves:world.probes,
       baselineRequested:baseline,trainingCounters:training.counters};
   });
 }

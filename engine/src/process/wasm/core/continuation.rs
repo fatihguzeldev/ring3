@@ -101,8 +101,14 @@ fn resolve_owned(context: u32, pc: u32, retired: u32, remaining: Option<u32>) ->
             None => cold::chain_probe(instance, core, pc),
         };
         if selected != 0 && (selected as usize) <= core.cache.link_capacity() {
-            if let Some(memory) = instance.memory.as_ref() {
-                core.trace_selection(memory, pc);
+            if remaining.is_some() {
+                if let Some(memory) = instance.memory.as_ref() {
+                    core.trace_selection(memory, pc);
+                }
+            } else if let Some(code) = core.code.as_ref() {
+                // legacy source selection has no live quota; only retain its
+                // actual owner for a capture that was already active.
+                core.tracing.observe(code);
             }
         }
         selected
