@@ -149,7 +149,13 @@ export function runExecutionWindowCanonicalCases(artifact,report) {
       if(budget===4)callbacks(world.helperCalls.slice(prefixHelpers),run.id,run.id===window.id?1:0,1);
       else assert.equal(world.helperCalls.length,prefixHelpers);
     }
-    stable(world,parentA,{skip:[window.pc]});stable(world,parentB,{skip:[window.pc]});
+    const publicEntries=[A,B,B+5,B+7];
+    for(const pc of publicEntries) {
+      assert.equal(world.raw.core_lookup(pc),0);
+      assert.equal(world.bigint(world.context,120),window.id,
+        'each complete canonical-boundary block selects the same window');
+    }
+    stable(world,parentA,{skip:publicEntries});stable(world,parentB,{skip:publicEntries});
     assert.equal(world.cache.admissions,admissions);assert.equal(world.cache.generatedModuleBytes,generated);
     assert.equal(world.cache.units.size,3);world.result.windowSemanticComplete=true;
   });

@@ -107,12 +107,12 @@ export function runStableGraphCase(artifact,report) {
       const warmState=state.slice(),warmView=view(warmState);
       warmView.setUint32(20,warmIterations,true);
       new Uint8Array(memory.buffer,engine.base,56).set(warmState);cache.import();
-      const warmSelected=cache.select(0x1000);assert.equal(warmSelected,windowRoot===0x1000?window:first);
+      const warmSelected=cache.select(0x1000);assert.equal(warmSelected,window);
       const before=bytes(cache.context,128),resolveBefore=resolves,routeBefore=routes.length;
       cache.budget=warmBudget;const warm=cache.execute(warmSelected);
       result.warm.push({...warm,id:String(warm.id),nativeResolves:resolves-resolveBefore});
       assert.deepEqual([warm.pc,warm.retired,warm.work,warm.coreReason,warm.regions],
-        [0x1048,warmBudget,warmBudget,2,2+Number(windowRoot!==0x1000)]);
+        [0x1048,warmBudget,warmBudget,2,2]);
       assert.equal(warm.id,second.id);
       const full=before.slice(),f=view(full);
       f.setUint32(4,0,true);f.setUint32(32,0x1048,true);f.setUint32(36,0x46,true);
@@ -128,13 +128,8 @@ export function runStableGraphCase(artifact,report) {
       assert.equal(new DataView(memory.buffer).getBigUint64(versionPointer,true),
         beforeVersion+2n*BigInt(iterations+(replay+1)*warmIterations));
       const learned=routes.slice(routeBefore);
-      if(replay===0) {
-        const boundary=windowRoot===0x1000
-          ? {pc:0x1047,source:String(window.id),slot:second.slot}
-          : {pc:windowRoot,source:String(first.id),slot:window.slot};
-        assert.deepEqual(learned,[boundary],
-          'the first warm route validates only the newly installed window boundary');
-      } else assert.deepEqual(learned,[],'the repeated warm window and its learned side exit resolve in generated Wasm');
+      assert.deepEqual(learned,[],
+        'certified ingress and the actual side exit resolve directly from the generated ownership directory');
       assert.equal(resolves-resolveBefore,learned.length);
       assert.equal(prepares,preparedAfterPorts);assert.equal(cache.admissions,3);
       assert.equal(cache.generatedModuleBytes,generated);assert.equal(cache.units.size,3);

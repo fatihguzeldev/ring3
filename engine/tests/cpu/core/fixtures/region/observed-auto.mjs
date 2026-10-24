@@ -68,6 +68,33 @@ export function runObservedAutoCases(artifact,report,{baseline=false}={}) {
       traffic.push(completed);
     }
     result.semanticComplete=true;
+    const publicSelections=[ROOT,ROOT+5,CALLEE].map(pc=>({pc,unit:cache.select(pc)}));
+    const returnChecks=[];
+    for(const target of[0x1800,0x1900]) {
+      if(returnChecks.length) {
+        // A real completed baseline instruction consumes the previous side
+        // exit's one-shot bypass before a different caller invokes the callee.
+        world.reset(9,{pc:CALLEE,esp:0x47fc});cache.budget=1;
+        const progressBefore=world.snapshot(),progress=cache.execute(cache.select(CALLEE));
+        const progressRegisters=Array.from({length:8},(_,i)=>view(progressBefore.state).getUint32(16+i*4,true));
+        observedLiteral(world,progressBefore,progress,{pc:CALLEE+2,retired:1,budget:1,
+          registers:progressRegisters,flags:2,writes:0,fpValue:integer80(5),fpPc:CALLEE});
+      }
+      // A different caller supplies its own already-written return word. The
+      // observed target misses only after the real RET read/pop has completed.
+      world.engine.ok('write32',0x47fc,target);
+      world.reset(9,{pc:CALLEE,esp:0x47fc});
+      const selected=cache.select(CALLEE),entryBefore=world.snapshot(),test=world.rawExecute(selected,10);
+      const actualRegisters=Array.from({length:8},(_,i)=>view(entryBefore.state).getUint32(16+i*4,true));
+      actualRegisters[4]=0x4800;
+      observedLiteral(world,entryBefore,test,{stop:1,pc:target,retired:2,budget:10,
+        registers:actualRegisters,flags:2,writes:0,fpValue:integer80(5),fpPc:CALLEE});
+      returnChecks.push(()=>assert.equal(selected.id,window.id,
+        'a separately called callee uses the same window before its exact changed-return side exit'));
+    }
+    result.externalReturnSemanticComplete=true;
+    for(const check of returnChecks)check();
+    result.externalReturnReuseComplete=true;
     for(const name of['record_reads','record_writes'])
       assert.equal(traffic[1].counters[name],traffic[0].counters[name],
         'more mixed CALL/RET iterations add no FP pool imports or spills');
@@ -88,6 +115,8 @@ export function runObservedAutoCases(artifact,report,{baseline=false}={}) {
       assert.equal(cache.table.get(saved.slot),saved.link);assert.equal(cache.publishers.get(saved.slot),saved.publish);
       assert.equal(world.bigint(owners,saved.slot*8),saved.unit.id);
     }
+    for(const {unit} of publicSelections)assert.equal(unit,window,
+      'ordinary executable selection aliases every complete block to the same window');
     assert.equal(cache.admissions,admissions);assert.equal(cache.generatedModuleBytes,generated);
     result.automatic={trainingIterations:TRAINING,trainingRegions:run.regions,
       admissions:cache.admissions,units:cache.units.size,windows:[String(window.id)],nativeResolves:world.probes,

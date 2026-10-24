@@ -131,6 +131,30 @@ export function runExecutionWindowCases(artifact,report) {
         'internal hot edges need no native ownership resolution');
     }
     world.result.semanticComplete=true;
+    // Both complete blocks already belong to this exact immutable body. A
+    // fresh caller can enter either one with actual state unrelated to training.
+    // Run every architectural literal before checking reuse, so OLD can prove
+    // semantics before failing the newly required entry capability.
+    const ingressChecks=[];
+    for(const control of[0x7f,0x37f])for(const entry of[A,B])for(const budget of[0,1,2,4,36]) {
+      const ingress=initial.slice(),d=new DataView(ingress.buffer);
+      d.setUint16(16,control,true);
+      const flags=0xc97,registers=[0xdeadbeef,0x80000001,0x01020304,0x3000,0x4f00,0x76543210,B,A];
+      world.reset({pc:entry,registers,flags,fp:ingress});
+      const ingressBefore=world.snapshot(),run=world.execute(budget,entry),adds=Math.ceil(budget/2);
+      const other=entry===A?B:A,expectedPc=budget%4===0?entry:budget%4===1?entry+2:
+        budget%4===2?other:other+2;
+      const value=adds===1?VALUE.five:adds===2?'00000000000000e00140':VALUE.thirtyNine;
+      coldLiteral(world,ingressBefore,run,{pc:expectedPc,retired:budget,budget,registers,flags,
+        fp:adds?fp(ingress,{value,fip:adds%2?entry:other}):ingress,writes:[],versionWrites:0});
+      ingressChecks.push(()=>{
+        if(budget>=2)assert.equal(run.id,window.id,'every certified complete block selects the same window');
+        if(budget>=4)assert.equal(run.regions,1,'secondary entry keeps subsequent mixed work in that body');
+      });
+    }
+    world.result.multiEntrySemanticComplete=true;
+    for(const check of ingressChecks)check();
+    world.result.multiEntryReuseComplete=true;
     assert.equal(world.helperCalls.length,helpers);
     for(const budget of[0,1]) {
       const root=window.pc;
@@ -140,7 +164,7 @@ export function runExecutionWindowCases(artifact,report) {
         fp:budget?fp(initial,{value:VALUE.five,fip:root}):initial,writes:[],versionWrites:0});
       assert.equal(run.regions,1);
     }
-    stable(world,parentA,{skip:[window.pc]});stable(world,parentB,{skip:[window.pc]});
+    stable(world,parentA,{skip:[A,B]});stable(world,parentB,{skip:[A,B]});
     assert.equal(world.cache.admissions,admissions);assert.equal(world.cache.generatedModuleBytes,generated);
     assert.equal(world.cache.units.size,3);world.result.windowSemanticComplete=true;
   });

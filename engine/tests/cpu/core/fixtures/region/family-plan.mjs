@@ -30,11 +30,11 @@ function assertOwner(world,owner,ports,window) {
   const {unit}=owner;
   assert.equal(world.cache.units.get(owner.id),unit);
   for(const pc of ports) {
-    if(window?.unit.pc===pc) {
+    if(window?.publicEntries.includes(pc)) {
       assert.equal(world.raw.core_lookup(pc),0);assert.equal(world.bigint(world.context,120),window.id,
-        'the automatic window has root priority while its original source owner stays retained');
+        'each certified block selects the window while its original source owner stays retained');
     }
-    const sourcePc=window?.unit.pc===pc?ports.find(other=>other!==pc):pc;
+    const sourcePc=window?.publicEntries.includes(pc)?ports.find(other=>!window.publicEntries.includes(other)):pc;
     assert.equal(world.selectSource(sourcePc),unit,'an exact historical source port keeps its immutable owner');
     assert.equal(world.bigint(world.context,120),owner.id);
     const bytes=source(world);assert.equal(bytes.length,owner.bytes);assert.equal(hash(bytes),owner.sha256);
@@ -150,10 +150,10 @@ function rotatePorts(world,owner,ports,window) {
   for(const pc of ports) {
     world.reset({registers:bridgeRegisters(9),pc});const before=world.snapshot();
     let run;
-    if(window?.unit.pc===pc) {
+    if(window?.publicEntries.includes(pc)) {
       // Select another validated source port, then exercise this exact private
-      // PC through the original body. Public root lookup still prefers window.
-      const selected=world.selectSource(ports.find(other=>other!==pc));
+      // PC through the original body. Public block lookup still prefers window.
+      const selected=world.selectSource(ports.find(other=>!window.publicEntries.includes(other)));
       const descriptor=Object.getOwnPropertyDescriptor(world.cache,'installRecordedTrace');
       try {
         Object.defineProperty(world.cache,'installRecordedTrace',{value:()=>{},configurable:true,writable:true});
@@ -197,6 +197,11 @@ function requireInteriorWindow(world,parents,bridgeOwner,retained,feedback) {
   assert.equal(newUnits.length,1);const window=saved(world,newUnits[0]);
   assert.equal(window.id,bridgeOwner.id+1n,'only the certified window allocates the next identity');
   const expected=[...A_PORTS,...B_PORTS,...C_PORTS].sort((a,b)=>a-b);
+  window.publicEntries=[A,A+8,B,B+8,C,C+0xa];
+  for(const pc of window.publicEntries) {
+    assert.equal(world.raw.core_lookup(pc),0);
+    assert.equal(world.bigint(world.context,120),window.id,'the six complete captured blocks alias one body');
+  }
   assert.deepEqual(lookupPorts(world.moduleRecords.get(window.id).source),expected,
     'only the fourteen actually completed PCs enter the window; terminal and other history are absent');
   assert.equal(world.cache.admissions,retained.admissions+1);
@@ -251,17 +256,14 @@ export function runFamilyPlanCases(artifact,report,{boundedOnly=false}={}) {
         learned=true;
       }
       const steady=checkpoint(world);assert(window);
-      let windowLearned=false;
       for(const[count,fp]of[[9,'00000000000000a80340'],[2048,'00000000000018800b40']]) {
-        // Starting at ordinary A reaches B's window after A and C. All
-        // subsequent A/C/B/C iterations execute inside that one body.
-        const feedback=boundedFeedback(world,2,windowLearned?0:2,()=>bridge(world,count,fp));
+        // Ordinary A is already a certified entry of the same captured body.
+        const feedback=boundedFeedback(world,0,0,()=>bridge(world,count,fp));
         assert.equal(feedback.value.run.id,window.id);
-        assert.equal(feedback.value.run.regions,window.unit.pc===A?1:3,
-          'the automatically selected window removes repeated owner activations from ordinary execution');
+        assert.equal(feedback.value.run.regions,1,'every certified entry keeps ordinary execution in one body');
+        assert.equal(feedback.misses,0,'internal cross-owner edges never resolve through the host');
         assert.equal(feedback.value.run.chainedColdWork,0);noNewModule(world,steady);
         assert.equal(world.bigint(world.word(world.context,88)),epoch);
-        windowLearned=true;
       }
       for(const[parent,ports]of[[parents[0],A_PORTS],[parents[1],B_PORTS],[owner,C_PORTS]]) {
         rotatePorts(world,parent,ports,window);assertOwner(world,parent,ports,window);

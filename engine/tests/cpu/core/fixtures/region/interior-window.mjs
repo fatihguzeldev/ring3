@@ -171,12 +171,16 @@ export function runInteriorWindowCases(artifact,report) {
         coldLiteral(world,prefixBefore,prefix,{pc:B+(fuel?2:0),retired:fuel,budget:fuel,registers:expected,
           flags:!mixed&&fuel?0x406:FLAGS,fp:fp(initial,mixed,fuel,B),writes:[],versionWrites:0,identity:window.id});
       }
-      for(const parent of parents)stable(world,parent,[B]);
+      for(const pc of[A,B]) {
+        assert.equal(world.raw.core_lookup(pc),0);
+        assert.equal(world.bigint(world.context,120),window.id,'both complete cycle blocks share the window');
+      }
+      for(const parent of parents)stable(world,parent,[A,B]);
       registers=[...REGS];registers[1]=4096;
-      world.reset({pc:A,registers,flags:FLAGS,fp:initial});const selected=world.cache.select(B);
+      world.reset({pc:A+2,registers,flags:FLAGS,fp:initial});const selected=world.cache.select(B);
       assert.equal(selected,window);const wrongBefore=world.snapshot();world.cache.budget=3;
       const wrong=world.cache.execute(selected);world.result.runs.push({...wrong,id:String(wrong.id)});
-      coldLiteral(world,wrongBefore,wrong,{pc:A,retired:0,work:0,budget:3,stop:1,registers,flags:FLAGS,
+      coldLiteral(world,wrongBefore,wrong,{pc:A+2,retired:0,work:0,budget:3,stop:1,registers,flags:FLAGS,
         fp:initial,writes:[],versionWrites:0,identity:window.id});
       assert.equal(world.raw.core_lookup(B),0);assert.equal(world.bigint(world.context,120),parentB.id);
       assert.equal(world.raw.core_lookup(P),0);assert.equal(world.bigint(world.context,120),parentP.id);
