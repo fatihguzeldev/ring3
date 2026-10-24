@@ -5,11 +5,16 @@ pub(in crate::process) struct FragmentAdmission {
     ownership_epoch: u64,
     fingerprint: ObservedPlanFingerprint,
     ports: Vec<HotSpan>,
+    permit: AutoPermit,
 }
 
 impl CoreCache32 {
-    fn hot_keys(&self, pc: u32) -> [Option<RegionKey>; 4] {
+    fn hot_keys(&self, pc: u32) -> [Option<RegionKey>; 5] {
         [
+            self.contexts.get(PreferredKey {
+                origin: None,
+                target: pc,
+            }),
             self.window_entries.get(&pc).copied(),
             self.trace_entries.get(&pc).copied(),
             self.executable_entries.get(&pc).copied(),
@@ -130,10 +135,12 @@ impl CoreCache32 {
         {
             return None;
         }
+        let permit = self.reserve_fragment(plan)?;
         Some(FragmentAdmission {
             ownership_epoch: self.ownership_epoch,
             fingerprint: plan.fingerprint().clone(),
             ports,
+            permit,
         })
     }
 
@@ -143,6 +150,10 @@ impl CoreCache32 {
         admission: FragmentAdmission,
         code: CompiledCode,
     ) -> Result<RegionRef, CompileError> {
+        self.policy.finish(
+            admission.permit,
+            Self::code_charge(&code, code.entrypoints().len()),
+        );
         if admission.ownership_epoch != self.ownership_epoch
             || !code.is_current(memory)
             || code.observed_fingerprint() != Some(&admission.fingerprint)
@@ -165,6 +176,7 @@ impl CoreCache32 {
     }
 
     pub(in crate::process) fn reject_fragment(&mut self, admission: FragmentAdmission) {
+        self.policy.finish(admission.permit, 0);
         if admission.ownership_epoch == self.ownership_epoch {
             self.remember_observed_refusal(admission.fingerprint);
         }

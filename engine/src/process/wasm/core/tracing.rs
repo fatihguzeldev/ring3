@@ -1,11 +1,18 @@
-use super::{CoreSession32, REGISTRY, Registry, cache::RegionRef, compile_status};
+use super::{
+    CoreSession32, REGISTRY, Registry,
+    cache::{PreferredKey, RegionRef},
+    compile_status,
+};
 use crate::{
     cpu::core::{
-        CompileError, CompileOptions, ObservedPlan, WindowPlan,
+        CompileError, CompileOptions, ExecutionCandidate, ObservedPlan, WindowPlan,
         cold::ColdObserver,
         compile_observed_with_growth, emit_hot_window, emit_observed_plan,
-        prepare_cold_prefix_plan, prepare_hot_window,
-        trace::{self, CompletedColdObservation, PendingColdObservation, TraceArena, TraceEvent},
+        for_each_execution_candidate, prepare_cold_prefix_plan,
+        trace::{
+            self, CompletedColdObservation, PendingColdObservation, RecordedIngress, TraceArena,
+            TraceEvent,
+        },
     },
     memory::{AddressSpace, GuestAddress},
 };
@@ -21,6 +28,9 @@ pub(super) struct TraceController {
     manual: bool,
     cold: Vec<CompletedColdObservation>,
     pending: Option<PendingColdObservation>,
+    ingresses: Vec<RecordedIngress>,
+    capture_serial: u64,
+    allow_start: bool,
 }
 
 impl Default for TraceController {
@@ -36,6 +46,9 @@ impl Default for TraceController {
             manual: false,
             cold: Vec::new(),
             pending: None,
+            ingresses: Vec::new(),
+            capture_serial: 0,
+            allow_start: true,
         }
     }
 }
@@ -43,6 +56,8 @@ impl Default for TraceController {
 impl TraceController {
     fn start(&mut self, memory: &AddressSpace, code: RegionRef, root: u32, manual: bool) {
         self.arena.begin();
+        self.capture_serial = self.capture_serial.wrapping_add(1);
+        self.ingresses.clear();
         self.root = Some(root);
         self.installed_root = None;
         self.memory_identity = memory.identity();
@@ -57,6 +72,8 @@ impl TraceController {
 
     fn start_cold(&mut self, memory: &AddressSpace, root: u32) {
         self.arena.begin();
+        self.capture_serial = self.capture_serial.wrapping_add(1);
+        self.ingresses.clear();
         self.root = Some(root);
         self.installed_root = None;
         self.memory_identity = memory.identity();
@@ -91,6 +108,39 @@ impl TraceController {
         }
     }
 
+    pub(super) fn allow_automatic_start(&mut self, allowed: bool) {
+        self.allow_start = allowed;
+    }
+
+    fn ingress(&mut self, code: &RegionRef, pc: u32, origin: Option<u32>) {
+        if self.arena.active != 1 {
+            return;
+        }
+        self.observe(code);
+        if self.manual {
+            return;
+        }
+        let ingress = RecordedIngress {
+            event_index: self.arena.used as usize,
+            origin,
+            target: pc,
+            owner: code.identity(),
+        };
+        // No work between two resolver selections: only the final actual
+        // handoff can own the next recorded event.
+        if self
+            .ingresses
+            .last()
+            .is_some_and(|last| last.event_index == ingress.event_index)
+        {
+            *self.ingresses.last_mut().unwrap() = ingress;
+        } else if self.ingresses.len() < trace::CAPACITY {
+            self.ingresses.push(ingress);
+        } else {
+            self.end();
+        }
+    }
+
     pub(super) fn numeric(&mut self, code: &RegionRef, pc: u32, next: u32) {
         if self.arena.active != 1 {
             return;
@@ -121,6 +171,7 @@ impl TraceController {
         self.installed_root = None;
         self.owners.clear();
         self.cold.clear();
+        self.ingresses.clear();
         self.pending = None;
         self.ended = false;
         self.manual = false;
@@ -153,7 +204,7 @@ impl ColdObserver for TraceController {
         instruction: &crate::cpu::core::NativeInstruction,
         hot: bool,
     ) -> bool {
-        if self.root.is_none() && hot {
+        if self.root.is_none() && hot && self.allow_start {
             self.start_cold(memory, instruction.pc);
         }
         if self.arena.active == 1 {
@@ -192,19 +243,28 @@ impl ColdObserver for TraceController {
 
 impl CoreSession32 {
     pub(super) fn trace_selection(&mut self, memory: &AddressSpace, pc: u32) {
+        self.trace_selection_from(memory, pc, None);
+    }
+
+    pub(super) fn trace_selection_from(
+        &mut self,
+        memory: &AddressSpace,
+        pc: u32,
+        origin: Option<u32>,
+    ) {
         let sampled = self.tracing.arena.take_sample();
         let Some(code) = self.code.as_ref() else {
             return;
         };
         if self.tracing.root.is_some() {
-            self.tracing.observe(code);
+            self.tracing.ingress(code, pc, origin);
             return;
         }
-        if !code.is_current(memory)
-            || self
-                .cache
-                .current_hot_port(memory, pc)
-                .is_none_or(|(current, _)| current.identity() != code.identity())
+        // The resolver already authenticated this selected capability. A
+        // context-neutral frontier may name a different overlapping window.
+        if !self.cache.can_capture_automatic()
+            || !code.is_current(memory)
+            || code.hot_span(pc).is_none()
         {
             return;
         }
@@ -215,6 +275,7 @@ impl CoreSession32 {
         };
         if candidate {
             self.tracing.start(memory, code.clone(), pc, false);
+            self.tracing.ingress(code, pc, origin);
         }
     }
 
@@ -346,10 +407,8 @@ pub(crate) fn core_trace_finish(root: u32, instructions: u32, blocks: u32) -> u3
                 ..CompileOptions::default()
             };
             if !manual {
-                // The selected root keeps priority, but the same completed
-                // timeline can license a compiled interior cycle even when
-                // its prefix/tail contains precise cold observations.
-                let window = prepare_hot_window(
+                let mut selected: Option<ExecutionCandidate> = None;
+                let window = for_each_execution_candidate(
                     memory,
                     GuestAddress(root),
                     options,
@@ -357,9 +416,43 @@ pub(crate) fn core_trace_finish(root: u32, instructions: u32, blocks: u32) -> u3
                     &owners,
                     core.tracing.source_version,
                     &core.tracing.cold,
+                    &core.tracing.ingresses,
+                    &mut |candidate| {
+                        // Every bounded key is observed before reserving even
+                        // one compile permit. Distinct capture serials, not
+                        // repeated markers within this lease, establish heat.
+                        let eligible = core.cache.observe_window_candidate(
+                            candidate.plan(),
+                            core.tracing.capture_serial,
+                            candidate.is_closed_cycle(),
+                        );
+                        if eligible
+                            && selected.as_ref().is_none_or(|old| {
+                                (candidate.is_closed_cycle(), candidate.completed_work())
+                                    > (old.is_closed_cycle(), old.completed_work())
+                            })
+                            && core.cache.can_select_window_candidate_for(
+                                memory,
+                                candidate.plan(),
+                                &[PreferredKey {
+                                    origin: candidate.origin(),
+                                    target: candidate.plan().anchor(),
+                                }],
+                            )
+                        {
+                            selected = Some(candidate);
+                        }
+                    },
                 )
-                .and_then(|plan| {
-                    plan.map(|plan| admit_window(&mut core.cache, memory, plan))
+                .and_then(|()| {
+                    selected
+                        .map(|candidate| {
+                            let binding = PreferredKey {
+                                origin: candidate.origin(),
+                                target: candidate.plan().anchor(),
+                            };
+                            admit_window(&mut core.cache, memory, candidate.into_plan(), &[binding])
+                        })
                         .transpose()
                         .map(Option::flatten)
                 });
@@ -428,7 +521,10 @@ fn admit_fragment(
             cache.reject_fragment(admission);
             Ok(None)
         }
-        Err(error) => Err(error),
+        Err(error) => {
+            cache.reject_fragment(admission);
+            Err(error)
+        }
     }
 }
 
@@ -436,16 +532,29 @@ fn admit_window(
     cache: &mut super::cache::CoreCache32,
     memory: &AddressSpace,
     plan: WindowPlan,
+    bindings: &[PreferredKey],
 ) -> Result<Option<RegionRef>, CompileError> {
+    if let Some(code) = cache.reuse_window(memory, &plan, bindings) {
+        return Ok(Some(code));
+    }
     let Some(admission) = cache.preflight_window(memory, &plan) else {
         return Ok(None);
     };
     match emit_hot_window(memory, plan) {
-        Ok(Some(code)) => cache.commit_window(memory, admission, code).map(Some),
+        Ok(Some(code)) => {
+            let code = cache.commit_window(memory, admission, code)?;
+            if !cache.bind_window_preferences(memory, &code, bindings) {
+                return Ok(None);
+            }
+            Ok(Some(code))
+        }
         Ok(None) | Err(CompileError::WasmLimit) => {
             cache.reject_window(admission);
             Ok(None)
         }
-        Err(error) => Err(error),
+        Err(error) => {
+            cache.reject_window(admission);
+            Err(error)
+        }
     }
 }

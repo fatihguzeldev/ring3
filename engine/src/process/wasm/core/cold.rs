@@ -27,6 +27,12 @@ pub(super) fn precise_selected(
     session: &mut CoreSession32,
 ) -> StopReason {
     let entry = session.cache.continuation_header().current_entry;
+    session
+        .cache
+        .account_owner_retired(session.context.retired());
+    session
+        .tracing
+        .allow_automatic_start(session.cache.can_capture_automatic());
     // Exact execution contributes source-validated completed instructions to
     // an active capture. The preceding BLOCK alone confirms no suffix.
     let result = execution::precise(
@@ -39,6 +45,7 @@ pub(super) fn precise_selected(
         &mut session.tracing,
     );
     session.refresh_trace_bypass(session.context.retired());
+    session.cache.continuation_header_mut().retired_clock = session.context.retired();
     if result == StopReason::NeedCode {
         let Some(memory) = instance.memory.as_mut() else {
             return StopReason::Infrastructure;
@@ -119,6 +126,17 @@ pub(crate) fn core_cold_run(budget: u32) -> i32 {
         } else {
             run(instance, session, &segments)
         };
+        let completed = session
+            .context
+            .retired()
+            .wrapping_sub(session.lease_retired);
+        if (1..=10).contains(&result)
+            && result != StopReason::Infrastructure as i32
+            && session.context.remaining() <= budget
+            && completed <= budget - session.context.remaining()
+        {
+            session.cache.earn_completed_work(completed);
+        }
         session.context.set_word(112, 0);
         session.active = false;
         session.cache.end_continuation();
@@ -131,6 +149,9 @@ fn run(
     session: &mut CoreSession32,
     segments: &SegmentContext,
 ) -> i32 {
+    session
+        .tracing
+        .allow_automatic_start(session.cache.can_capture_automatic());
     let (bypass, bypass_retired) = session.tracing.bypass_token().unwrap_or((0, 0));
     let CoreSession32 {
         context,
@@ -160,6 +181,12 @@ pub(super) fn chain_next(
     instance: &mut crate::process::EngineInstance,
     session: &mut CoreSession32,
 ) -> u32 {
+    session
+        .cache
+        .account_owner_retired(session.context.retired());
+    session
+        .tracing
+        .allow_automatic_start(session.cache.can_capture_automatic());
     let CoreSession32 {
         context,
         numeric,
@@ -222,6 +249,12 @@ pub(super) fn chain_cold(
     instance: &mut crate::process::EngineInstance,
     session: &mut CoreSession32,
 ) -> u32 {
+    session
+        .cache
+        .account_owner_retired(session.context.retired());
+    session
+        .tracing
+        .allow_automatic_start(session.cache.can_capture_automatic());
     session.cache.clear_continuation();
     let next = execution::chain_cold_observed(
         instance,
@@ -243,6 +276,7 @@ fn observe_selected(
 ) {
     use crate::cpu::core::{COLD_MARK, STOP_MARK};
     let slot = next & !(COLD_MARK | STOP_MARK);
+    session.cache.continuation_header_mut().retired_clock = session.context.retired();
     session.refresh_trace_bypass(session.context.retired());
     if next & STOP_MARK == 0 && slot != 0 && (slot as usize) <= session.cache.link_capacity() {
         if let Some(memory) = instance.memory.as_ref() {

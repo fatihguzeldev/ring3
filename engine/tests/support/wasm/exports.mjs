@@ -9,6 +9,7 @@ const continuationParameters = new Map([
   ['core_numeric_owned',['context: u32','slot: u32','generation: u64','pc: u32','ordinal: u32']],
   ['core_precise_owned',['context: u32','slot: u32','generation: u64']],
   ['core_end_owned',['context: u32','slot: u32','generation: u64','reason: u32']],
+  ['core_end_accounted_owned',['context: u32','slot: u32','generation: u64','reason: u32','initial_retired: u32','budget: u32']],
 ]);
 const instanceOwner = 'engine/src/abi/wasm/exports/instance.rs';
 const tokens = value => value.match(/[a-zA-Z_][a-zA-Z_0-9]*|"(?:\\.|[^"\\])*"|[^\s]/g);

@@ -14,10 +14,17 @@ use std::{
     rc::Rc,
 };
 
+#[path = "cache/context.rs"]
+mod context;
 #[path = "cache/continuation.rs"]
 mod continuation;
 #[path = "cache/executable.rs"]
 mod executable;
+#[path = "cache/policy.rs"]
+mod policy;
+use context::ContextBook;
+pub(in crate::process) use context::PreferredKey;
+use policy::{AutoPermit, PolicyBook};
 
 // Initial directory extents, not independent residency limits.
 const MAX_REGIONS: usize = 4096;
@@ -49,6 +56,10 @@ pub(super) struct CoreCache32 {
     window_refusals: Vec<WindowRefusal>,
     bytes: usize,
     owner_charge: usize,
+    policy: PolicyBook,
+    contexts: ContextBook,
+    protected_charge: usize,
+    protected_count: usize,
     binding_epoch: u64,
     route_header: Box<route::Header>,
     route_owners: Vec<route::Owner>,
@@ -91,6 +102,7 @@ pub(super) struct WindowAdmission {
     fingerprint: WindowFingerprint,
     replace: Vec<RegionKey>,
     stale: Vec<RegionKey>,
+    permit: AutoPermit,
 }
 
 struct WindowRefusal {
@@ -176,6 +188,8 @@ struct CachedRegion {
     rejected_capacity: usize,
     trace_heat: [TraceHeat; 4],
     charge: usize,
+    automatic: bool,
+    policy_baseline: u64,
 }
 
 #[derive(Clone, Copy, Default)]
@@ -299,6 +313,10 @@ impl Default for CoreCache32 {
             window_refusals: Vec::new(),
             bytes: 0,
             owner_charge: 0,
+            policy: PolicyBook::default(),
+            contexts: ContextBook::default(),
+            protected_charge: 0,
+            protected_count: 0,
             binding_epoch: 1,
             route_header: Box::default(),
             route_owners: vec![route::Owner::default(); MAX_REGIONS],
@@ -381,6 +399,8 @@ impl CoreCache32 {
             + Self::hash_charge::<u32, RegionKey>(self.coverage_capacity)
             + Self::hash_charge::<u32, RegionKey>(self.executable_entries_capacity)
             + self.memo_charge()
+            + self.policy.charge()
+            + self.contexts.charge()
     }
 
     fn resident_charge(&self) -> usize {
@@ -414,6 +434,16 @@ impl CoreCache32 {
         entries_capacity: usize,
         kind: DirectoryKind,
     ) -> Result<(), CompileError> {
+        self.validate_candidate_routes(code, entries_capacity, kind, 0)
+    }
+
+    fn validate_candidate_routes(
+        &self,
+        code: &CompiledCode,
+        entries_capacity: usize,
+        kind: DirectoryKind,
+        additional_routes: usize,
+    ) -> Result<(), CompileError> {
         let trace = code.trace_root().is_some();
         let entries = code.entrypoints().len();
         let table_capacity = |count: usize| {
@@ -430,7 +460,14 @@ impl CoreCache32 {
                     + size_of::<route::Owner>())
             + (MAX_LINK_SLOT + 1) * (size_of::<u64>() * 2 + size_of::<u32>())
             + size_of::<route::Header>()
-            + Self::route_capacity(code.hot_spans().count()) * size_of::<route::Row>()
+            + self.policy.charge()
+            + self.contexts.charge()
+            + Self::route_capacity(
+                code.hot_spans()
+                    .count()
+                    .saturating_add(usize::from(matches!(kind, DirectoryKind::Window)))
+                    .saturating_add(additional_routes),
+            ) * size_of::<route::Row>()
             + Self::hash_charge::<u32, RegionKey>(table_capacity(entries))
             + if trace && !matches!(kind, DirectoryKind::Fragment) {
                 0
@@ -534,6 +571,8 @@ impl CoreCache32 {
                 self.executable_entries_capacity
             })
             + self.memo_charge()
+            + self.policy.charge()
+            + self.contexts.charge()
     }
 
     fn grow_directories(&mut self) {
@@ -655,6 +694,7 @@ impl CoreCache32 {
             "executable admission is outside the CPU lease"
         );
         let mut compact_at = usize::MAX;
+        let mut reviewed = false;
         while self
             .owner_charge
             .saturating_add(charge)
@@ -662,6 +702,10 @@ impl CoreCache32 {
             > MAX_CODE_BYTES
             || self.free.is_empty() && self.regions.len() == MAX_REGION_EXTENT
         {
+            if !reviewed {
+                self.review_protected();
+                reviewed = true;
+            }
             if self.window_refusals.capacity() != 0 {
                 self.window_refusals = Vec::new();
                 continue;
@@ -679,7 +723,7 @@ impl CoreCache32 {
                 }
             }
             let index = self
-                .oldest()
+                .policy_victim()
                 .expect("validated owner fits an empty resident cache");
             let identity = self.regions[index].as_ref().unwrap().code.identity();
             self.remove(RegionKey { index, identity });
@@ -743,6 +787,9 @@ impl CoreCache32 {
         let extra = Self::hash_charge::<u32, EntryRejection>(entry.rejected_capacity) - before;
         entry.charge += extra;
         self.owner_charge += extra;
+        if self.route_owners[key.index].flags & route::PROTECTED != 0 {
+            self.protected_charge += extra;
+        }
     }
 
     pub(super) fn owned_frontier_contains(&self, memory: &AddressSpace, pc: u32) -> bool {
@@ -918,7 +965,7 @@ impl CoreCache32 {
     }
 
     pub(super) fn preflight_window(
-        &self,
+        &mut self,
         memory: &AddressSpace,
         plan: &WindowPlan,
     ) -> Option<WindowAdmission> {
@@ -937,11 +984,22 @@ impl CoreCache32 {
             || self
                 .window_refusals
                 .iter()
-                .any(|refusal| refusal.fingerprint.same_graph(plan.fingerprint()))
+                .any(|r| r.fingerprint.same_graph(plan.fingerprint()))
+            || self.contexts.windows.iter().any(|key| {
+                self.region(*key).is_some_and(|entry| {
+                    entry.code.is_current(memory)
+                        && entry
+                            .code
+                            .window_fingerprint()
+                            .is_some_and(|old| old.same_graph(plan.fingerprint()))
+                })
+            })
         {
             return None;
         }
-        let (replace, stale) = self.window_replacements(memory, plan.fingerprint())?;
+        let (replace, stale) =
+            self.window_replacements(memory, plan.fingerprint(), plan.instruction_pcs())?;
+        let permit = self.reserve_window(plan)?;
         Some(WindowAdmission {
             ownership_epoch: self.ownership_epoch,
             anchor: plan.anchor(),
@@ -949,46 +1007,8 @@ impl CoreCache32 {
             fingerprint: plan.fingerprint().clone(),
             replace,
             stale,
+            permit,
         })
-    }
-
-    fn window_replacements(
-        &self,
-        memory: &AddressSpace,
-        fingerprint: &WindowFingerprint,
-    ) -> Option<(Vec<RegionKey>, Vec<RegionKey>)> {
-        let mut replace = Vec::new();
-        let mut stale = Vec::new();
-        // A window has many public aliases but one lifetime. Inspect each
-        // retained artifact once, without rescanning its graph for every port.
-        for (index, entry) in self.regions.iter().enumerate() {
-            let Some(entry) = entry else {
-                continue;
-            };
-            let Some(old) = entry.code.window_fingerprint() else {
-                continue;
-            };
-            let key = RegionKey {
-                index,
-                identity: entry.code.identity(),
-            };
-            if entry.code.is_current(memory) {
-                if old.same_graph(fingerprint) {
-                    return None;
-                }
-                if fingerprint.overlaps(old) {
-                    if !fingerprint.strictly_covers(old) {
-                        return None;
-                    }
-                    replace.push(key);
-                }
-            } else if fingerprint.overlaps(old) {
-                stale.push(key);
-            }
-        }
-        replace.sort_unstable_by_key(|key| key.identity);
-        stale.sort_unstable_by_key(|key| key.identity);
-        Some((replace, stale))
     }
 
     pub(super) fn commit_window(
@@ -997,6 +1017,8 @@ impl CoreCache32 {
         admission: WindowAdmission,
         code: CompiledCode,
     ) -> Result<RegionRef, CompileError> {
+        let actual = Self::code_charge(&code, code.entrypoints().len());
+        self.policy.finish(admission.permit, actual);
         if admission.ownership_epoch != self.ownership_epoch
             || !code.is_execution_window()
             || !code.is_current(memory)
@@ -1012,30 +1034,50 @@ impl CoreCache32 {
         {
             return Err(CompileError::InvalidLimits);
         }
-        let Some((replace, stale)) = self.window_replacements(memory, &admission.fingerprint)
+        let Some((replace, stale)) =
+            self.window_replacements(memory, &admission.fingerprint, code.instruction_pcs())
         else {
             return Err(CompileError::InvalidLimits);
         };
         if replace != admission.replace || stale != admission.stale {
             return Err(CompileError::InvalidLimits);
         }
-        self.validate_candidate(&code, code.entrypoints().len())?;
-        // at most one current optimized window covers a pc. replacing that
-        // executor never retires baseline/family source owners or their ports.
-        // all graph/source/resource checks complete before any slot is revoked.
-        for stale in admission.stale {
-            self.remove(stale);
+        let migrate = self.contexts.keys_for_owners(&replace);
+        if migrate
+            .iter()
+            .any(|key| !code.supports_entry(key.target) || code.hot_span(key.target).is_none())
+        {
+            return Err(CompileError::InvalidLimits);
+        }
+        let entries = code.entrypoints().to_vec();
+        self.validate_candidate_routes(
+            &code,
+            entries.capacity(),
+            DirectoryKind::Window,
+            migrate.iter().filter(|key| key.origin.is_some()).count(),
+        )?;
+        for key in stale {
+            self.remove(key);
             self.source_invalidations = self.source_invalidations.saturating_add(1);
         }
-        for previous in admission.replace {
-            self.remove(previous);
+        for key in replace {
+            self.remove(key);
         }
-        let code = self.insert_owned(code)?;
-        self.remember_window_refusal(admission.fingerprint);
+        let code = self.insert_with_kind_routes(
+            code,
+            entries,
+            DirectoryKind::Window,
+            migrate.iter().filter(|key| key.origin.is_some()).count(),
+        )?;
+        assert!(
+            self.bind_window_preferences(memory, &code, &migrate),
+            "validated context migration uses reserved routes"
+        );
         Ok(code)
     }
 
     pub(super) fn reject_window(&mut self, admission: WindowAdmission) {
+        self.policy.finish(admission.permit, 0);
         self.remember_window_refusal(admission.fingerprint);
     }
 
@@ -1289,6 +1331,9 @@ impl CoreCache32 {
         let extra = (entry.admitted_entries.capacity() - before) * size_of::<GuestAddress>();
         entry.charge += extra;
         self.owner_charge += extra;
+        if self.route_owners[owner.key.index].flags & route::PROTECTED != 0 {
+            self.protected_charge += extra;
+        }
         entry.indexed_entries += 1;
         entry.rejected_entries.remove(&pc);
         self.refresh_route_pc(pc);
@@ -1421,17 +1466,26 @@ impl CoreCache32 {
     }
 
     pub(super) fn oldest_linked_slot(&self) -> u32 {
-        let mut current = self.oldest();
-        while let Some(index) = current {
-            let entry = self.regions[index].as_ref().unwrap();
-            let key = RegionKey {
-                index,
-                identity: entry.code.identity(),
-            };
-            if self.reciprocal_slot(key, entry) {
-                return entry.slot;
+        for head in [self.route_header.oldest, self.route_header.protected_oldest] {
+            let mut current = Self::route_index(head);
+            let mut left = self.regions.len();
+            while let Some(index) = current {
+                if left == 0 {
+                    break;
+                }
+                left -= 1;
+                let Some(entry) = self.regions.get(index).and_then(Option::as_ref) else {
+                    break;
+                };
+                let key = RegionKey {
+                    index,
+                    identity: entry.code.identity(),
+                };
+                if self.reciprocal_slot(key, entry) {
+                    return entry.slot;
+                }
+                current = Self::route_index(self.route_owners[index].newer);
             }
-            current = Self::route_index(self.route_owners[index].newer);
         }
         0
     }
@@ -1757,7 +1811,17 @@ impl CoreCache32 {
         entries: Vec<GuestAddress>,
         kind: DirectoryKind,
     ) -> Result<RegionRef, CompileError> {
-        self.validate_candidate_kind(&code, entries.capacity(), kind)?;
+        self.insert_with_kind_routes(code, entries, kind, 0)
+    }
+
+    fn insert_with_kind_routes(
+        &mut self,
+        code: CompiledCode,
+        entries: Vec<GuestAddress>,
+        kind: DirectoryKind,
+        additional_routes: usize,
+    ) -> Result<RegionRef, CompileError> {
+        self.validate_candidate_routes(&code, entries.capacity(), kind, additional_routes)?;
         self.advance_ownership_epoch();
         self.advance_entries_epoch();
         let trace = code.trace_root().is_some();
@@ -1779,7 +1843,10 @@ impl CoreCache32 {
             entries.len(),
             code.instruction_count(),
             kind,
-            code.hot_spans().count(),
+            code.hot_spans()
+                .count()
+                .saturating_add(usize::from(window))
+                .saturating_add(additional_routes),
         );
         let index = self.free.pop().unwrap();
         let identity = code.identity();
@@ -1819,7 +1886,12 @@ impl CoreCache32 {
             rejected_capacity: 0,
             trace_heat: [TraceHeat::default(); 4],
             charge,
+            automatic: fragment || window,
+            policy_baseline: 0,
         });
+        if window {
+            self.contexts.add_window(key);
+        }
         let newest = self.route_header.newest;
         self.route_owners[index] = route::Owner {
             identity,
@@ -1829,6 +1901,7 @@ impl CoreCache32 {
             older: newest,
             newer: 0,
             flags: if window { route::WINDOW } else { 0 },
+            completed_work: 0,
         };
         if let Some(newest) = Self::route_index(newest) {
             self.route_owners[newest].newer = index as u32 + 1;
@@ -1877,30 +1950,12 @@ impl CoreCache32 {
     }
 
     fn touch(&mut self, index: usize) {
-        if self.newest() == Some(index) {
+        let protected = self.protected(index);
+        if Self::route_index(self.queue_ends(protected).1) == Some(index) {
             return;
         }
-        let entry = self.route_owners[index];
-        let (older, newer) = (entry.older, entry.newer);
-        self.detach(older, newer);
-        let newest = self.newest().unwrap();
-        self.route_owners[newest].newer = index as u32 + 1;
-        self.route_owners[index].older = newest as u32 + 1;
-        self.route_owners[index].newer = 0;
-        self.route_header.newest = index as u32 + 1;
-    }
-
-    fn detach(&mut self, older: u32, newer: u32) {
-        if let Some(older) = Self::route_index(older) {
-            self.route_owners[older].newer = newer;
-        } else {
-            self.route_header.oldest = newer;
-        }
-        if let Some(newer) = Self::route_index(newer) {
-            self.route_owners[newer].older = older;
-        } else {
-            self.route_header.newest = older;
-        }
+        self.detach_queue(index);
+        self.append_queue(index, protected);
     }
 
     fn remove(&mut self, key: RegionKey) {
@@ -1912,7 +1967,12 @@ impl CoreCache32 {
         self.advance_binding_epoch();
         let entry = self.regions[key.index].take().unwrap();
         let row = self.route_owners[key.index];
-        self.detach(row.older, row.newer);
+        self.detach_queue(key.index);
+        if row.flags & route::PROTECTED != 0 {
+            self.protected_charge -= entry.charge;
+            self.protected_count -= 1;
+        }
+        let context_keys = self.contexts.remove(key);
         self.route_owners[key.index] = route::Owner::default();
         self.bytes -= entry.code.wasm().len();
         self.owner_charge -= entry.charge;
@@ -1946,7 +2006,18 @@ impl CoreCache32 {
             }
         }
         for pc in &entry.admitted_entries {
+            if self.window_entries.get(&pc.0).is_none() {
+                if let Some(other) = self.contexts.windows.iter().copied().rev().find(|key| {
+                    self.region(*key)
+                        .is_some_and(|entry| entry.code.supports_entry(pc.0))
+                }) {
+                    self.window_entries.insert(pc.0, other);
+                }
+            }
             self.refresh_route_pc(pc.0);
+        }
+        for key in context_keys {
+            self.refresh_route_context(key);
         }
         self.free.push(key.index);
     }
@@ -1992,7 +2063,10 @@ impl CoreCache32 {
     // Distinct hot ports and already observed owners can form a later capture.
     // Failed/equal captures back off without permanently consuming the site.
     pub(super) fn trace_candidate(&mut self, code: &RegionRef, pc: u32) -> bool {
-        if code.is_execution_window() || self.retained(code).is_none() || !code.supports_entry(pc) {
+        if !self.can_capture_automatic()
+            || self.retained(code).is_none()
+            || !code.supports_entry(pc)
+        {
             return false;
         }
         let entry = self.regions[code.key.index].as_mut().unwrap();
@@ -2000,7 +2074,10 @@ impl CoreCache32 {
     }
 
     pub(super) fn sample_candidate(&mut self, code: &RegionRef, pc: u32) -> bool {
-        if code.is_execution_window() || self.retained(code).is_none() || !code.supports_entry(pc) {
+        if !self.can_capture_automatic()
+            || self.retained(code).is_none()
+            || !code.supports_entry(pc)
+        {
             return false;
         }
         let entry = self.regions[code.key.index].as_mut().unwrap();

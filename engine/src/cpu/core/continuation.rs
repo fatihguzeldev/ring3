@@ -1,8 +1,8 @@
 //! Private generated/native continuation wire format. All indices use zero as
 //! absent; owner indices are cache arena indices plus one.
 
-pub(crate) const FORMAT_VERSION: u32 = 1;
-pub(crate) const HEADER_SIZE: u64 = 120;
+pub(crate) const FORMAT_VERSION: u32 = 2;
+pub(crate) const HEADER_SIZE: u64 = 136;
 pub(crate) const FORMAT: u64 = 0;
 pub(crate) const ACTIVE: u64 = 4;
 pub(crate) const CONTEXT: u64 = 8;
@@ -27,11 +27,14 @@ pub(crate) const CURRENT_ENTRY: u64 = 96;
 pub(crate) const CURRENT_PORT: u64 = 100;
 pub(crate) const CURRENT_NONCE: u64 = 104;
 pub(crate) const FLAGS: u64 = 112;
+pub(crate) const RETIRED_CLOCK: u64 = 120;
+pub(crate) const PROTECTED_OLDEST: u64 = 128;
+pub(crate) const PROTECTED_NEWEST: u64 = 132;
 pub(crate) const TRANSIENT: u32 = 1;
 pub(crate) const COLD: u32 = 2;
 pub(crate) const SELECTED_UNBOUND: u32 = 4;
 
-pub(crate) const OWNER_SIZE: u64 = 40;
+pub(crate) const OWNER_SIZE: u64 = 48;
 pub(crate) const OWNER_ID: u64 = 0;
 pub(crate) const OWNER_GENERATION: u64 = 8;
 pub(crate) const OWNER_VALIDATION: u64 = 16;
@@ -39,16 +42,20 @@ pub(crate) const OWNER_SLOT: u64 = 24;
 pub(crate) const OWNER_OLDER: u64 = 28;
 pub(crate) const OWNER_NEWER: u64 = 32;
 pub(crate) const OWNER_FLAGS: u64 = 36;
+pub(crate) const OWNER_COMPLETED_WORK: u64 = 40;
 pub(crate) const BOUND: u32 = 1;
 pub(crate) const WINDOW: u32 = 2;
+pub(crate) const PROTECTED: u32 = 4;
 
-pub(crate) const ROW_SIZE: u64 = 80;
+pub(crate) const ROW_SIZE: u64 = 88;
 pub(crate) const ROW_PC: u64 = 0;
 pub(crate) const ROW_STATE: u64 = 4;
+pub(crate) const ROW_ORIGIN: u64 = 8;
+pub(crate) const ROW_HAS_ORIGIN: u64 = 12;
 pub(crate) const EMPTY: u32 = 0;
 pub(crate) const PRESENT: u32 = 1;
 pub(crate) const DELETED: u32 = 2;
-pub(crate) const CANDIDATES: u64 = 8;
+pub(crate) const CANDIDATES: u64 = 16;
 pub(crate) const CANDIDATE_SIZE: u64 = 24;
 pub(crate) const CANDIDATE_ID: u64 = 0;
 pub(crate) const CANDIDATE_INDEX: u64 = 8;
@@ -87,6 +94,10 @@ pub(crate) struct Header {
     pub current_nonce: u64,
     pub flags: u32,
     pub reserved: u32,
+    pub retired_clock: u32,
+    pub accounting_reserved: u32,
+    pub protected_oldest: u32,
+    pub protected_newest: u32,
 }
 
 impl Default for Header {
@@ -117,6 +128,10 @@ impl Default for Header {
             current_nonce: 0,
             flags: 0,
             reserved: 0,
+            retired_clock: 0,
+            accounting_reserved: 0,
+            protected_oldest: 0,
+            protected_newest: 0,
         }
     }
 }
@@ -131,6 +146,7 @@ pub(crate) struct Owner {
     pub older: u32,
     pub newer: u32,
     pub flags: u32,
+    pub completed_work: u64,
 }
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -148,6 +164,8 @@ pub(crate) struct Candidate {
 pub(crate) struct Row {
     pub pc: u32,
     pub state: u32,
+    pub origin: u32,
+    pub has_origin: u32,
     pub candidates: [Candidate; 3],
 }
 
@@ -155,12 +173,23 @@ pub(crate) fn hash(pc: u32) -> u32 {
     (pc ^ (pc >> 16)).wrapping_mul(HASH_MULTIPLIER)
 }
 
+pub(crate) fn context_hash(pc: u32, origin: Option<u32>) -> u32 {
+    let key = match origin {
+        Some(origin) => pc ^ origin.rotate_left(13) ^ 0x85eb_ca6b,
+        None => pc,
+    };
+    hash(key)
+}
+
 const _: () = {
     assert!(std::mem::size_of::<Header>() == HEADER_SIZE as usize);
     assert!(std::mem::offset_of!(Header, flags) == FLAGS as usize);
     assert!(std::mem::offset_of!(Header, current_nonce) == CURRENT_NONCE as usize);
+    assert!(std::mem::offset_of!(Header, retired_clock) == RETIRED_CLOCK as usize);
+    assert!(std::mem::offset_of!(Header, protected_newest) == PROTECTED_NEWEST as usize);
     assert!(std::mem::size_of::<Owner>() == OWNER_SIZE as usize);
     assert!(std::mem::offset_of!(Owner, flags) == OWNER_FLAGS as usize);
+    assert!(std::mem::offset_of!(Owner, completed_work) == OWNER_COMPLETED_WORK as usize);
     assert!(std::mem::size_of::<Row>() == ROW_SIZE as usize);
     assert!(std::mem::offset_of!(Row, candidates) == CANDIDATES as usize);
     assert!(std::mem::size_of::<Candidate>() == CANDIDATE_SIZE as usize);

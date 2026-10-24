@@ -26,18 +26,31 @@ impl CoreCache32 {
         }
     }
 
-    fn route_position(&self, pc: u32) -> Result<usize, usize> {
+    pub(super) fn route_position(&self, pc: u32) -> Result<usize, usize> {
+        self.route_position_key(PreferredKey {
+            origin: None,
+            target: pc,
+        })
+    }
+
+    pub(super) fn route_position_key(&self, key: PreferredKey) -> Result<usize, usize> {
         if self.route_rows.is_empty() {
             return Err(0);
         }
         let mask = self.route_rows.len() - 1;
-        let start = route::hash(pc) as usize & mask;
+        let start = route::context_hash(key.target, key.origin) as usize & mask;
         let mut deleted = None;
         for offset in 0..=mask {
             let index = (start + offset) & mask;
             let row = &self.route_rows[index];
             match row.state {
-                route::PRESENT if row.pc == pc => return Ok(index),
+                route::PRESENT
+                    if row.pc == key.target
+                        && row.has_origin == u32::from(key.origin.is_some())
+                        && row.origin == key.origin.unwrap_or(0) =>
+                {
+                    return Ok(index);
+                }
                 route::EMPTY => return Err(deleted.unwrap_or(index)),
                 route::DELETED if deleted.is_none() => deleted = Some(index),
                 _ => {}
@@ -54,7 +67,12 @@ impl CoreCache32 {
         let old = std::mem::replace(&mut self.route_rows, vec![route::Row::default(); capacity]);
         self.route_count = 0;
         for row in old.into_iter().filter(|row| row.state == route::PRESENT) {
-            let index = self.route_position(row.pc).unwrap_err();
+            let index = self
+                .route_position_key(PreferredKey {
+                    target: row.pc,
+                    origin: (row.has_origin != 0).then_some(row.origin),
+                })
+                .unwrap_err();
             self.route_rows[index] = row;
             self.route_count += 1;
         }
@@ -84,45 +102,72 @@ impl CoreCache32 {
     }
 
     pub(super) fn refresh_route_pc(&mut self, pc: u32) {
-        let hot = |key: &&RegionKey| {
-            self.region(**key)
+        self.refresh_route_context(PreferredKey {
+            origin: None,
+            target: pc,
+        });
+    }
+
+    pub(super) fn refresh_route_context(&mut self, key: PreferredKey) {
+        let pc = key.target;
+        let preference = self.contexts.get(key).filter(|owner| {
+            self.region(*owner)
                 .is_some_and(|entry| entry.code.hot_span(pc).is_some())
+        });
+        let keys = if key.origin.is_some() {
+            [preference, None, None]
+        } else {
+            [
+                preference
+                    .or_else(|| self.window_entries.get(&pc).copied())
+                    .filter(|owner| {
+                        self.region(*owner)
+                            .is_some_and(|entry| entry.code.hot_span(pc).is_some())
+                    }),
+                self.trace_entries
+                    .get(&pc)
+                    .copied()
+                    .filter(|owner| {
+                        self.region(*owner)
+                            .is_some_and(|entry| entry.code.hot_span(pc).is_some())
+                    })
+                    .or_else(|| {
+                        self.executable_entries.get(&pc).copied().filter(|owner| {
+                            self.region(*owner)
+                                .is_some_and(|entry| entry.code.hot_span(pc).is_some())
+                        })
+                    }),
+                self.entries.get(&pc).copied().filter(|owner| {
+                    self.region(*owner)
+                        .is_some_and(|entry| entry.code.hot_span(pc).is_some())
+                }),
+            ]
         };
-        let keys = [
-            self.window_entries.get(&pc).filter(hot),
-            self.trace_entries
-                .get(&pc)
-                .filter(hot)
-                .or_else(|| self.executable_entries.get(&pc).filter(hot)),
-            self.entries.get(&pc).filter(hot),
-        ]
-        .map(|key| key.copied());
         let mut candidates = [route::Candidate::default(); 3];
-        let mut hot = false;
-        for (position, key) in keys.into_iter().enumerate() {
-            let Some(key) = key else {
+        for (position, owner) in keys.into_iter().enumerate() {
+            let Some(owner) = owner else {
                 continue;
             };
-            let Some(entry) = self.region(key) else {
+            let Some(entry) = self.region(owner) else {
                 continue;
             };
-            let span = entry.code.hot_span(pc);
-            hot |= span.is_some();
+            let Some(span) = entry.code.hot_span(pc) else {
+                continue;
+            };
             candidates[position] = route::Candidate {
-                identity: key.identity,
-                index: key.index as u32 + 1,
-                port: span.map_or(u32::MAX, |span| span.port),
-                work: span.map_or(0, |span| span.instructions),
-                flags: u32::from(span.is_none()) * route::NON_HOT
-                    | if entry.code.is_execution_window() {
-                        route::WINDOW_ROOT
-                    } else {
-                        0
-                    },
+                identity: owner.identity,
+                index: owner.index as u32 + 1,
+                port: span.port,
+                work: span.instructions,
+                flags: if entry.code.is_execution_window() {
+                    route::WINDOW_ROOT
+                } else {
+                    0
+                },
             };
         }
-        if !hot {
-            if let Ok(index) = self.route_position(pc) {
+        if candidates.iter().all(|candidate| candidate.identity == 0) {
+            if let Ok(index) = self.route_position_key(key) {
                 self.route_rows[index] = route::Row {
                     state: route::DELETED,
                     ..Default::default()
@@ -131,18 +176,50 @@ impl CoreCache32 {
             }
             return;
         }
-        let index = match self.route_position(pc) {
+        let index = match self.route_position_key(key) {
             Ok(index) => index,
             Err(index) => {
                 self.route_count += 1;
+
                 index
             }
         };
         self.route_rows[index] = route::Row {
             pc,
             state: route::PRESENT,
+            origin: key.origin.unwrap_or(0),
+            has_origin: u32::from(key.origin.is_some()),
             candidates,
         };
+    }
+
+    // called only by an authenticated native transition, or by the equivalent
+    // generated lease path. The actual live retired count is never read from a
+    // potentially stale Context snapshot while generated locals own it.
+    pub(in crate::process) fn account_owner_retired(&mut self, actual: u32) {
+        let h = &mut self.route_header;
+        let completed = actual.wrapping_sub(h.retired_clock);
+        h.retired_clock = actual;
+        if h.active != 1
+            || h.current_nonce != h.nonce
+            || h.nonce == 0
+            || h.flags & (route::COLD | route::TRANSIENT) != 0
+        {
+            return;
+        }
+        let Some(index) = Self::route_index(h.current_index) else {
+            return;
+        };
+        let Some(owner) = self.route_owners.get_mut(index) else {
+            return;
+        };
+        if owner.identity != h.current_id
+            || owner.generation != h.current_generation
+            || owner.slot != h.current_slot
+        {
+            return;
+        }
+        owner.completed_work = owner.completed_work.saturating_add(completed as u64);
     }
 
     pub(in crate::process) fn begin_continuation(
@@ -162,6 +239,7 @@ impl CoreCache32 {
         self.refresh_route_pointers();
         self.route_header.nonce = nonce;
         self.route_header.active = 1;
+        self.route_header.retired_clock = 0;
         self.route_header.context = context;
         self.route_header.memory = memory.identity();
         self.route_header.trace_arena = trace_arena;
@@ -207,6 +285,7 @@ impl CoreCache32 {
                 },
             )
         };
+        self.route_header.reserved = self.route_header.current_entry;
         self.route_header.current_index = index;
         self.route_header.current_slot = slot;
         self.route_header.current_id = code.identity();

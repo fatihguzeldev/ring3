@@ -78,6 +78,7 @@ fn resolve_owned(context: u32, pc: u32, retired: u32, remaining: Option<u32>) ->
             return u32::MAX;
         };
         let h = core.cache.continuation_header();
+        let origin = (h.current_id != 0).then_some(h.current_entry);
         let Some(code) = source(
             instance,
             core,
@@ -92,6 +93,7 @@ fn resolve_owned(context: u32, pc: u32, retired: u32, remaining: Option<u32>) ->
         if identity(core) != code.identity() {
             return u32::MAX;
         }
+        core.cache.account_owner_retired(retired);
         // Only this explicit ticket path can adopt a generated callee. The old
         // public probe/numeric interfaces retain their selected-owner contract.
         core.code = Some(code);
@@ -103,7 +105,7 @@ fn resolve_owned(context: u32, pc: u32, retired: u32, remaining: Option<u32>) ->
         if selected != 0 && (selected as usize) <= core.cache.link_capacity() {
             if remaining.is_some() {
                 if let Some(memory) = instance.memory.as_ref() {
-                    core.trace_selection(memory, pc);
+                    core.trace_selection_from(memory, pc, origin);
                 }
             } else if let Some(code) = core.code.as_ref() {
                 // legacy source selection has no live quota; only retain its
@@ -168,6 +170,33 @@ pub(crate) fn core_precise_owned(context: u32, slot: u32, generation: u64) -> u3
 }
 
 pub(crate) fn core_end_owned(context: u32, slot: u32, generation: u64, reason: u32) -> u32 {
+    end_owned(context, slot, generation, reason, None)
+}
+
+pub(crate) fn core_end_accounted_owned(
+    context: u32,
+    slot: u32,
+    generation: u64,
+    reason: u32,
+    initial_retired: u32,
+    budget: u32,
+) -> u32 {
+    end_owned(
+        context,
+        slot,
+        generation,
+        reason,
+        Some((initial_retired, budget)),
+    )
+}
+
+fn end_owned(
+    context: u32,
+    slot: u32,
+    generation: u64,
+    reason: u32,
+    accounting: Option<(u32, u32)>,
+) -> u32 {
     if !(1..=10).contains(&reason) {
         return 7;
     }
@@ -182,6 +211,19 @@ pub(crate) fn core_end_owned(context: u32, slot: u32, generation: u64, reason: u
         if !active(core, context) {
             return 7;
         }
+        let completed = match accounting {
+            Some((initial, budget)) => {
+                let completed = core.context.retired().wrapping_sub(initial);
+                if initial != core.lease_retired
+                    || core.context.remaining() > budget
+                    || completed > budget - core.context.remaining()
+                {
+                    return 7;
+                }
+                (reason != StopReason::Infrastructure as u32).then_some(completed)
+            }
+            None => None,
+        };
         let h = core.cache.continuation_header();
         if h.flags == route::COLD
             && h.current_id == 0
@@ -197,6 +239,10 @@ pub(crate) fn core_end_owned(context: u32, slot: u32, generation: u64, reason: u
             && identity(core) == 0
             && core.code.is_none()
         {
+            if let Some(completed) = completed {
+                core.cache.account_owner_retired(core.context.retired());
+                core.cache.earn_completed_work(completed);
+            }
             core.finish_end();
             return 0;
         }
@@ -210,6 +256,10 @@ pub(crate) fn core_end_owned(context: u32, slot: u32, generation: u64, reason: u
             return 7;
         }
         core.code = Some(code);
+        if let Some(completed) = completed {
+            core.cache.account_owner_retired(core.context.retired());
+            core.cache.earn_completed_work(completed);
+        }
         core.finish_end();
         0
     })

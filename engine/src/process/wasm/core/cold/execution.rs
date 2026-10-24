@@ -76,7 +76,16 @@ pub(in crate::process) fn probe_executable(
     if !current.is_current(memory) {
         return 0;
     }
-    let Some((code, slot)) = cache.lookup_executable_linked(memory, pc, remaining) else {
+    let header = cache.continuation_header();
+    let origin = (header.active == 1
+        && header.current_id == current.identity()
+        && header.context == context.bytes().as_ptr() as usize as u32
+        && header.memory == memory.identity()
+        && header.nonce != 0
+        && header.current_nonce == header.nonce)
+        .then_some(header.current_entry);
+    let Some((code, slot)) = cache.lookup_executable_linked_context(memory, origin, pc, remaining)
+    else {
         return COLD_MARK;
     };
     context.bytes_mut()[120..128].copy_from_slice(&code.identity().to_le_bytes());

@@ -14,7 +14,8 @@ pub(crate) use tracing::{
 pub(crate) use cold::{core_cold_run, core_precise};
 pub(crate) use continuation::{
     core_chain_resolve_executable_owned, core_chain_resolve_owned, core_continuation_format,
-    core_continuation_ptr, core_end_owned, core_numeric_owned, core_precise_owned,
+    core_continuation_ptr, core_end_accounted_owned, core_end_owned, core_numeric_owned,
+    core_precise_owned,
 };
 pub(crate) use dispatch::{
     core_chain_cold, core_chain_next, core_chain_probe, core_chain_select, core_dispatch_code_len,
@@ -58,6 +59,7 @@ pub(super) struct CoreSession32 {
     cold_status: [u64; 13],
     numeric: Box<NumericBank>,
     exported_retired: u32,
+    lease_retired: u32,
     context: Box<Context32>,
     active: bool,
     cold_state: ColdState,
@@ -76,6 +78,7 @@ impl CoreSession32 {
             cold_status: [0; 13],
             numeric: Box::new(NumericBank::from_instance(instance)?),
             exported_retired: 0,
+            lease_retired: 0,
             context: Box::new(Context32::new(state)),
             active: false,
             cold_state: ColdState::default(),
@@ -125,6 +128,8 @@ impl CoreSession32 {
         ) {
             return Err(7);
         }
+        self.lease_retired = self.context.retired();
+        self.cache.continuation_header_mut().retired_clock = self.lease_retired;
         let identity = code.map_or(0, |code| code.identity());
         let view = memory.core_view();
         for (offset, value) in [
@@ -351,6 +356,7 @@ pub(crate) fn core_prepare(pc: u32, instructions: u32, blocks: u32) -> u32 {
                 cold_status: [0; 13],
                 numeric: Box::new(numeric),
                 exported_retired: 0,
+                lease_retired: 0,
                 context: Box::new(Context32::new(state)),
                 active: false,
                 cold_state: ColdState::default(),
