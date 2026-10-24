@@ -283,7 +283,10 @@ pub(crate) fn prepare_hot_window(
         compiled_end[index] = end;
     }
     for (start, site) in sites.iter().enumerate() {
-        if site.owner() == 0 || start == 0 && compiled_only {
+        if site.owner() == 0
+            || start == 0 && compiled_only
+            || start != 0 && sites[start - 1].owner() == site.owner()
+        {
             continue;
         }
         let positions = &occurrences[&site.first()];
@@ -296,7 +299,10 @@ pub(crate) fn prepare_hot_window(
         if owner_changes[end] == owner_changes[start] {
             continue;
         }
-        // Earliest actual entry wins. BLOCK/NUMERIC may share a PC without
+        // Only actual owner-entry frontiers can intercept ordinary execution;
+        // an internal block in the previous body cannot select a new window.
+        // The selected root at index zero keeps its prior priority.
+        // BLOCK/NUMERIC may share a PC without
         // completing a cycle, so keep the last witness in this compiled segment;
         // the certifier still stops at the actual second closure. No cold
         // prefix/tail or unrelated parent history is copied into the executable.

@@ -4,6 +4,7 @@ import {readFileSync,writeFileSync,openSync,closeSync} from 'node:fs';
 import {pathToFileURL} from 'node:url';
 import {readEngine} from '../../../../support/wasm/engine.mjs';
 import {coldFixture,coldLiteral} from '../../../../support/core_wasm/cold_observed.mjs';
+import {readGeneratedModule} from './structure.mjs';
 
 const A=0x1000,B=0x1100,C=0x1200,D=0x1300;
 const A_PORTS=[0x1000,0x1002,0x1005,0x1006,0x1008];
@@ -25,11 +26,16 @@ function saved(world,unit) {
     bytes:bytes.length,sha256:hash(bytes)};
 }
 
-function assertOwner(world,owner,ports) {
+function assertOwner(world,owner,ports,window) {
   const {unit}=owner;
   assert.equal(world.cache.units.get(owner.id),unit);
   for(const pc of ports) {
-    assert.equal(world.selectSource(pc),unit,'an exact historical source port keeps its immutable owner');
+    if(window?.unit.pc===pc) {
+      assert.equal(world.raw.core_lookup(pc),0);assert.equal(world.bigint(world.context,120),window.id,
+        'the automatic window has root priority while its original source owner stays retained');
+    }
+    const sourcePc=window?.unit.pc===pc?ports.find(other=>other!==pc):pc;
+    assert.equal(world.selectSource(sourcePc),unit,'an exact historical source port keeps its immutable owner');
     assert.equal(world.bigint(world.context,120),owner.id);
     const bytes=source(world);assert.equal(bytes.length,owner.bytes);assert.equal(hash(bytes),owner.sha256);
   }
@@ -121,7 +127,7 @@ function boundedFeedback(world,transitions,learningEdges,execute) {
   const misses=world.resolverCalls-resolves,bound=learningEdges+sampleBound+captureBound;
   assert(misses<=bound,'native feedback is bounded by sampling, actual capture length and finite edge learning');
   (world.result.feedback??=[]).push({transitions,countdown,misses,sampleBound,captureBound,learningEdges,
-    captures:captures.map(capture=>({used:capture.used,root:capture.events[0]?.pc}))});
+    captures:captures.map(capture=>({used:capture.used,root:capture.events[0]?.pc,events:capture.events}))});
   return{value,misses,captures};
 }
 
@@ -139,15 +145,73 @@ function requireRecordedParents(world,parents,prefix=C) {
     'the actual connected capture holds each distinct current parent authority');
 }
 
-function rotatePorts(world,owner,ports) {
+function rotatePorts(world,owner,ports,window) {
   const retained=checkpoint(world);
   for(const pc of ports) {
-    world.reset({registers:bridgeRegisters(9),pc});const before=world.snapshot(),run=world.executeSource(0,pc);
+    world.reset({registers:bridgeRegisters(9),pc});const before=world.snapshot();
+    let run;
+    if(window?.unit.pc===pc) {
+      // Select another validated source port, then exercise this exact private
+      // PC through the original body. Public root lookup still prefers window.
+      const selected=world.selectSource(ports.find(other=>other!==pc));
+      const descriptor=Object.getOwnPropertyDescriptor(world.cache,'installRecordedTrace');
+      try {
+        Object.defineProperty(world.cache,'installRecordedTrace',{value:()=>{},configurable:true,writable:true});
+        world.cache.budget=0;run=world.cache.execute(selected);
+        world.result.runs.push({...run,id:run.id===null?null:String(run.id)});
+      } finally {
+        if(descriptor)Object.defineProperty(world.cache,'installRecordedTrace',descriptor);
+        else delete world.cache.installRecordedTrace;
+      }
+    } else run=world.executeSource(0,pc);
     coldLiteral(world,before,run,{pc,retired:0,budget:0,registers:bridgeRegisters(9),flags:2,
       fp:before.fp,writes:[],versionWrites:0});
     assert.equal(run.id,owner.id);
   }
-  assertOwner(world,owner,ports);noNewModule(world,retained);
+  assertOwner(world,owner,ports,window);noNewModule(world,retained);
+}
+
+function lookupPorts(bytes) {
+  const module=readGeneratedModule(bytes),named=[...module.names].filter(([,name])=>name==='guest.lookup');
+  assert.equal(named.length,1);const fn=module.functions[named[0][0]-module.imports.length];assert(fn);
+  return fn.ops.flatMap((op,index)=>op.op===0x41&&fn.ops[index-1]?.op===0x20&&
+    fn.ops[index-1].local===0&&fn.ops[index+1]?.op===0x46?[op.value>>>0]:[]).sort((a,b)=>a-b);
+}
+
+function requireInteriorWindow(world,parents,bridgeOwner,retained,feedback) {
+  assert.equal(feedback.captures.length,1);const capture=feedback.captures[0];
+  assert.equal(capture.events[0].pc,C);assert(capture.events.every(event=>event.kind===1&&event.offset===0));
+  // C alternates its branch: its own consecutive cycles differ. A fallback
+  // root must be an actual owner-entry frontier, so the old C body's internal
+  // C+0xa block cannot intercept ordinary A-root execution.
+  const start=capture.events.findIndex((event,index)=>index>0&&
+    capture.events[index-1].owner!==event.owner);
+  assert(start>0);const root=capture.events[start].pc;assert([A,B].includes(root));
+  const cycle=[A,A+8,C,C+0xa,B,B+8,C],position=cycle.indexOf(root);
+  const word=[...cycle.slice(position),...cycle.slice(0,position)];
+  const ownerAt=pc=>pc>=C?bridgeOwner:pc>=B?parents[1]:parents[0];
+  assert.deepEqual(capture.events.slice(start,start+2*word.length+1).map(event=>[event.pc,event.owner]),
+    [...word,...word,root].map(pc=>[pc,String(ownerAt(pc).id)]),
+    'the actual capture contains two exact consecutive 17-instruction cross-owner cycles');
+  const newUnits=[...world.cache.units.values()].filter(unit=>![...parents,bridgeOwner].some(owner=>owner.id===unit.id));
+  assert.equal(newUnits.length,1);const window=saved(world,newUnits[0]);
+  assert.equal(window.id,bridgeOwner.id+1n,'only the certified window allocates the next identity');
+  const expected=[...A_PORTS,...B_PORTS,...C_PORTS].sort((a,b)=>a-b);
+  assert.deepEqual(lookupPorts(world.moduleRecords.get(window.id).source),expected,
+    'only the fourteen actually completed PCs enter the window; terminal and other history are absent');
+  assert.equal(world.cache.admissions,retained.admissions+1);
+  assert.equal(world.cache.generatedModuleBytes,retained.bytes+window.bytes);
+  assert.equal(moduleCount(world),retained.modules+1);assert.equal(world.moduleRecords.size,retained.records+1);
+  assert.equal(world.cache.units.size,4);assert.equal(world.cache.transientAdmissions,0);assert.equal(world.prepares,0);
+  const native=world.cache.sampleUsage().nativeCache;
+  assert(BigInt(native.residentCharge)<=BigInt(native.residentBudget));
+  world.result.interiorWindow={id:String(window.id),root:window.unit.pc,expectedEntryFrontier:root,
+    bytes:window.bytes,sha256:window.sha256,
+    uniqueInstructions:14,cycleInstructions:17,completedCycles:2,ports:expected,sourceOwners:[...parents,bridgeOwner]
+      .map(owner=>({id:String(owner.id),slot:owner.slot,bytes:owner.bytes,sha256:owner.sha256})),native};
+  assert.equal(window.unit.pc,root,
+    'automatic window root must intercept an actual cross-owner entry, not an old body internal block');
+  return window;
 }
 
 export function runFamilyPlanCases(artifact,report,{boundedOnly=false}={}) {
@@ -172,21 +236,40 @@ export function runFamilyPlanCases(artifact,report,{boundedOnly=false}={}) {
       assert.equal(moduleCount(world),3);assert.equal(world.moduleRecords.size,3);
       assertOwner(world,owner,C_PORTS);
       const retained=checkpoint(world);
-      let learned=false;
+      let learned=false,window;
       for(const[count,fp]of[[9,'00000000000000a80340'],[9,'00000000000000a80340'],[2048,'00000000000018800b40']]) {
         const feedback=boundedFeedback(world,2*count-2,learned?0:4,()=>bridge(world,count,fp));
         const {run}=feedback.value;
         assert.equal(run.regions,2*count-1,'each immutable parent and bridge executes once per actual visit');
-        assert.equal(run.chainedColdWork,0);noNewModule(world,retained);
+        assert.equal(run.chainedColdWork,0);
+        if(count>=SAMPLE_INTERVAL)window=requireInteriorWindow(world,parents,owner,retained,feedback);
+        else noNewModule(world,retained);
         if(count>=SAMPLE_INTERVAL) {
           assert(feedback.misses>0,'long warm execution reaches the real generated sampling path');
           assert.equal(feedback.captures.length,1,'sampled hotness starts one bounded capture for this lease');
         }
         learned=true;
       }
-      for(const[parent,ports]of[[parents[0],A_PORTS],[parents[1],B_PORTS],[owner,C_PORTS]]) {
-        rotatePorts(world,parent,ports);assertOwner(world,parent,ports);
+      const steady=checkpoint(world);assert(window);
+      let windowLearned=false;
+      for(const[count,fp]of[[9,'00000000000000a80340'],[2048,'00000000000018800b40']]) {
+        // Starting at ordinary A reaches B's window after A and C. All
+        // subsequent A/C/B/C iterations execute inside that one body.
+        const feedback=boundedFeedback(world,2,windowLearned?0:2,()=>bridge(world,count,fp));
+        assert.equal(feedback.value.run.id,window.id);
+        assert.equal(feedback.value.run.regions,window.unit.pc===A?1:3,
+          'the automatically selected window removes repeated owner activations from ordinary execution');
+        assert.equal(feedback.value.run.chainedColdWork,0);noNewModule(world,steady);
+        assert.equal(world.bigint(world.word(world.context,88)),epoch);
+        windowLearned=true;
       }
+      for(const[parent,ports]of[[parents[0],A_PORTS],[parents[1],B_PORTS],[owner,C_PORTS]]) {
+        rotatePorts(world,parent,ports,window);assertOwner(world,parent,ports,window);
+      }
+      assert.equal(world.cache.units.get(window.id),window.unit);
+      assert.equal(world.cache.table.get(window.slot),window.link);
+      assert.equal(world.cache.publishers.get(window.slot),window.publish);
+      assert.equal(world.bigint(world.raw.core_link_owners_ptr(),window.slot*8),window.id);
       world.result.semanticComplete=true;
     });
 

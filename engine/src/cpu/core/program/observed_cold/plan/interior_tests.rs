@@ -281,3 +281,62 @@ fn duplicate_numeric_markers_do_not_hide_two_actual_interior_cycles() {
     assert_eq!(plan.cycle_instruction_count(), 3);
     assert_eq!(plan.instruction_pcs().collect::<Vec<_>>(), [A, A + 2, B]);
 }
+
+#[test]
+fn internal_recurrent_site_is_skipped_for_the_first_actual_owner_entry() {
+    let mut memory = memory();
+    // NOT EDX; TEST EDX,EDX; JZ A; JMP B. Consecutive root cycles
+    // alternate, while the internal JMP and external B both recur exactly.
+    memory
+        .write(
+            GuestAddress(P),
+            &[0xf7, 0xd2, 0x85, 0xd2, 0x74, 0x0a, 0xeb, 0x18],
+        )
+        .unwrap();
+    memory.write(GuestAddress(A), &[0xeb, 0xee]).unwrap();
+    memory.write(GuestAddress(B), &[0xeb, 0xde]).unwrap();
+    let c = family(
+        &memory,
+        &[(P, P + 2), (P + 2, P + 4), (P + 4, P + 6), (P + 6, B)],
+    );
+    let a = family(&memory, &[(A, P)]);
+    let b = family(&memory, &[(B, P)]);
+    let events = [
+        block(&c, P),
+        block(&c, P + 6),
+        block(&b, B),
+        block(&c, P),
+        block(&a, A),
+        block(&c, P),
+        block(&c, P + 6),
+        block(&b, B),
+        block(&c, P),
+        block(&a, A),
+        block(&c, P),
+        block(&c, P + 6),
+        block(&b, B),
+    ];
+    let owners = [&c, &a, &b];
+    // The internal site is a valid graph certificate, but normal C execution
+    // reaches it without selecting a new owner, so it is an ineffective root.
+    let internal = prepare_root_window(
+        &memory,
+        GuestAddress(P + 6),
+        CompileOptions::default(),
+        &events[1..],
+        &owners,
+        memory.code_source_version(),
+        &[],
+    )
+    .unwrap()
+    .unwrap();
+    assert_eq!(internal.anchor(), P + 6);
+    let selected = prepare(&memory, P, &events, &owners, &[]).unwrap();
+    assert_eq!(selected.anchor(), B);
+    assert_eq!(selected.cycle_instruction_count(), 9);
+    assert_eq!(selected.completed_cycle_count(), 2);
+    assert!(selected.fingerprint().same_graph(internal.fingerprint()));
+    let code = emit_hot_window(&memory, selected).unwrap().unwrap();
+    assert!(code.supports_entry(B));
+    assert!(!code.supports_entry(P + 6));
+}
