@@ -6,6 +6,12 @@ export_process_calls! {
     core_context_ptr();
     core_begin();
     core_end();
+    core_continuation_format();
+    core_continuation_ptr();
+    core_chain_resolve_owned(context: u32, pc: u32, retired: u32);
+    core_numeric_owned(context: u32, slot: u32, generation: u64, pc: u32, ordinal: u32);
+    core_precise_owned(context: u32, slot: u32, generation: u64);
+    core_end_owned(context: u32, slot: u32, generation: u64, reason: u32);
     core_dispatch_code_ptr();
     core_dispatch_code_len();
     core_link(slot: u32);

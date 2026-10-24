@@ -1,6 +1,7 @@
 mod boundary;
 mod cache;
 mod cold;
+mod continuation;
 mod dispatch;
 mod numeric;
 mod retention;
@@ -11,6 +12,10 @@ pub(crate) use tracing::{
 };
 
 pub(crate) use cold::{core_cold_run, core_precise};
+pub(crate) use continuation::{
+    core_chain_resolve_owned, core_continuation_format, core_continuation_ptr, core_end_owned,
+    core_numeric_owned, core_precise_owned,
+};
 pub(crate) use dispatch::{
     core_chain_cold, core_chain_next, core_chain_probe, core_chain_select, core_dispatch_code_len,
     core_dispatch_code_ptr, core_link, core_unlink,
@@ -110,6 +115,16 @@ impl CoreSession32 {
         if flags & 2 == 0 || flags & !USER_FLAGS_MASK_V3 != 0 || flags & 0x50100 != 0 {
             return Err(7);
         }
+        let selected = compiled.then(|| self.code.as_ref().unwrap().clone());
+        if !self.cache.begin_continuation(
+            memory,
+            (&*self.context as *const Context32) as usize as u32,
+            (&*self.tracing.arena as *const crate::cpu::core::trace::TraceArena) as usize as u32,
+            selected.as_ref(),
+            self.context.state().eip,
+        ) {
+            return Err(7);
+        }
         let identity = code.map_or(0, |code| code.identity());
         let view = memory.core_view();
         for (offset, value) in [
@@ -144,6 +159,17 @@ impl CoreSession32 {
         self.context.set_word(112, 1);
         self.active = true;
         Ok(())
+    }
+
+    pub(super) fn finish_end(&mut self) {
+        self.context.set_word(112, 0);
+        self.active = false;
+        self.cache.end_continuation();
+        self.tracing.end();
+        self.refresh_trace_bypass(self.context.retired());
+        if self.code.as_ref().is_some_and(RegionRef::is_transient) {
+            self.code = None;
+        }
     }
 }
 
@@ -457,13 +483,7 @@ pub(crate) fn core_end() -> u32 {
         if !core.active {
             return 7;
         }
-        core.context.set_word(112, 0);
-        core.active = false;
-        core.tracing.end();
-        core.refresh_trace_bypass(core.context.retired());
-        if core.code.as_ref().is_some_and(RegionRef::is_transient) {
-            core.code = None;
-        }
+        core.finish_end();
         0
     })
 }

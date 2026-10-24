@@ -18,41 +18,54 @@ pub(crate) fn core_precise(context: u32) -> u32 {
         if !session.active || session.context_address() != context as usize {
             return StopReason::Infrastructure as u32;
         }
-        // Exact execution contributes source-validated completed instructions to
-        // an active capture. The preceding BLOCK alone confirms no suffix.
-        let result = execution::precise(
-            instance,
-            &mut session.context,
-            &mut session.numeric,
-            &mut session.code,
-            &session.cache,
-            &mut session.cold_state,
-            &mut session.tracing,
-        );
-        session.refresh_trace_bypass(session.context.retired());
-        if result == StopReason::NeedCode {
-            let Some(memory) = instance.memory.as_mut() else {
-                return StopReason::Infrastructure as u32;
-            };
-            let view = memory.core_view();
-            for (offset, value) in [
-                (56, view.mappings),
-                (60, view.permissions),
-                (64, view.backing),
-                (68, view.backing_pages as usize),
-                (72, view.executable_views),
-                (76, view.private_slots),
-                (80, view.transaction_version),
-                (84, view.page_versions),
-                (88, view.code_validation_version),
-            ] {
-                session.context.set_word(offset, value as u32);
-            }
-            session.context.bytes_mut()[96..104]
-                .copy_from_slice(&view.expected_code_version.to_le_bytes());
-        }
-        result as u32
+        precise_selected(instance, session) as u32
     })
+}
+
+pub(super) fn precise_selected(
+    instance: &mut crate::process::EngineInstance,
+    session: &mut CoreSession32,
+) -> StopReason {
+    let entry = session.cache.continuation_header().current_entry;
+    // Exact execution contributes source-validated completed instructions to
+    // an active capture. The preceding BLOCK alone confirms no suffix.
+    let result = execution::precise(
+        instance,
+        &mut session.context,
+        &mut session.numeric,
+        &mut session.code,
+        &session.cache,
+        &mut session.cold_state,
+        &mut session.tracing,
+    );
+    session.refresh_trace_bypass(session.context.retired());
+    if result == StopReason::NeedCode {
+        let Some(memory) = instance.memory.as_mut() else {
+            return StopReason::Infrastructure;
+        };
+        let view = memory.core_view();
+        for (offset, value) in [
+            (56, view.mappings),
+            (60, view.permissions),
+            (64, view.backing),
+            (68, view.backing_pages as usize),
+            (72, view.executable_views),
+            (76, view.private_slots),
+            (80, view.transaction_version),
+            (84, view.page_versions),
+            (88, view.code_validation_version),
+        ] {
+            session.context.set_word(offset, value as u32);
+        }
+        session.context.bytes_mut()[96..104]
+            .copy_from_slice(&view.expected_code_version.to_le_bytes());
+    }
+    if let (Some(memory), Some(code)) = (instance.memory.as_ref(), session.code.as_ref()) {
+        if code.is_current(memory) {
+            session.cache.bind_continuation(memory, code, entry);
+        }
+    }
+    result
 }
 
 pub(crate) fn core_cold_run(budget: u32) -> i32 {
@@ -105,6 +118,7 @@ pub(crate) fn core_cold_run(budget: u32) -> i32 {
         };
         session.context.set_word(112, 0);
         session.active = false;
+        session.cache.end_continuation();
         result
     })
 }
@@ -169,19 +183,26 @@ pub(super) fn chain_probe(
     session: &mut CoreSession32,
     pc: u32,
 ) -> u32 {
-    execution::probe(
+    let next = execution::probe(
         instance,
         &mut session.context,
         &mut session.code,
         &mut session.cache,
         pc,
-    )
+    );
+    if next != 0 && (next as usize) <= session.cache.link_capacity() {
+        if let (Some(memory), Some(code)) = (instance.memory.as_ref(), session.code.as_ref()) {
+            session.cache.bind_continuation(memory, code, pc);
+        }
+    }
+    next
 }
 
 pub(super) fn chain_cold(
     instance: &mut crate::process::EngineInstance,
     session: &mut CoreSession32,
 ) -> u32 {
+    session.cache.clear_continuation();
     let next = execution::chain_cold_observed(
         instance,
         &mut session.context,
@@ -205,7 +226,14 @@ fn observe_selected(
     session.refresh_trace_bypass(session.context.retired());
     if next & STOP_MARK == 0 && slot != 0 && (slot as usize) <= session.cache.link_capacity() {
         if let Some(memory) = instance.memory.as_ref() {
+            if let Some(code) = session.code.as_ref() {
+                session
+                    .cache
+                    .bind_continuation(memory, code, session.context.state().eip);
+            }
             session.trace_selection(memory, session.context.state().eip);
         }
+    } else if session.code.is_none() {
+        session.cache.clear_continuation();
     }
 }
