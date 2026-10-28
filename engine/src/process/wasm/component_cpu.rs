@@ -153,8 +153,10 @@ fn gate(instance: &EngineInstance, pc: u32) -> Option<u32> {
 pub(crate) fn component_cpu_gate(low: u32, high: u32, pc: u32) -> u32 {
     access(low, high, true, |instance| {
         let id = gate(instance, pc).unwrap_or(0);
-        instance.arena.as_mut().get_mut()[TRANSFER_OFFSET..TRANSFER_OFFSET + 4]
-            .copy_from_slice(&id.to_le_bytes());
+        let flags = u32::from(instance.external_cpu_can_defer_gate(pc, id));
+        let output = &mut instance.arena.as_mut().get_mut()[TRANSFER_OFFSET..TRANSFER_OFFSET + 8];
+        output[..4].copy_from_slice(&id.to_le_bytes());
+        output[4..].copy_from_slice(&flags.to_le_bytes());
         Ok(())
     })
 }

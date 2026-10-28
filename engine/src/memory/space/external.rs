@@ -119,14 +119,14 @@ impl AddressSpace {
         ] {
             bytes[offset..offset + 8].copy_from_slice(&value.to_le_bytes());
         }
-        // bit 1 advertises the collector even before the backing is attached.
-        bytes[108..112].copy_from_slice(&2u32.to_le_bytes());
+        // collector and gate flags are available before attach.
+        bytes[108..112].copy_from_slice(&10u32.to_le_bytes());
         if let Some(changes) = self.external_mapping_changes.as_ref() {
             for (offset, value) in [
                 (96, changes.pages.as_ptr() as u32),
                 (100, changes.pages.len() as u32),
                 (104, GUEST_PAGES as u32),
-                (108, 3),
+                (108, 11),
             ] {
                 bytes[offset..offset + 4].copy_from_slice(&value.to_le_bytes());
             }

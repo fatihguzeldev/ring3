@@ -14,6 +14,7 @@ export class PageTables {
     this.lastMappingScanCount=0;this.lastMappingFullRebuild=false;
     this.lastDirtyScanCount=0;this.lastDirtyDirectoryCount=0;
     const info=this.descriptor();
+    this.dirtyGateFlagsSupported=(info.mappingChangeFlags&8)!==0;
     this.nativeDirtySupported=(info.mappingChangeFlags&2)!==0;
     this.nativeDirty=options.nativeDirty??this.nativeDirtySupported;
     if(typeof this.nativeDirty!=='boolean' || (this.nativeDirty && !this.nativeDirtySupported))

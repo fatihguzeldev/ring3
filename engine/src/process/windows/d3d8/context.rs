@@ -25,6 +25,25 @@ pub(in crate::process) struct D3D8Runtime32 {
 }
 
 impl D3D8Runtime32 {
+    #[cfg(feature = "external-cpu")]
+    pub(in crate::process) fn external_cpu_scalar_gate_safe(
+        &self,
+        memory: &crate::memory::AddressSpace,
+        pointer: GuestAddress,
+    ) -> bool {
+        if !self.deferred_private_releases.is_empty()
+            || !self.private_callbacks.is_empty()
+            || !self.garbage.is_empty()
+            || !self.retired_devices.is_empty()
+            || self.readback_input.is_some()
+            || self.com.preflight(memory, pointer).is_err()
+        {
+            return false;
+        }
+        self.device(pointer)
+            .is_ok_and(|device| !device.queue().is_draining() && !device.queue().is_sealed())
+    }
+
     pub(in crate::process) fn new(config: D3D8Config32) -> Result<Self, D3D8Error32> {
         config
             .adapter

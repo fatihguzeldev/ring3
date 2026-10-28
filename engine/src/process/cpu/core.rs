@@ -13,6 +13,73 @@ pub(in crate::process) struct PreparedCoreExit32 {
 }
 
 impl EngineInstance {
+    #[cfg(feature = "external-cpu")]
+    pub(in crate::process) fn external_cpu_can_defer_gate(&self, pc: u32, id: u32) -> bool {
+        use crate::{
+            abi::{
+                arena::STATE_OFFSET,
+                x86::{STATE_SIZE, decode_state},
+            },
+            graphics::d3d8::api::{InterfaceKind, MethodGate},
+            memory::{Access, GuestAddress},
+            windows::{CallFrame32, CallingConvention32},
+        };
+        let Some(gate) = MethodGate::from_id(id) else {
+            return false;
+        };
+        if gate.interface != InterfaceKind::Device
+            || !matches!(gate.slot, 37 | 42 | 46 | 50 | 63)
+            || !self.external_cpu_memory_pinned
+            || self.guard_core_entry().is_err()
+            || self.callback.is_some()
+            || self.has_active_module_operation()
+            || self.image_input.is_some()
+            || self.execution_frame.is_some()
+            || self.windows_service.is_some()
+            || !self.windows_replies.is_empty()
+            || self.module_windows_reply.is_some()
+            || self.d3d8_reply.is_some()
+        {
+            return false;
+        }
+        let Ok(state) = decode_state(&self.arena()[STATE_OFFSET..STATE_OFFSET + STATE_SIZE]) else {
+            return false;
+        };
+        if state.eip != pc {
+            return false;
+        }
+        let Ok(memory) = self.memory() else {
+            return false;
+        };
+        let Ok(frame) = CallFrame32::capture(
+            memory,
+            state,
+            CallingConvention32::Stdcall,
+            u32::from(gate.method().stack_words),
+        ) else {
+            return false;
+        };
+        if Self::prepare_completed_call(frame.complete(0)).is_err() {
+            return false;
+        }
+        let args = frame.arguments();
+        let input = match gate.slot {
+            37 => Some((args[2], 64)),
+            42 => Some((args[1], 68)),
+            _ => None,
+        };
+        if input.is_some_and(|(address, length)| {
+            memory
+                .check_span(GuestAddress(address), length, Access::Read)
+                .is_err()
+        }) {
+            return false;
+        }
+        self.d3d8.as_ref().is_some_and(|runtime| {
+            runtime.external_cpu_scalar_gate_safe(memory, GuestAddress(args[0]))
+        })
+    }
+
     pub(in crate::process) fn prepare_core_exit(
         &self,
         state: crate::cpu::x86::State32,

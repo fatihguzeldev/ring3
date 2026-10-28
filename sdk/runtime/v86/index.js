@@ -64,7 +64,7 @@ export async function prepareV86(options={}, {signal}={}) {
 
 export const createV86Runtime=prepareV86;
 
-class V86CodeCache {
+export class V86CodeCache {
   constructor(engine,execution,cpu,runtime) {
     this.engine=engine;this.memory=engine.memory;this.cpu=cpu;this.runtime=runtime;
     const budget=execution.budget??50000;
@@ -74,7 +74,9 @@ class V86CodeCache {
     try {this.traps=new Traps(cpu);}catch(error){this.tables.rollback(error);throw error;}
     this.imported=false;this.closed=false;this.open=false;
     this.runs=0;this.regions=0;this.retired=0;this.work=0;this.gates=0;this.faults=0;
-    this.dirtyPages=0;this.cowFaults=0;this.reuseNumericState=true;
+    this.dirtyPages=0;this.cowFaults=0;
+    this.deferDirty=false;this.dirtyPending=false;this.deferredDirtyPublications=0;
+    this.reuseNumericState=true;
   }
   get pc() {return this.engine.get(48);}
   import() {
@@ -90,7 +92,7 @@ class V86CodeCache {
   execute() {
     if(!this.imported)this.import();
     const cpu=this.cpu,h=this.engine,hp=cpu.wm.exports.get_hypercall_page_ptr()>>>0;
-    let work=0,retired=0,stop=2,detail=0,auxiliary=0,vector=0,trap=null;
+    let work=0,retired=0,stop=2,detail=0,auxiliary=0,vector=0,trap=null,deferAllowed=false;
     for(let attempt=0;attempt<8;attempt++) {
       const before=cpuViews(this.memory).data.getUint32(664,true);
       new DataView(this.memory.buffer).setUint32(hp,this.budget,true);
@@ -102,8 +104,9 @@ class V86CodeCache {
       work+=delta;retired+=Math.max(0,delta-(trap?2:0));
       exportState(h,cpu,trap);
       if(this.reuseNumericState!==false)rememberStateBanks(h,cpu);
-      this.dirtyPages+=this.tables.publishDirty();
+      this.dirtyPending=true;
       if(trap?.vector===14 && (trap.error&2) && this.tables.isCopyOnWrite(trap.address)) {
+        this.publish();
         h.ok('component_cpu_write_fault',...KEY,trap.address);
         this.cowFaults++;this.import();
         if(attempt===7)throw new Error('v86 repeated copy-on-write fault');
@@ -115,7 +118,8 @@ class V86CodeCache {
       vector=trap.vector;
       if(vector===6) {
         h.ok('component_cpu_gate',...KEY,trap.pc);
-        const gate=h.resultView(4).getUint32(0,true);
+        const result=h.resultView(8),gate=result.getUint32(0,true);
+        deferAllowed=this.tables.dirtyGateFlagsSupported===true && (result.getUint32(4,true)&1)!==0;
         if(gate){stop=7;vector=gate;this.gates++;}else {stop=9;this.faults++;}
       } else if(vector===14) {
         stop=3;detail=trap.address;
@@ -129,13 +133,23 @@ class V86CodeCache {
       } else throw new Error(`unsupported v86 CPU exception ${vector} at0x${trap.pc.toString(16)}`);
     }
     if(work>0xffffffff || retired>work)throw new Error('invalid v86 execution accounting');
+    if(this.deferDirty && stop===7 && deferAllowed)this.deferredDirtyPublications++;
+    else this.publish();
     h.ok('component_cpu_publish',...KEY,stop,detail,auxiliary,vector,retired,work);
     this.imported=false;this.traps.pending=null;this.runs++;this.regions++;
     this.retired+=retired;this.work+=work;
     return {pc:this.pc,coreReason:stop,reason:h.get(72),detail:h.get(80),retired,work,
       kind:'v86',id:'v86',regions:1,chainedColdRuns:0,chainedColdWork:0,chainedColdRetired:0};
   }
-  publish() {}
+  publish() {
+    if(!this.dirtyPending)return;
+    this.dirtyPages+=this.tables.publishDirty();this.dirtyPending=false;
+  }
+  configureDirtyDeferral(enabled,owner) {
+    if(owner?.paused!==true || owner?.open!==false || typeof enabled!=='boolean')
+      throw new Error('v86 dirty deferral changes require a closed paused owner');
+    this.publish();this.deferDirty=enabled;return enabled;
+  }
   sampleUsage() {return this.stats();}
   coldDiagnostics() {return null;}
   stats() {
@@ -146,7 +160,8 @@ class V86CodeCache {
       admissions:counters.generatedModules,generatedModuleBytes:counters.generatedModuleBytes,
       installedUnits:counters.finalizedModules,v86:counters,jitConfig:this.runtime.jitConfig,
       workBudget:this.budget,gates:this.gates,faults:this.faults,cowFaults:this.cowFaults,
-      dirtyPages:this.dirtyPages,wasmMemoryBytes:this.memory.buffer.byteLength,
+      dirtyPages:this.dirtyPages,deferDirty:this.deferDirty,
+      deferredDirtyPublications:this.deferredDirtyPublications,wasmMemoryBytes:this.memory.buffer.byteLength,
       executePermissionEnforcement:false,faultAccessLength:'one-byte conservative fault span',
       x87TagSemantics:'v86 represents occupancy and derives nonempty tags from payload; incompatible imports fail',
       coldRuns:0,coldRetired:0,coldWork:0,chainedColdRuns:0,chainedColdRetired:0,chainedColdWork:0,
@@ -155,6 +170,7 @@ class V86CodeCache {
   close() {
     if(this.closed)return;
     if(this.open)throw new Error('cannot close an active v86 adapter');
+    this.publish();
     forgetStateBanks(this.cpu);
     this.tables.release();this.closed=true;this.imported=false;
   }
