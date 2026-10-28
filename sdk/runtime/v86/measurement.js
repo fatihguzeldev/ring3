@@ -1,6 +1,7 @@
 const active = new WeakMap();
 const nativePhases = new Map([
   ['component_cpu_view','nativeView'], ['component_cpu_dirty','nativeDirty'],
+  ['component_cpu_ack_mappings','nativeMappingAck'],
   ['component_cpu_gate','nativeGate'], ['component_cpu_publish','nativePublish'],
   ['component_cpu_write_fault','nativeCow'],
 ]);
@@ -13,11 +14,11 @@ export function instrumentV86(cache, measurements) {
   if(active.has(cache))throw new Error('v86 adapter is already instrumented');
   const {cpu,tables,traps,engine}=cache, installed=[];
   const counters={imports:0,selections:0,executions:0,cpuRuns:0,traps:0,
-    refreshCalls:0,mappingRebuilds:0,scannedMappingEntries:0,clearedPtes:0,
-    dirtyPublications:0,scannedPtes:0,dirtySlots:0,tlbFlushes:0,jitFlushes:0,
-    tlbFlushReasons:{mappingRebuild:0,dirtyReset:0,other:0},
-    jitFlushReasons:{hostCodeVersion:0,mappingRebuild:0,other:0},
-    nativeCalls:{nativeView:0,nativeDirty:0,nativeGate:0,nativePublish:0,nativeCow:0}};
+    refreshCalls:0,mappingRebuilds:0,mappingUpdates:0,scannedMappingEntries:0,clearedPtes:0,
+    dirtyPublications:0,scannedPtes:0,scannedDirectories:0,dirtySlots:0,tlbFlushes:0,jitFlushes:0,
+    tlbFlushReasons:{mappingChange:0,dirtyReset:0,other:0},
+    jitFlushReasons:{hostCodeVersion:0,mappingChange:0,other:0},
+    nativeCalls:{nativeView:0,nativeDirty:0,nativeMappingAck:0,nativeGate:0,nativePublish:0,nativeCow:0}};
   let enabled=true, refreshContext=null, dirtyDepth=0, guestPages=1<<20;
   const phase=(name,operation)=>measurements.runExclusive(name==='run'?'v86.run':`v86.bridge.${name}`,operation);
   const wrap=(owner,name,operation)=>{
@@ -68,7 +69,9 @@ export function instrumentV86(cache, measurements) {
         try {
           const result=original.apply(this,args);
           if(this.mappingEpoch!==context.epoch) {
-            counters.mappingRebuilds++;counters.scannedMappingEntries+=guestPages;counters.clearedPtes+=oldRows;
+            counters.mappingUpdates++;
+            if(this.lastMappingFullRebuild??true){counters.mappingRebuilds++;counters.clearedPtes+=oldRows;}
+            counters.scannedMappingEntries+=this.lastMappingScanCount??guestPages;
           }
           return result;
         } finally {refreshContext=previous;}
@@ -80,7 +83,8 @@ export function instrumentV86(cache, measurements) {
         const count=this.pages.length;dirtyDepth++;
         try {
           const result=original.apply(this,args);
-          counters.scannedPtes+=count;
+          counters.scannedPtes+=this.lastDirtyScanCount??count;
+          counters.scannedDirectories+=this.lastDirtyDirectoryCount??0;
           if(Number.isInteger(result))counters.dirtySlots+=result;
           return result;
         } finally {dirtyDepth--;}
@@ -88,12 +92,12 @@ export function instrumentV86(cache, measurements) {
     });
     wrap(cpu,'full_clear_tlb',function(original,args){
       counters.tlbFlushes++;
-      counters.tlbFlushReasons[dirtyDepth?'dirtyReset':refreshContext?'mappingRebuild':'other']++;
+      counters.tlbFlushReasons[dirtyDepth?'dirtyReset':refreshContext?'mappingChange':'other']++;
       return phase('tlbFlush',()=>original.apply(this,args));
     });
     wrap(cpu,'jit_clear_cache',function(original,args){
       counters.jitFlushes++;
-      const reason=!refreshContext?'other':tables.mappingEpoch!==refreshContext.epoch?'mappingRebuild':'hostCodeVersion';
+      const reason=!refreshContext?'other':tables.mappingEpoch!==refreshContext.epoch?'mappingChange':'hostCodeVersion';
       counters.jitFlushReasons[reason]++;
       return phase('jitFlush',()=>original.apply(this,args));
     });
@@ -115,7 +119,7 @@ export function instrumentV86(cache, measurements) {
       run:'synchronous v86 main_loop excluding measured bridge trap handling; includes CPU code generation, not later asynchronous Wasm compilation',
       import:'self time excludes page refresh; includes canonical state import and adapter bookkeeping',
       execute:'self time includes state export, accounting and fault classification; pure state export is not separately measured',
-      scans:'scannedPtes counts completed dirty scans; mapping entries count completed rebuilds; failed partial scans are not claimed',
+      scans:'completed mapping/leaf/directory visits use actual policy scan counts; mappingRebuilds counts only full rebuilds; failed partial scans are not claimed',
       flushes:'adapter calls through JS cpu properties only; internal v86 Wasm flushes are included in v86.run',
       off:'restore removes all wrappers; no stage clocks or instrumentation counter writes remain',
     }});
