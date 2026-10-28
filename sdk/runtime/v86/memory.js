@@ -1,11 +1,14 @@
 import {KEY} from '../engine.js';
 import {PAGE,BACKING_BASE,DIRECTORY,TABLES,GDT,PRIVATE_VA} from './layout.js';
+import {CodeValidity} from './code-validity.js';
 
 export class PageTables {
-  constructor(engine,cpu) {
+  constructor(engine,cpu,options={}) {
     this.engine=engine;this.cpu=cpu;this.ram=cpu.mem8.byteOffset;this.pages=[];
     this.ownsPin=false;
     this.mappingEpoch=null;this.codeVersion=null;this.identity=null;
+    this.policy={selectiveCode:options.selectiveCode??true,incrementalSync:options.incrementalSync??false};
+    this.codeValidity=new CodeValidity(engine.memory);
     this.descriptor();
     const length=this.capacity*PAGE;
     if(BACKING_BASE+length>cpu.mem8.length)throw new Error('v86 physical RAM is too small for Ring3 backing');
@@ -33,6 +36,17 @@ export class PageTables {
     try {this.release();}catch(cleanup){error.cleanupFailure=cleanup.message;}
   }
   pte(page) {return this.ram+TABLES+page*4;}
+  configure(policy) {
+    if(typeof policy?.selectiveCode!=='boolean' || typeof policy?.incrementalSync!=='boolean')
+      throw new Error('v86 memory policy requires two boolean switches');
+    if(this.policy.selectiveCode===policy.selectiveCode && this.policy.incrementalSync===policy.incrementalSync)
+      return {...this.policy};
+    this.publishDirty();
+    this.cpu.full_clear_tlb();this.cpu.jit_clear_cache();
+    this.policy={...policy};this.mappingEpoch=null;this.codeVersion=null;
+    this.codeValidity=new CodeValidity(this.engine.memory);this.refresh();
+    return {...this.policy};
+  }
   descriptor() {
     const h=this.engine;h.ok('component_cpu_view',...KEY);
     const d=h.resultView(128);
@@ -40,7 +54,8 @@ export class PageTables {
       throw new Error('invalid external CPU memory descriptor');
     const values={backing:d.getUint32(16,true),length:d.getUint32(20,true),maps:d.getUint32(24,true),
       permissions:d.getUint32(28,true),guestPages:d.getUint32(32,true),capacity:d.getUint32(36,true),
-      mapped:d.getUint32(40,true),privateSlots:d.getUint32(52,true),identity:d.getBigUint64(64,true),
+      mapped:d.getUint32(40,true),mappingVersions:d.getUint32(44,true),physicalVersions:d.getUint32(48,true),
+      privateSlots:d.getUint32(52,true),identity:d.getBigUint64(64,true),
       transaction:d.getBigUint64(72,true),code:d.getBigUint64(80,true),mapping:d.getBigUint64(88,true)};
     this.capacity=values.capacity;
     return values;
@@ -49,9 +64,12 @@ export class PageTables {
     const info=this.descriptor(),d=new DataView(this.engine.memory.buffer);
     if(this.identity!==null && this.identity!==info.identity)throw new Error('v86 backing identity changed');
     this.identity=info.identity;
-    if(this.codeVersion!==null && this.codeVersion!==info.code)this.cpu.jit_clear_cache();
+    if(!this.policy.selectiveCode && this.codeVersion!==null && this.codeVersion!==info.code)this.cpu.jit_clear_cache();
     this.codeVersion=info.code;
-    if(this.mappingEpoch===info.mapping)return;
+    if(this.mappingEpoch===info.mapping) {
+      if(this.policy.selectiveCode && this.codeValidity.refresh(info,this.pages).invalidate)this.cpu.jit_clear_cache();
+      return;
+    }
     if(info.backing!==this.ram+BACKING_BASE)throw new Error('v86 backing detached unexpectedly');
     for(const row of this.pages)d.setUint32(row.pte,0,true);
     const maps=new Uint32Array(this.engine.memory.buffer,info.maps,info.guestPages);
@@ -71,7 +89,7 @@ export class PageTables {
     this.pages=rows;this.maps=info.maps;this.rights=info.permissions;this.privateSlots=info.privateSlots;
     this.mappingEpoch=info.mapping;
     this.cpu.full_clear_tlb();
-    this.cpu.jit_clear_cache();
+    if(!this.policy.selectiveCode || this.codeValidity.refresh(info,this.pages).invalidate)this.cpu.jit_clear_cache();
   }
   isCopyOnWrite(address) {
     const page=address>>>12;
@@ -96,7 +114,8 @@ export class PageTables {
       this.engine.ok('component_cpu_dirty',...KEY,part.length);
     }
     // v86 already invalidates code written by the guest; only later host changes need a flush.
-    this.codeVersion=this.descriptor().code;
+    const info=this.descriptor();this.codeVersion=info.code;
+    if(this.policy.selectiveCode)this.codeValidity.acknowledgeGuestWrites(info,slots);
     return slots.length;
   }
 }
