@@ -44,7 +44,7 @@ pub(crate) fn component_cpu_attach(low: u32, high: u32, backing: ExternalMemory)
             || instance.callback.is_some()
             || instance.cpu_event.is_some()
             || instance.execution_frame.is_some()
-            || instance.has_active_module_operation()
+            || !instance.external_cpu_module_ready()
             || instance.core_owner.is_some()
         {
             return Err(HostError::InvalidRequest);

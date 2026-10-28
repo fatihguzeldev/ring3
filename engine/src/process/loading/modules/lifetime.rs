@@ -267,6 +267,18 @@ impl EngineInstance {
         !self.modules.operations.is_empty() || self.modules.source.is_some()
     }
 
+    #[cfg(feature = "external-cpu")]
+    pub(in crate::process) fn external_cpu_module_ready(&self) -> bool {
+        self.modules.input.is_none()
+            && self.modules.source.is_none()
+            && (self.modules.operations.is_empty()
+                || self
+                    .modules
+                    .operations
+                    .last()
+                    .is_some_and(|operation| operation.active.is_some()))
+    }
+
     pub fn configure_module_limits(
         &mut self,
         limits: crate::loader::ModuleLimits32,

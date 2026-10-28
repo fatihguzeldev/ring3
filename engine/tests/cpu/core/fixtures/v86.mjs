@@ -4,6 +4,7 @@ import {readFileSync, writeFileSync} from 'node:fs';
 import {readEngine} from '../../../support/wasm/engine.mjs';
 import {Engine, KEY, view} from '../../../../../sdk/runtime/engine.js';
 import {prepareV86} from '../../../../../sdk/runtime/v86/index.js';
+import {image as moduleImage} from '../../../loader/modules/wasm/fixtures/runtime/images.mjs';
 
 const [enginePath, reportPath, permissionText = '1'] = process.argv.slice(2);
 assert(enginePath && reportPath, 'usage: v86.mjs imported-engine.wasm fresh-report.json');
@@ -48,6 +49,13 @@ try {
   engine.ok('configure_cpu_clock', 1_000_000_000, 0, 0, 0);
   engine.ok('configure_module_limits', 8, 0x100000, 16, 65536, 0x100000);
   engine.ok('register_kernel32_module', 0x70000000);
+  const dll = moduleImage({base: 0x10000000, dll: true});
+  engine.ok('begin_module_input', dll.bytes.length, engine.name('entry.dll'));
+  for (let offset = 0; offset < dll.bytes.length; offset += 4096) {
+    const chunk = dll.bytes.subarray(offset, offset + 4096);
+    engine.request(chunk); engine.ok('append_module_input', offset, chunk.length);
+  }
+  engine.ok('commit_module_input');
   const name = 'core-imports.exe';
   engine.ok('begin_module_input', image.length, engine.name(name));
   for (let offset = 0; offset < image.length; offset += 4096) {
@@ -59,7 +67,26 @@ try {
   const banks = () => Buffer.concat([[4236,128], [4364,160], [4524,64], [4612,144], [4756,40]]
     .map(([offset,length]) => Buffer.from(new Uint8Array(memory.buffer, engine.base + offset, length))));
   const initialBanks = banks();
+  engine.ok('load_library_module', engine.name('entry.dll'), 0);
+  const dllEntry = engine.get(48), dllBase = dllEntry - 0x1020;
+  engine.ok('module_initializer');
+  const initializer = view(engine.take(72));
+  assert.equal(initializer.getUint32(16, true), 1, 'a real guest DLL initializer is pending at attach');
+  const init = {token: initializer.getBigUint64(24, true), returnPc: initializer.getUint32(44, true), id: initializer.getUint32(48, true)};
+  stage = 'attach while DLL initializer is pending';
   cache = await runtime.attach(engine, {budget: 1000});
+  let initRun;
+  for (let count = 0; count < 100; count++) {
+    initRun = cache.execute(cache.select());
+    if (initRun.reason === 8) break;
+    assert([1,2,6].includes(initRun.coreReason));
+  }
+  assert.equal(initRun.pc, init.returnPc); assert.equal(initRun.detail, init.id);
+  engine.ok('finish_module_initializer', Number(init.token & 0xffffffffn), Number(init.token >> 32n));
+  assert.equal(engine.get(48), 0x401000, 'DLL initialization restores the original PE entry');
+  engine.ok('read32', dllBase + 0x2904); assert.equal(engine.get(120), 1, 'DllMain observed DLL_PROCESS_ATTACH');
+  report.initializer = {entry: dllEntry, returnPc: init.returnPc, id: init.id};
+  cache.import();
   const expected = [
     {id: 0x10002, args: [0xf1234567], returnPc: 0x40100f, result: 0, error: 0xf1234567},
     {id: 0x10001, args: [], returnPc: 0x401017, result: 0xf1234567, error: 0xf1234567},

@@ -207,3 +207,51 @@ fn core_owners_are_instance_scoped_and_gate_identity_is_authoritative() {
     assert_eq!(engine.arena(), before);
     assert!(engine.pending_call.is_none());
 }
+
+#[cfg(feature = "external-cpu")]
+#[test]
+fn external_attach_accepts_retained_initializer_after_committed_mapping() {
+    let mut engine = EngineInstance::new(128, KEY).unwrap();
+    let main = crate::process::windows::process::test_image_for_startup();
+    engine.register_guest_module("main.exe", &main).unwrap();
+    engine
+        .start_module_process("main.exe", None, Default::default())
+        .unwrap();
+    assert!(engine.external_cpu_module_ready());
+    let mut dll = main;
+    dll[0x96..0x98].copy_from_slice(&0x2103u16.to_le_bytes());
+    dll[0xb4..0xb8].copy_from_slice(&0x600000u32.to_le_bytes());
+    engine
+        .register_guest_module("initializer.dll", &dll)
+        .unwrap();
+    let identity = engine.memory().unwrap().identity();
+    let backing = engine.memory().unwrap().cpu_read_arrays().2.as_ptr();
+    let crate::process::ModuleOperation32::Pending(initializer) =
+        engine.load_library_module("initializer.dll", None).unwrap()
+    else {
+        panic!("missing initializer");
+    };
+    assert!(engine.has_active_module_operation());
+    assert_eq!(engine.module_initializer().unwrap(), Some(initializer));
+    assert_eq!(state(&engine).eip, initializer.entry);
+    assert_eq!(engine.memory().unwrap().identity(), identity);
+    assert_eq!(
+        engine.memory().unwrap().cpu_read_arrays().2.as_ptr(),
+        backing
+    );
+    assert!(engine.core_owner.is_none());
+    assert!(engine.external_cpu_module_ready());
+    engine.enable_core_execution().unwrap();
+    engine.guard_core_entry().unwrap();
+}
+
+#[cfg(feature = "external-cpu")]
+#[test]
+fn external_attach_rejects_pending_module_input() {
+    let mut engine = EngineInstance::new(32, KEY).unwrap();
+    assert!(engine.external_cpu_module_ready());
+    engine.begin_module_input(1, "pending.dll").unwrap();
+    assert!(!engine.external_cpu_module_ready());
+    engine.abort_module_input().unwrap();
+    assert!(engine.external_cpu_module_ready());
+}
