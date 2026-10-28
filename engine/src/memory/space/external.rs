@@ -35,6 +35,30 @@ impl MappingChanges {
 }
 
 impl AddressSpace {
+    pub(crate) fn external_write_is_stable(&self, address: GuestAddress, length: usize) -> bool {
+        if length == 0 {
+            return true;
+        }
+        let Some(end) = u64::from(address.0)
+            .checked_add(length as u64)
+            .filter(|end| *end <= ADDRESS_LIMIT)
+        else {
+            return false;
+        };
+        let first = address.0 as usize / PAGE_SIZE as usize;
+        let last = ((end - 1) / u64::from(PAGE_SIZE)) as usize;
+        (first..=last).all(|page| {
+            let mapping = self.mappings[page];
+            mapping != 0
+                && self.permissions[page].allows(Access::Write)
+                && self
+                    .private_slots
+                    .as_ref()
+                    .is_none_or(|slots| slots[page] == 0)
+                && self.executable_views[mapping as usize - 1] == 0
+        })
+    }
+
     pub(super) fn record_external_mapping_change(&mut self, page: usize, version: u64) {
         self.external_mapping_epoch = version;
         if let Some(changes) = self.external_mapping_changes.as_mut() {

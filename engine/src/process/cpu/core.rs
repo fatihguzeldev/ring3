@@ -77,11 +77,15 @@ impl EngineInstance {
             },
             graphics::d3d8::api::{InterfaceKind, MethodGate},
             memory::{Access, GuestAddress},
-            windows::{CallFrame32, CallingConvention32},
+            windows::{CallFrame32, CallingConvention32, WindowsApi32, thread::ThreadApi32},
         };
-        let getter = id == crate::windows::WindowsApi32::GetLastError.id();
+        let getter = id == WindowsApi32::GetLastError.id();
+        let setter = id == WindowsApi32::SetLastError.id();
+        let tls_getter = id == ThreadApi32::TlsGetValue.id();
         let gate = MethodGate::from_id(id);
         if !getter
+            && !setter
+            && !tls_getter
             && !gate.is_some_and(|gate| {
                 gate.interface == InterfaceKind::Device
                     && matches!(gate.slot, 37 | 42 | 46 | 50 | 63)
@@ -115,7 +119,11 @@ impl EngineInstance {
             memory,
             state,
             CallingConvention32::Stdcall,
-            gate.map_or(0, |gate| u32::from(gate.method().stack_words)),
+            if setter || tls_getter {
+                1
+            } else {
+                gate.map_or(0, |gate| u32::from(gate.method().stack_words))
+            },
         ) else {
             return false;
         };
@@ -126,8 +134,44 @@ impl EngineInstance {
             // getlasterror republishes the same TEB value, so no guest RAM write occurs.
             return self.module_teb_address().is_none_or(|teb| {
                 teb.checked_add(0x34).is_some_and(|address| {
-                    memory.check_span(GuestAddress(address), 4, Access::Read).is_ok()
+                    memory
+                        .check_span(GuestAddress(address), 4, Access::Read)
+                        .is_ok()
                 })
+            });
+        }
+        if setter || tls_getter {
+            let argument = frame.arguments()[0];
+            if tls_getter {
+                if argument >= 1088 {
+                    return false;
+                }
+                if self.threads.current_teb().is_some_and(|teb| {
+                    let offset = if argument < 64 {
+                        0xe10 + argument * 4
+                    } else {
+                        0xf94
+                    };
+                    teb.checked_add(offset).is_none()
+                }) || self.get_windows_tls(argument).is_err()
+                {
+                    return false;
+                }
+            }
+            let target = if setter { argument } else { 0 };
+            return self.module_teb_address().is_none_or(|teb| {
+                let Some(address) = teb.checked_add(0x34).map(GuestAddress) else {
+                    return false;
+                };
+                let mut current = [0; 4];
+                if memory.read(address, &mut current).is_err() {
+                    return false;
+                }
+                if setter && u32::from_le_bytes(current) == target {
+                    return memory.check_span(address, 4, Access::Write).is_ok();
+                }
+                memory.external_write_is_stable(address, 4)
+                    && memory.ensure_transaction_versions(1).is_ok()
             });
         }
         let gate = gate.unwrap();
