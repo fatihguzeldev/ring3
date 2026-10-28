@@ -164,9 +164,16 @@ try {
   upload(0x600300,[0xa1,...u32(dataAddress),0xb8,...u32(gate),0xff,0xe0]);
   upload(0x600340,[0xc7,0x05,...u32(dataAddress),...u32(0x76543210),0xb8,...u32(gate),0xff,0xe0]);
   report.memoryPolicies=[];
-  for(const [selectiveCode,incrementalSync] of [[false,false],[true,false],[false,true],[true,true]]) {
+  for(const [selectiveCode,incrementalSync,nativeDirty] of [[false,false,false],[true,false,false],
+      [false,true,false],[true,true,false],[false,true,true],[true,true,true]]) {
+    assert.equal(cache.imported,false,'the preceding actual CPU batch already published its writes');
+    cache.tables.refresh();
     cache.tables.configure({selectiveCode,incrementalSync});
+    cache.tables.configureDirty(nativeDirty,{paused:true,open:cache.open});
     const observations=[],original=cache.tables.publishDirty;
+    const order=[],clear=cache.cpu.full_clear_tlb,main=cache.cpu.main_loop;
+    cache.cpu.full_clear_tlb=function(...args){order.push('flush');return clear.apply(this,args);};
+    cache.cpu.main_loop=function(...args){order.push('cpu');return main.apply(this,args);};
     cache.tables.publishDirty=function() {
       const d=new DataView(memory.buffer),directory=this.ram+DIRECTORY+(dataAddress>>>22)*4;
       const observed={accessed:!!(d.getUint32(directory,true)&32),
@@ -185,9 +192,13 @@ try {
       assert.equal(observations[0].dirty,false,'read-only batch does not dirty the data PTE');
       assert.equal(observations[1].dirty,true,'later actual store marks the data PTE dirty');
       if(incrementalSync)assert.equal(observations[0].accessedAfter,false,'partitioned read-only collection resets access');
+      if(incrementalSync) {
+        const first=order.indexOf('cpu'),second=order.indexOf('cpu',first+1);
+        assert(order.slice(first+1,second).includes('flush'),'read-only A-bit reset flushes before the next actual CPU batch');
+      }
       assert.equal(read(dataAddress),0x76543210);
-      report.memoryPolicies.push({selectiveCode,incrementalSync,observations});
-    } finally {cache.tables.publishDirty=original;}
+      report.memoryPolicies.push({selectiveCode,incrementalSync,nativeDirty,observations,order});
+    } finally {cache.tables.publishDirty=original;cache.cpu.full_clear_tlb=clear;cache.cpu.main_loop=main;}
   }
   stage='host code write invalidates actual finalized v86 code';
   const hotPc=0x600400,hot=value=>[0xc7,0x05,...u32(dataAddress),...u32(value),0xe9,...u32(-15)];
