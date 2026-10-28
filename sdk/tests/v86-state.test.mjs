@@ -3,6 +3,24 @@ import test from 'node:test';
 import * as state from '../runtime/v86/state.js';
 import {X87,SIMD,SEGMENTS,YMM} from '../runtime/v86/layout.js';
 
+test('CPU views reuse one memory buffer and refresh after actual growth without crossing memories',()=>{
+  const memory=new WebAssembly.Memory({initial:1}),other=new WebAssembly.Memory({initial:1});
+  const first=state.cpuViews(memory);
+  first.regs[0]=0x12345678;
+  assert.ok(state.cpuViews(memory)===first);
+  const separate=state.cpuViews(other);
+  assert.ok(separate!==first);assert.equal(separate.regs[0],0);
+  memory.grow(1);
+  const grown=state.cpuViews(memory);
+  assert.ok(grown!==first);assert.equal(first.bytes.byteLength,0);
+  assert.ok(state.cpuViews(memory)===grown);assert.equal(grown.bytes.byteLength,131072);
+  for(const view of Object.values(grown))assert.ok(view.buffer===memory.buffer);
+  assert.equal(grown.regs[0],0x12345678);
+  grown.data.setUint32(64,0xabcdef01,true);
+  assert.equal(grown.regs[0],0xabcdef01);assert.equal(separate.regs[0],0);
+  assert.ok(state.cpuViews(other)===separate);
+});
+
 function fixture() {
   const memory=new WebAssembly.Memory({initial:2}),engine={memory,base:65536};
   let tags=0,updates=0,descriptors=0;

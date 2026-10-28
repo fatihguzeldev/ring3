@@ -4,6 +4,7 @@ const CACHE_OFFSETS = [28,32,36,40,44,56];
 const USER_FLAGS = 0x254fd7;
 const NUMERIC_WORDS = (SIMD+160-X87)/4;
 const numericBanks = new WeakMap();
+const memoryViews = new WeakMap();
 
 export function forgetStateBanks(cpu) {numericBanks.delete(cpu);}
 
@@ -28,9 +29,13 @@ function consumeStateBanks(engine,cpu) {
 
 export function cpuViews(memory) {
   const buffer = memory.buffer;
-  return {bytes:new Uint8Array(buffer), data:new DataView(buffer),
+  const cached=memoryViews.get(memory);
+  if(cached?.bytes.buffer===buffer)return cached;
+  const views={bytes:new Uint8Array(buffer), data:new DataView(buffer),
     regs:new Uint32Array(buffer,64,8), selectors:new Uint16Array(buffer,668,8),
     bases:new Uint32Array(buffer,736,8), limits:new Uint32Array(buffer,768,8)};
+  memoryViews.set(memory,views);
+  return views;
 }
 
 export function importState(engine, cpu, traps) {
