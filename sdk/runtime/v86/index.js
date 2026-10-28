@@ -75,7 +75,7 @@ export class V86CodeCache {
     this.imported=false;this.closed=false;this.open=false;
     this.runs=0;this.regions=0;this.retired=0;this.work=0;this.gates=0;this.faults=0;
     this.dirtyPages=0;this.cowFaults=0;
-    this.deferDirty=false;this.dirtyPending=false;this.deferredDirtyPublications=0;
+    this.deferDirty=true;this.dirtyPending=false;this.deferredDirtyPublications=0;
     this.reuseNumericState=true;
   }
   get pc() {return this.engine.get(48);}

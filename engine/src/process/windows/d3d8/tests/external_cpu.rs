@@ -158,3 +158,36 @@ fn external_cpu_dirty_policy_rejects_deferred_releases_and_sealed_queues() {
         .unwrap();
     assert!(engine.external_cpu_can_defer_gate(PC, id));
 }
+
+#[test]
+fn external_cpu_dirty_policy_get_last_error_reads_teb_without_mutation() {
+    use crate::{abi::x86::decode_state, windows::WindowsApi32};
+    let mut engine = EngineInstance::new(128, 91).unwrap();
+    let image = crate::process::windows::process::test_image_for_startup();
+    engine.register_guest_module("last-error.exe", &image).unwrap();
+    engine.start_module_process("last-error.exe", None, Default::default()).unwrap();
+    engine.enable_core_execution().unwrap();
+    engine.external_cpu_memory_pinned = true;
+    let teb = engine.module_teb_address().unwrap();
+    let mut state = decode_state(&engine.arena()[STATE_OFFSET..STATE_OFFSET + STATE_SIZE]).unwrap();
+    state.eip = PC;
+    state.registers[4] = DATA;
+    let memory = engine.memory.as_mut().unwrap();
+    memory.map_zeroed(PageRange::new(GuestAddress(DATA), 1).unwrap(), Permissions::READ_WRITE).unwrap();
+    memory.write(GuestAddress(state.registers[4]), &0x9002u32.to_le_bytes()).unwrap();
+    memory.write(GuestAddress(teb + 0x34), &0xf1234567u32.to_le_bytes()).unwrap();
+    encode_state_current(&state, &mut engine.arena.as_mut().get_mut()[STATE_OFFSET..STATE_OFFSET + STATE_SIZE]).unwrap();
+    let page = PageRange::new(GuestAddress(teb & !4095), 1).unwrap();
+    engine.memory.as_mut().unwrap().protect(page, Permissions::READ).unwrap();
+    let version = engine.memory().unwrap().transaction_version();
+    assert!(engine.external_cpu_can_defer_gate(PC, WindowsApi32::GetLastError.id()));
+    assert_eq!(engine.memory().unwrap().transaction_version(), version);
+    let mut value = [0; 4];
+    engine.memory().unwrap().read(GuestAddress(teb + 0x34), &mut value).unwrap();
+    assert_eq!(u32::from_le_bytes(value), 0xf1234567);
+    engine.memory.as_mut().unwrap().protect(page, Permissions::READ.with_guard()).unwrap();
+    let version = engine.memory().unwrap().transaction_version();
+    assert!(!engine.external_cpu_can_defer_gate(PC, WindowsApi32::GetLastError.id()));
+    assert_eq!(engine.memory().unwrap().transaction_version(), version);
+    assert_eq!(engine.memory().unwrap().permissions_at(GuestAddress(teb)), Ok(Permissions::READ.with_guard()));
+}

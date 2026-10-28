@@ -78,7 +78,7 @@ try {
   cache = await runtime.attach(engine, {budget: 1000});
   let initRun;
   for (let count = 0; count < 100; count++) {
-    initRun = cache.execute(cache.select());
+    initRun = cache.execute(cache.select()); cache.publish();
     if (initRun.reason === 8) break;
     assert([1,2,6].includes(initRun.coreReason));
   }
@@ -98,7 +98,7 @@ try {
     stage = 'Windows call ' + (index + 1);
     let run;
     for (let count = 0; count < 100; count++) {
-      run = cache.execute(cache.select()); report.runs.push(run); save();
+      run = cache.execute(cache.select()); cache.publish(); report.runs.push(run); save();
       if (run.reason === 8) break;
       assert([1,2,6].includes(run.coreReason), 'only bounded CPU progress before a gate');
       await new Promise(resolve => setTimeout(resolve, 0));
@@ -129,7 +129,7 @@ try {
   report.output = actual;
   stage = 'live v86 JIT';
   for (let count = 0; count < 8 && cache.stats().installedUnits === 0; count++) {
-    cache.execute(cache.select());
+    cache.execute(cache.select()); cache.publish();
     await new Promise(resolve => setTimeout(resolve, 5));
   }
   assert(cache.stats().installedUnits > 0, 'v86 generated and finalized actual hot guest code');
@@ -149,7 +149,7 @@ try {
   cache.import();
   let arithmetic;
   for (let count = 0; count < 100; count++) {
-    arithmetic = cache.execute(cache.select());
+    arithmetic = cache.execute(cache.select()); cache.publish();
     if (arithmetic.reason === 8) break;
     assert([1,2,6].includes(arithmetic.coreReason), 'numeric program reached no fault');
   }
@@ -192,7 +192,7 @@ try {
       const beforeVersion=contentVersion();let readVersion;
       for(const pc of [0x600300,0x600340]) {
         new DataView(memory.buffer).setUint32(engine.base+48,pc,true);cache.import();
-        const run=cache.execute(cache.select());assert.equal(run.reason,8);
+        const run=cache.execute(cache.select());cache.publish();assert.equal(run.reason,8);
         if(pc===0x600300)readVersion=contentVersion();
       }
       assert.equal(observations[0].accessed,true,'actual read marks the page directory accessed');
@@ -216,7 +216,7 @@ try {
   const generatedBefore=cache.stats().v86.finalizedModules;
   for(let count=0;count<24;count++) {
     new DataView(memory.buffer).setUint32(engine.base+48,hotPc,true);
-    cache.import();cache.execute(cache.select());await new Promise(resolve=>setTimeout(resolve,2));
+    cache.import();cache.execute(cache.select());cache.publish();await new Promise(resolve=>setTimeout(resolve,2));
   }
   assert(cache.stats().v86.finalizedModules>generatedBefore,'the authored hot loop finalized actual Wasm');
   assert.equal(read(dataAddress),1);
@@ -226,10 +226,10 @@ try {
     engine.ok('map',0x690000,1,3);cache.import();
     assert.equal(clears,0,'unrelated real data mapping retains hot code');
     upload(hotPc,hot(2));cache.import();assert.equal(clears,1,'host executable write invalidates hot code');
-    new DataView(memory.buffer).setUint32(engine.base+48,hotPc,true);cache.import();cache.execute(cache.select());
+    new DataView(memory.buffer).setUint32(engine.base+48,hotPc,true);cache.import();cache.execute(cache.select());cache.publish();
     assert.equal(read(dataAddress),2);
     engine.ok('unmap',0x600000,1);engine.ok('map',0x600000,1,7);upload(hotPc,hot(3));
-    new DataView(memory.buffer).setUint32(engine.base+48,hotPc,true);cache.import();cache.execute(cache.select());
+    new DataView(memory.buffer).setUint32(engine.base+48,hotPc,true);cache.import();cache.execute(cache.select());cache.publish();
     assert.equal(read(dataAddress),3,'same-VA remap executes new canonical bytes');
     report.hostCodeInvalidation={clears,finalizedModules:cache.stats().v86.finalizedModules};
   } finally {cache.cpu.jit_clear_cache=clear;}
@@ -243,7 +243,7 @@ try {
   engine.ok('protect', 0x601000, 1, deniedPermission);
   new DataView(engine.memory.buffer).setUint32(engine.base + 48, 0x600100, true);
   cache.import();
-  const fault = cache.execute(cache.select());
+  const fault = cache.execute(cache.select()); cache.publish();
   assert.equal(fault.coreReason, 3); assert.equal(fault.pc, 0x600100);
   assert.equal(fault.reason, 5); assert.equal(fault.detail, 2, 'mapped denied page is a permission fault');
   assert.equal(new DataView(engine.memory.buffer).getUint32(physical, true), 0x11223344, 'faulting write preserves canonical RAM');

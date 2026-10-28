@@ -24,12 +24,17 @@ impl EngineInstance {
             memory::{Access, GuestAddress},
             windows::{CallFrame32, CallingConvention32},
         };
-        let Some(gate) = MethodGate::from_id(id) else {
+        let getter = id == crate::windows::WindowsApi32::GetLastError.id();
+        let gate = MethodGate::from_id(id);
+        if !getter
+            && !gate.is_some_and(|gate| {
+                gate.interface == InterfaceKind::Device
+                    && matches!(gate.slot, 37 | 42 | 46 | 50 | 63)
+            })
+        {
             return false;
-        };
-        if gate.interface != InterfaceKind::Device
-            || !matches!(gate.slot, 37 | 42 | 46 | 50 | 63)
-            || !self.external_cpu_memory_pinned
+        }
+        if !self.external_cpu_memory_pinned
             || self.guard_core_entry().is_err()
             || self.callback.is_some()
             || self.has_active_module_operation()
@@ -55,13 +60,22 @@ impl EngineInstance {
             memory,
             state,
             CallingConvention32::Stdcall,
-            u32::from(gate.method().stack_words),
+            gate.map_or(0, |gate| u32::from(gate.method().stack_words)),
         ) else {
             return false;
         };
         if Self::prepare_completed_call(frame.complete(0)).is_err() {
             return false;
         }
+        if getter {
+            // getlasterror republishes the same TEB value, so no guest RAM write occurs.
+            return self.module_teb_address().is_none_or(|teb| {
+                teb.checked_add(0x34).is_some_and(|address| {
+                    memory.check_span(GuestAddress(address), 4, Access::Read).is_ok()
+                })
+            });
+        }
+        let gate = gate.unwrap();
         let args = frame.arguments();
         let input = match gate.slot {
             37 => Some((args[2], 64)),
