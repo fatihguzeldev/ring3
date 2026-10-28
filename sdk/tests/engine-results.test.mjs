@@ -51,9 +51,50 @@ test('media values survive later arena reuse without retaining the borrowed resu
 
 test('an absent Windows callback returns its boolean synchronously', () => {
   const session=Object.create(Session.prototype),operations=[];
-  session.engine={get:()=>3,ok:operation=>operations.push(operation),take:()=>new Uint8Array(96)};
+  session.engine={get:()=>3,ok:operation=>operations.push(operation),
+    resultView:()=>new DataView(new ArrayBuffer(96)),
+    take(){throw new Error('an absent callback must not copy the request');}};
   assert.equal(session.beginCallback(),false);
   assert.deepEqual(operations,['pending_windows_callback']);
+});
+
+test('a present callback retains its owned request across native result reuse and memory growth', () => {
+  const memory = new WebAssembly.Memory({initial: 1}), calls = [], stack = [];
+  const engine = new Engine({
+    pending_windows_callback() {
+      const request = new DataView(memory.buffer, 140, 96);
+      for (const [offset, value] of [[12, 1], [16, 0x12345678], [40, 0xabcdef]])
+        request.setUint32(offset, value, true);
+      return 0;
+    },
+    core_begin_windows_callback(returnPc, returnId) {
+      calls.push(['begin', returnPc, returnId]);
+      memory.grow(1);
+      new Uint8Array(memory.buffer, 140, 96).fill(0xcc);
+      new Uint8Array(memory.buffer, 140, 64).fill(0);
+      const callback = new DataView(memory.buffer, 140, 64);
+      for (const [offset, value] of [[0, 0x42433352], [4, 0x10002], [8, 64],
+        [16, 2], [20, 1], [24, 1], [32, 0x5000], [36, 0x8000], [40, returnPc], [44, returnId]])
+        callback.setUint32(offset, value, true);
+      return 0;
+    },
+  }, memory, 'fixture');
+  new DataView(memory.buffer).setUint32(72, 3, true);
+  const session = Object.assign(Object.create(Session.prototype), {
+    engine, thread: 9, stack: () => stack,
+    returnGate() {
+      calls.push('returnGate');
+      new Uint8Array(memory.buffer, 140, 96).fill(0xdd);
+      return 0x7000;
+    },
+    callDiagnostics: {activation: {begin(request, thread) {
+      calls.push(['activation', request.getUint32(16, true), request.getUint32(40, true), thread]);
+    }}},
+  });
+  assert.equal(session.beginCallback(), true);
+  assert.deepEqual(calls, ['returnGate', ['begin', 0x7000, 0xffffe],
+    ['activation', 0x12345678, 0xabcdef, 9]]);
+  assert.equal(stack.length, 1);
 });
 
 test('call capture consumes borrowed fields before native completion overwrites the arena', async () => {

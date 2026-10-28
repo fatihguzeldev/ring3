@@ -190,8 +190,8 @@ export class Session {
     const h = this.engine;
     if (h.get(72) === 9) return false;
     h.ok("pending_windows_callback");
+    if (!h.resultView(96).getUint32(12, true)) return false;
     const request = view(h.take(96));
-    if (!request.getUint32(12, true)) return false;
     const returnPc = this.returnGate();
     h.ok("core_begin_windows_callback", returnPc, 0xffffe);
     const callback = callbackRecord(h.take(64), returnPc, 0xffffe);
