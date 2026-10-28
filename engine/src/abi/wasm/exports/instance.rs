@@ -12,6 +12,7 @@ export_process_calls! {
     component_cpu_ack_mappings(key_low: u32, key_high: u32, epoch_low: u32, epoch_high: u32, count: u32);
     component_cpu_dirty(key_low: u32, key_high: u32, count: u32);
     component_cpu_gate(key_low: u32, key_high: u32, pc: u32);
+    component_cpu_set_gate_mode(key_low: u32, key_high: u32, mode: u32);
     component_cpu_try_complete_gate(key_low: u32, key_high: u32);
     component_cpu_publish(key_low: u32, key_high: u32, stop: u32, detail: u32, auxiliary: u32, vector: u32, retired: u32, work: u32);
     component_cpu_write_fault(key_low: u32, key_high: u32, address: u32);

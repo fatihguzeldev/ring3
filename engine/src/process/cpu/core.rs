@@ -26,7 +26,7 @@ impl EngineInstance {
         complete: impl FnOnce(&mut Self, u32) -> Result<(), HostError>,
     ) -> Result<bool, HostError> {
         use crate::abi::{arena::*, call_frame::CALL_FRAME_SIZE, x86::*};
-        use crate::{cpu::ExitReason, memory::GuestAddress};
+        use crate::cpu::ExitReason;
         if self.pending_call.is_some() {
             return Err(HostError::InvalidRequest);
         }
@@ -41,19 +41,10 @@ impl EngineInstance {
         let ExitReason::Gate { id } = exit.reason else {
             return Ok(false);
         };
-        let gate = crate::process::execution::cache::cache_gate_at(
-            &self.modules,
-            self.callback.as_ref(),
-            state.eip,
-        );
-        let mut bytes = [0; 2];
-        if !gate.is_some_and(|gate| gate.id == id)
+        if !self
+            .external_cpu_gate_match(state.eip)
+            .is_some_and(|(gate, _)| gate == id)
             || crate::process::windows_gate_info(id).is_none()
-            || self
-                .memory()?
-                .fetch(GuestAddress(state.eip), &mut bytes)
-                .is_err()
-            || bytes != [0x0f, 0x0b]
         {
             return Ok(false);
         }

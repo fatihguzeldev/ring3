@@ -11,6 +11,8 @@ pub use code::CodeSnapshot;
 pub(crate) use code::PageVersion;
 pub use space::AddressSpace;
 pub(crate) use space::CoreWriteOutcome;
+#[cfg(feature = "external-cpu")]
+pub(crate) use space::ExternalCodePatch;
 pub(crate) use space::{GuardPage32, PageInitialization, PrivatePageChange32, SharedPages};
 
 pub(crate) use paging::{PagingBacking32, PagingCheckError32};

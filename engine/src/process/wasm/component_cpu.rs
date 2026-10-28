@@ -2,7 +2,6 @@ use super::{REGISTRY, status};
 use crate::{
     abi::{arena::*, external_memory::ExternalMemory, x86::*},
     cpu::{ExecutionExit, ExitReason},
-    memory::GuestAddress,
     process::{EngineInstance, HostError},
 };
 
@@ -136,27 +135,27 @@ pub(crate) fn component_cpu_collect_dirty(
 }
 
 fn gate(instance: &EngineInstance, pc: u32) -> Option<u32> {
-    let gate = crate::process::execution::cache::cache_gate_at(
-        &instance.modules,
-        instance.callback.as_ref(),
-        pc,
-    )?;
-    let mut bytes = [0; 2];
-    instance
-        .memory
-        .as_ref()?
-        .fetch(GuestAddress(pc), &mut bytes)
-        .ok()?;
-    (bytes == [0x0f, 0x0b]).then_some(gate.id)
+    instance.external_cpu_gate_match(pc).map(|(id, _)| id)
 }
 
 pub(crate) fn component_cpu_gate(low: u32, high: u32, pc: u32) -> u32 {
     access(low, high, true, |instance| {
-        let id = gate(instance, pc).unwrap_or(0);
-        let flags = u32::from(instance.external_cpu_can_defer_gate(pc, id));
+        let (id, port) = instance.external_cpu_lookup_gate(pc)?.unwrap_or((0, false));
+        let flags =
+            u32::from(instance.external_cpu_can_defer_gate(pc, id)) | (u32::from(port) << 1);
         let output = &mut instance.arena.as_mut().get_mut()[TRANSFER_OFFSET..TRANSFER_OFFSET + 8];
         output[..4].copy_from_slice(&id.to_le_bytes());
         output[4..].copy_from_slice(&flags.to_le_bytes());
+        Ok(())
+    })
+}
+
+pub(crate) fn component_cpu_set_gate_mode(low: u32, high: u32, mode: u32) -> u32 {
+    access(low, high, true, |instance| {
+        let (mode, count) = instance.set_external_cpu_gate_mode(mode)?;
+        let output = &mut instance.arena.as_mut().get_mut()[TRANSFER_OFFSET..TRANSFER_OFFSET + 8];
+        output[..4].copy_from_slice(&mode.to_le_bytes());
+        output[4..].copy_from_slice(&count.to_le_bytes());
         Ok(())
     })
 }
@@ -246,6 +245,7 @@ pub(crate) fn component_cpu_write_fault(low: u32, high: u32, address: u32) -> u3
 
 pub(crate) fn component_cpu_release(low: u32, high: u32) -> u32 {
     access(low, high, true, |instance| {
+        instance.set_external_cpu_gate_mode(0)?;
         instance
             .memory
             .as_mut()

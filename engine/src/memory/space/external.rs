@@ -1,6 +1,14 @@
 use super::*;
 use crate::abi::external_memory::ExternalMemory;
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct ExternalCodePatch {
+    pub(crate) address: GuestAddress,
+    pub(crate) mapping: u64,
+    pub(crate) slot: u32,
+    pub(crate) content: u64,
+}
+
 pub(super) struct MappingChanges {
     pub(super) pages: Vec<u32>,
     bits: Box<[u64]>,
@@ -35,6 +43,76 @@ impl MappingChanges {
 }
 
 impl AddressSpace {
+    pub(crate) fn external_code_patch(
+        &self,
+        address: GuestAddress,
+        expected: [u8; 2],
+    ) -> Result<ExternalCodePatch, MemoryError> {
+        let page = address.0 as usize / PAGE_SIZE as usize;
+        let within = address.0 as usize % PAGE_SIZE as usize;
+        let mapping = self.mappings[page];
+        if within > PAGE_SIZE as usize - 2
+            || mapping == 0
+            || !self.permissions[page].allows(Access::Execute)
+            || self
+                .private_slots
+                .as_ref()
+                .is_some_and(|slots| slots[page] != 0)
+        {
+            return Err(MemoryError::InvalidRange);
+        }
+        let slot = mapping as usize - 1;
+        let offset = slot * PAGE_SIZE as usize + within;
+        if self.references[slot] != 1 || self.backing[offset..offset + 2] != expected {
+            return Err(MemoryError::InvalidRange);
+        }
+        Ok(ExternalCodePatch {
+            address,
+            mapping: self.mapping_versions[page],
+            slot: slot as u32,
+            content: self.versions[slot].content,
+        })
+    }
+
+    pub(crate) fn external_code_patch_matches(
+        &self,
+        patch: &ExternalCodePatch,
+        expected: [u8; 2],
+    ) -> bool {
+        self.external_code_patch(patch.address, expected).as_ref() == Ok(patch)
+    }
+
+    pub(crate) fn external_patch_code(
+        &mut self,
+        patches: &[ExternalCodePatch],
+        expected: [u8; 2],
+        replacement: [u8; 2],
+    ) -> Result<u64, MemoryError> {
+        let mut end = 0u64;
+        for patch in patches {
+            if u64::from(patch.address.0) < end
+                || !self.external_code_patch_matches(patch, expected)
+            {
+                return Err(MemoryError::InvalidRange);
+            }
+            end = u64::from(patch.address.0) + 2;
+        }
+        if patches.is_empty() {
+            return Ok(self.version);
+        }
+        let version = self.advance_version()?;
+        for patch in patches {
+            let offset = patch.slot as usize * PAGE_SIZE as usize
+                + patch.address.0 as usize % PAGE_SIZE as usize;
+            self.backing[offset..offset + 2].copy_from_slice(&replacement);
+            self.versions[patch.slot as usize].content = version;
+        }
+        self.code_validation_version = version;
+        self.code_source_version = version;
+        self.external_executable_epoch = version;
+        Ok(version)
+    }
+
     pub(crate) fn external_write_is_stable(&self, address: GuestAddress, length: usize) -> bool {
         if length == 0 {
             return true;

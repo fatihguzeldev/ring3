@@ -6,6 +6,8 @@ pub(super) mod core;
 pub(super) mod events;
 pub(super) mod far;
 pub(super) mod integer;
+#[cfg(feature = "external-cpu")]
+pub(super) mod port_gates;
 pub(super) mod segment_queries;
 pub(super) mod segments;
 pub(super) mod simd;

@@ -425,3 +425,92 @@ fn external_fast_gate_completes_another_registered_process_api() {
         crate::windows::process::ProcessApi32::GetCurrentThreadId.id()
     );
 }
+
+#[cfg(feature = "external-cpu")]
+fn external_gate_bytes(engine: &EngineInstance, pc: u32) -> [u8; 2] {
+    let mut bytes = [0; 2];
+    engine.memory().unwrap().fetch(GuestAddress(pc), &mut bytes).unwrap();
+    bytes
+}
+
+#[cfg(feature = "external-cpu")]
+#[test]
+fn external_port_gate_mode_patches_rx_and_lazily_owns_new_module_gates() {
+    use crate::memory::{PageRange, Permissions};
+    let mut engine = fixture();
+    engine.external_cpu_memory_pinned = true;
+    let id = WindowsApi32::GetLastError.id();
+    let pc = gate(&engine, id);
+    let rights = engine.memory().unwrap().permissions_at(GuestAddress(pc)).unwrap();
+    assert_eq!(external_gate_bytes(&engine, pc), [0x0f, 0x0b]);
+    let before = engine.memory().unwrap().code_validation_version();
+    assert!(engine.set_external_cpu_gate_mode(2).is_err());
+    assert_eq!(engine.memory().unwrap().code_validation_version(), before);
+    let (mode, count) = engine.set_external_cpu_gate_mode(1).unwrap();
+    assert_eq!(mode, 1); assert!(count > 0);
+    assert_eq!(external_gate_bytes(&engine, pc), [0xe6, 0xe1]);
+    assert_eq!(engine.external_cpu_gate_match(pc), Some((id, true)));
+    assert_eq!(engine.memory().unwrap().permissions_at(GuestAddress(pc)).unwrap(), rights);
+    assert!(engine.memory().unwrap().code_validation_version() > before);
+    let unregistered = 0x690000;
+    engine.memory.as_mut().unwrap().map_zeroed(
+        PageRange::new(GuestAddress(unregistered), 1).unwrap(), Permissions::ALL).unwrap();
+    engine.memory.as_mut().unwrap().write(GuestAddress(unregistered), &[0xe6, 0xe1]).unwrap();
+    assert_eq!(engine.external_cpu_lookup_gate(unregistered).unwrap(), None);
+    engine.register_user32_module(0x71000000).unwrap();
+    engine.load_library_module("user32.dll", None).unwrap();
+    let new_gate = engine.module_gates().unwrap().into_iter()
+        .find(|gate| gate.id >> 16 == 2).unwrap();
+    assert_eq!(external_gate_bytes(&engine, new_gate.entry.0), [0x0f, 0x0b]);
+    assert_eq!(engine.external_cpu_lookup_gate(new_gate.entry.0).unwrap(), Some((new_gate.id, false)),
+        "the first real UD2 retains its provenance while the next entry is patched");
+    assert_eq!(engine.external_cpu_gate_match(new_gate.entry.0), Some((new_gate.id, true)));
+    let before_restore = engine.memory().unwrap().code_validation_version();
+    assert_eq!(engine.set_external_cpu_gate_mode(0).unwrap(), (0, 0));
+    assert_eq!(external_gate_bytes(&engine, pc), [0x0f, 0x0b]);
+    assert_eq!(external_gate_bytes(&engine, new_gate.entry.0), [0x0f, 0x0b]);
+    assert_eq!(engine.memory().unwrap().permissions_at(GuestAddress(pc)).unwrap(), rights);
+    assert!(engine.memory().unwrap().code_validation_version() > before_restore);
+}
+
+#[cfg(feature = "external-cpu")]
+#[test]
+fn external_port_gate_restore_rejects_modified_bytes_without_partial_restore() {
+    use crate::memory::{PageRange, Permissions};
+    let mut engine = fixture();
+    engine.external_cpu_memory_pinned = true;
+    let pc = gate(&engine, WindowsApi32::GetLastError.id());
+    let other = gate(&engine, WindowsApi32::SetLastError.id());
+    engine.set_external_cpu_gate_mode(1).unwrap();
+    let page = PageRange::new(GuestAddress(pc & !4095), 1).unwrap();
+    engine.memory.as_mut().unwrap().protect(page, Permissions::ALL).unwrap();
+    engine.memory.as_mut().unwrap().write(GuestAddress(pc), &[0x90, 0x90]).unwrap();
+    engine.memory.as_mut().unwrap().protect(page, Permissions::READ_EXECUTE).unwrap();
+    let before = engine.memory().unwrap().transaction_version();
+    assert!(engine.set_external_cpu_gate_mode(0).is_err());
+    assert_eq!(external_gate_bytes(&engine, pc), [0x90, 0x90]);
+    assert_eq!(external_gate_bytes(&engine, other), [0xe6, 0xe1]);
+    assert_eq!(engine.memory().unwrap().transaction_version(), before);
+    assert!(engine.external_cpu_memory_pinned);
+}
+
+#[cfg(feature = "external-cpu")]
+#[test]
+fn external_port_gate_restore_rejects_same_va_remap_even_with_matching_port_bytes() {
+    use crate::memory::{PageRange, Permissions};
+    let mut engine = fixture();
+    engine.external_cpu_memory_pinned = true;
+    let pc = gate(&engine, WindowsApi32::GetLastError.id());
+    engine.set_external_cpu_gate_mode(1).unwrap();
+    let page = PageRange::new(GuestAddress(pc & !4095), 1).unwrap();
+    engine.memory.as_mut().unwrap().unmap(page).unwrap();
+    engine.memory.as_mut().unwrap().map_zeroed(page, Permissions::ALL).unwrap();
+    engine.memory.as_mut().unwrap().write(GuestAddress(pc), &[0xe6, 0xe1]).unwrap();
+    engine.memory.as_mut().unwrap().protect(page, Permissions::READ_EXECUTE).unwrap();
+    let before = engine.memory().unwrap().transaction_version();
+    assert_eq!(engine.external_cpu_gate_match(pc), None);
+    assert!(engine.set_external_cpu_gate_mode(0).is_err());
+    assert_eq!(external_gate_bytes(&engine, pc), [0xe6, 0xe1]);
+    assert_eq!(engine.memory().unwrap().transaction_version(), before);
+    assert!(engine.external_cpu_memory_pinned);
+}

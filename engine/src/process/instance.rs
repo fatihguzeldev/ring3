@@ -162,6 +162,8 @@ pub struct EngineInstance {
     pub(in crate::process) execution_census_generation: u64,
     #[cfg(feature = "external-cpu")]
     pub(in crate::process) external_cpu_memory_pinned: bool,
+    #[cfg(feature = "external-cpu")]
+    pub(in crate::process) external_port_gates: crate::process::cpu::port_gates::PortGates32,
 }
 
 impl EngineInstance {
@@ -185,6 +187,8 @@ impl EngineInstance {
         Ok(Self {
             #[cfg(feature = "external-cpu")]
             external_cpu_memory_pinned: false,
+            #[cfg(feature = "external-cpu")]
+            external_port_gates: Default::default(),
             #[cfg(feature = "observability")]
             observer: ring3_observability::Observer::disabled(),
             console: crate::windows::console::ConsoleControl32::new(),
