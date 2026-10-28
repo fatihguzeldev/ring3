@@ -7,10 +7,12 @@ const PRIVATE_PAGE: usize = 0xff000000usize >> 12;
 
 pub(super) struct Collector {
     occupied: Box<[u32]>,
+    expected: Box<[u32]>,
     directory_counts: [u16; 1024],
     directories: [u32; 32],
     slots: Vec<u32>,
     seen_slots: Box<[u32]>,
+    dirty_ptes: Vec<u32>,
 }
 
 struct Observation {
@@ -33,25 +35,59 @@ impl Collector {
         slots
             .try_reserve_exact(memory.references.len())
             .map_err(|_| MemoryError::Allocation)?;
+        let mut dirty_ptes = Vec::new();
+        // aliases need one staged offset per dirty VA, independently of slot deduplication.
+        dirty_ptes
+            .try_reserve_exact(GUEST_PAGES)
+            .map_err(|_| MemoryError::Allocation)?;
         let mut collector = Self {
             occupied: filled(GUEST_PAGES / 32, 0)?.into_boxed_slice(),
+            expected: filled(GUEST_PAGES, 0)?.into_boxed_slice(),
             directory_counts: [0; 1024],
             directories: [0; 32],
             slots,
             seen_slots: filled(memory.references.len().div_ceil(32), 0)?.into_boxed_slice(),
+            dirty_ptes,
         };
         for (page, &mapping) in memory.mappings.iter().enumerate() {
             if mapping != 0 {
                 if (PRIVATE_PAGE..PRIVATE_PAGE + 8).contains(&page) {
                     return Err(MemoryError::InvalidRange);
                 }
-                collector.update_mapping(page, true);
+                collector.update_mapping(
+                    page,
+                    mapping,
+                    memory.permissions[page],
+                    memory
+                        .private_slots
+                        .as_ref()
+                        .is_some_and(|slots| slots[page] != 0),
+                );
             }
         }
         Ok(collector)
     }
 
-    pub(super) fn update_mapping(&mut self, page: usize, mapped: bool) {
+    pub(super) fn update_mapping(
+        &mut self,
+        page: usize,
+        mapping: u32,
+        permissions: Permissions,
+        private: bool,
+    ) {
+        let mapped = mapping != 0;
+        let present = permissions.allows(Access::Read)
+            || permissions.allows(Access::Write)
+            || permissions.allows(Access::Execute);
+        let writable = permissions.allows(Access::Write) && !private;
+        // slot and permission changes can keep the same mapped presence.
+        self.expected[page] = if mapped {
+            (BACKING_PHYSICAL + (mapping - 1) * 4096)
+                | if present { 5 } else { 0 }
+                | if writable { 2 } else { 0 }
+        } else {
+            0
+        };
         let bit = 1u32 << (page % 32);
         let present = self.occupied[page / 32] & bit != 0;
         if present == mapped {
@@ -71,15 +107,12 @@ impl Collector {
         }
     }
 
-    fn observe(
-        &mut self,
-        memory: &AddressSpace,
-        tables: &[u8],
-    ) -> Result<Observation, MemoryError> {
+    fn observe(&mut self, tables: &[u8]) -> Result<Observation, MemoryError> {
         for &slot in &self.slots {
             self.seen_slots[slot as usize / 32] &= !(1u32 << (slot % 32));
         }
         self.slots.clear();
+        self.dirty_ptes.clear();
         let mut observation = Observation {
             accessed: [0; 32],
             leaves: 0,
@@ -105,31 +138,18 @@ impl Collector {
                         let page = index * 32 + pages.trailing_zeros() as usize;
                         pages &= pages - 1;
                         observation.leaves += 1;
-                        let mapping = memory.mappings[page];
-                        if mapping == 0
-                            || mapping as usize > memory.references.len()
-                            || (PRIVATE_PAGE..PRIVATE_PAGE + 8).contains(&page)
-                        {
+                        if (PRIVATE_PAGE..PRIVATE_PAGE + 8).contains(&page) {
                             return Err(MemoryError::InvalidRange);
                         }
-                        let permissions = memory.permissions[page];
-                        let present = permissions.allows(Access::Read)
-                            || permissions.allows(Access::Write)
-                            || permissions.allows(Access::Execute);
-                        let writable = permissions.allows(Access::Write)
-                            && memory
-                                .private_slots
-                                .as_ref()
-                                .is_none_or(|slots| slots[page] == 0);
-                        let expected = BACKING_PHYSICAL + (mapping - 1) * 4096
-                            | if present { 5 } else { 0 }
-                            | if writable { 2 } else { 0 };
-                        let pte = word(tables, 4096 + page * 4);
+                        let expected = self.expected[page];
+                        let offset = 4096 + page * 4;
+                        let pte = word(tables, offset);
                         if pte & !96 != expected {
                             return Err(MemoryError::InvalidRange);
                         }
                         if pte & 64 != 0 {
-                            let slot = mapping - 1;
+                            self.dirty_ptes.push(offset as u32);
+                            let slot = ((expected & !4095) - BACKING_PHYSICAL) >> 12;
                             let bit = 1u32 << (slot % 32);
                             if self.seen_slots[slot as usize / 32] & bit == 0 {
                                 self.seen_slots[slot as usize / 32] |= bit;
@@ -152,19 +172,12 @@ impl Collector {
                 let offset = directory * 4;
                 let entry = word(tables, offset) & !32;
                 put(tables, offset, entry);
-                for index in directory * 32..directory * 32 + 32 {
-                    let mut pages = self.occupied[index];
-                    while pages != 0 {
-                        let page = index * 32 + pages.trailing_zeros() as usize;
-                        pages &= pages - 1;
-                        let offset = 4096 + page * 4;
-                        let pte = word(tables, offset);
-                        if pte & 64 != 0 {
-                            put(tables, offset, pte & !64);
-                        }
-                    }
-                }
             }
+        }
+        for &offset in &self.dirty_ptes {
+            let offset = offset as usize;
+            let pte = word(tables, offset) & !64;
+            put(tables, offset, pte);
         }
     }
 }
@@ -200,7 +213,7 @@ impl AddressSpace {
             None => Collector::new(self)?,
         };
         let result = (|| {
-            let observation = collector.observe(self, tables)?;
+            let observation = collector.observe(tables)?;
             // publication validates every physical slot and the next version before
             // consuming any hardware dirty/accessed evidence.
             self.publish_external_dirty(&collector.slots)?;
@@ -416,6 +429,17 @@ mod tests {
         );
         assert_eq!(bytes, malformed);
         assert_eq!(memory.transaction_version(), version);
+        let mut retry = before;
+        let collected = memory
+            .collect_external_dirty(memory.external_mapping_epoch, &mut retry)
+            .unwrap();
+        assert_eq!(
+            word(&collected, 20),
+            2,
+            "a failed scan does not strand staged evidence"
+        );
+        assert_eq!(word(&retry, pte(1)) & 64, 0);
+        assert_eq!(word(&retry, pte(2)) & 64, 0);
         memory.protect(range(0x1000), Permissions::READ).unwrap();
         let mut pending = tables(&memory);
         access(&mut pending, 2, true);
@@ -444,6 +468,94 @@ mod tests {
         );
         assert_eq!(bytes, before);
         assert_eq!(memory.transaction_version(), u64::MAX);
+        memory.version = memory.external_mapping_epoch;
+        let retried = memory
+            .collect_external_dirty(memory.external_mapping_epoch, &mut bytes)
+            .unwrap();
+        assert_eq!(
+            word(&retried, 20),
+            1,
+            "publication failure leaves the next collection complete"
+        );
+        assert_eq!(word(&bytes, pte(1)) & 64, 0);
+    }
+
+    #[test]
+    fn external_dirty_collect_permission_only_ack_rejects_stale_ptes_and_preserves_presence() {
+        let mut memory = AddressSpace::new(2).unwrap();
+        memory
+            .map_zeroed(range(0x1000), Permissions::READ_WRITE)
+            .unwrap();
+        track(&mut memory);
+        let mut bytes = tables(&memory);
+        memory
+            .collect_external_dirty(memory.external_mapping_epoch, &mut bytes)
+            .unwrap();
+        let writable = bytes.clone();
+        let mapping = memory.mappings[1];
+        memory.protect(range(0x1000), Permissions::READ).unwrap();
+        memory
+            .acknowledge_external_mappings(memory.external_mapping_epoch, 1)
+            .unwrap();
+        assert_eq!(memory.mappings[1], mapping);
+        let mut stale = writable;
+        access(&mut stale, 1, true);
+        let before = stale.clone();
+        let version = memory.transaction_version();
+        assert_eq!(
+            memory.collect_external_dirty(memory.external_mapping_epoch, &mut stale),
+            Err(MemoryError::InvalidRange)
+        );
+        assert_eq!(stale, before);
+        assert_eq!(memory.transaction_version(), version);
+        let mut bytes = tables(&memory);
+        access(&mut bytes, 1, false);
+        let read = memory
+            .collect_external_dirty(memory.external_mapping_epoch, &mut bytes)
+            .unwrap();
+        assert_eq!(word(&read, 20), 0);
+        assert_eq!(word(&read, 32), 1);
+        assert_eq!(word(&read, 28), 1);
+        memory.protect(range(0x1000), Permissions::NONE).unwrap();
+        memory
+            .acknowledge_external_mappings(memory.external_mapping_epoch, 1)
+            .unwrap();
+        let mut bytes = tables(&memory);
+        access(&mut bytes, 1, false);
+        let none = memory
+            .collect_external_dirty(memory.external_mapping_epoch, &mut bytes)
+            .unwrap();
+        assert_eq!(
+            word(&none, 32),
+            1,
+            "permission-only NOACCESS retains occupied VA"
+        );
+        memory
+            .protect(range(0x1000), Permissions::READ.with_guard())
+            .unwrap();
+        memory
+            .acknowledge_external_mappings(memory.external_mapping_epoch, 1)
+            .unwrap();
+        let mut bytes = tables(&memory);
+        access(&mut bytes, 1, false);
+        let guarded = memory
+            .collect_external_dirty(memory.external_mapping_epoch, &mut bytes)
+            .unwrap();
+        assert_eq!(word(&guarded, 20), 0);
+        assert_eq!(word(&guarded, 32), 1);
+        memory
+            .protect(range(0x1000), Permissions::READ_WRITE)
+            .unwrap();
+        memory
+            .acknowledge_external_mappings(memory.external_mapping_epoch, 1)
+            .unwrap();
+        let mut bytes = tables(&memory);
+        access(&mut bytes, 1, true);
+        let written = memory
+            .collect_external_dirty(memory.external_mapping_epoch, &mut bytes)
+            .unwrap();
+        assert_eq!(word(&written, 20), 1);
+        assert_eq!(memory.mappings[1], mapping);
     }
 
     #[test]
@@ -487,5 +599,29 @@ mod tests {
         assert_eq!(word(&result, 32), 2);
         assert_eq!(word(&result, 36), 2);
         assert_eq!(memory.versions[shared_slot as usize].content, old_shared);
+        let old_slot = memory.mappings[1024] - 1;
+        memory.unmap(range(0x400000)).unwrap();
+        memory
+            .map_zeroed(range(0x500000), Permissions::READ_WRITE)
+            .unwrap();
+        memory
+            .map_zeroed(range(0x400000), Permissions::READ_WRITE)
+            .unwrap();
+        assert_ne!(
+            memory.mappings[1024] - 1,
+            old_slot,
+            "same VA now names another physical slot"
+        );
+        memory
+            .acknowledge_external_mappings(memory.external_mapping_epoch, 2)
+            .unwrap();
+        let old_version = memory.versions[old_slot as usize].content;
+        let mut bytes = tables(&memory);
+        access(&mut bytes, 1024, true);
+        let remapped = memory
+            .collect_external_dirty(memory.external_mapping_epoch, &mut bytes)
+            .unwrap();
+        assert_eq!(word(&remapped, 20), 1);
+        assert_eq!(memory.versions[old_slot as usize].content, old_version);
     }
 }

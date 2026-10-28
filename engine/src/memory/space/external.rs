@@ -56,7 +56,15 @@ impl AddressSpace {
         }
         if let Some(collector) = self.external_dirty.as_mut() {
             for &page in &changes.pages {
-                collector.update_mapping(page as usize, self.mappings[page as usize] != 0);
+                let page = page as usize;
+                collector.update_mapping(
+                    page,
+                    self.mappings[page],
+                    self.permissions[page],
+                    self.private_slots
+                        .as_ref()
+                        .is_some_and(|slots| slots[page] != 0),
+                );
             }
         }
         changes.clear();
