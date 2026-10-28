@@ -71,7 +71,7 @@ class V86CodeCache {
     if(!Number.isInteger(budget) || budget<1 || budget>0xffffffff)throw new Error('invalid v86 execution budget');
     this.budget=Math.min(budget,100002);
     this.tables=new PageTables(engine,cpu);
-    this.traps=new Traps(cpu);
+    try {this.traps=new Traps(cpu);}catch(error){this.tables.rollback(error);throw error;}
     this.imported=false;this.closed=false;this.open=false;
     this.runs=0;this.regions=0;this.retired=0;this.work=0;this.gates=0;this.faults=0;
     this.dirtyPages=0;this.cowFaults=0;
@@ -154,6 +154,6 @@ class V86CodeCache {
   close() {
     if(this.closed)return;
     if(this.open)throw new Error('cannot close an active v86 adapter');
-    this.engine.ok('component_cpu_release',...KEY);this.closed=true;this.imported=false;
+    this.tables.release();this.closed=true;this.imported=false;
   }
 }

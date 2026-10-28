@@ -4,20 +4,33 @@ import {PAGE,BACKING_BASE,DIRECTORY,TABLES,GDT,PRIVATE_VA} from './layout.js';
 export class PageTables {
   constructor(engine,cpu) {
     this.engine=engine;this.cpu=cpu;this.ram=cpu.mem8.byteOffset;this.pages=[];
+    this.ownsPin=false;
     this.mappingEpoch=null;this.codeVersion=null;this.identity=null;
     this.descriptor();
     const length=this.capacity*PAGE;
     if(BACKING_BASE+length>cpu.mem8.length)throw new Error('v86 physical RAM is too small for Ring3 backing');
     engine.ok('component_cpu_attach',...KEY,this.ram+BACKING_BASE,length);
-    const d=new DataView(engine.memory.buffer);
-    new Uint8Array(engine.memory.buffer,this.ram+DIRECTORY,PAGE*1025).fill(0);
-    for(let index=0;index<1024;index++)d.setUint32(this.ram+DIRECTORY+index*4,(TABLES+index*PAGE)|7,true);
-    for(let index=0;index<8;index++) {
-      const page=(PRIVATE_VA>>>12)+index;
-      d.setUint32(this.pte(page),(GDT+index*PAGE)|3,true);
+    this.ownsPin=true;
+    try {
+      const d=new DataView(engine.memory.buffer);
+      new Uint8Array(engine.memory.buffer,this.ram+DIRECTORY,PAGE*1025).fill(0);
+      for(let index=0;index<1024;index++)d.setUint32(this.ram+DIRECTORY+index*4,(TABLES+index*PAGE)|7,true);
+      for(let index=0;index<8;index++) {
+        const page=(PRIVATE_VA>>>12)+index;
+        d.setUint32(this.pte(page),(GDT+index*PAGE)|3,true);
+      }
+      d.setUint32(580,0x80010033,true);d.setUint32(592,DIRECTORY,true);d.setUint32(596,0x600,true);
+      this.refresh();
+    } catch(error) {
+      this.rollback(error);throw error;
     }
-    d.setUint32(580,0x80010033,true);d.setUint32(592,DIRECTORY,true);d.setUint32(596,0x600,true);
-    this.refresh();
+  }
+  release() {
+    if(!this.ownsPin)return;
+    this.engine.ok('component_cpu_release',...KEY);this.ownsPin=false;
+  }
+  rollback(error) {
+    try {this.release();}catch(cleanup){error.cleanupFailure=cleanup.message;}
   }
   pte(page) {return this.ram+TABLES+page*4;}
   descriptor() {
