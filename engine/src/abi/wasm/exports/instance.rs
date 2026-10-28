@@ -9,6 +9,7 @@ export_process_calls! {
 export_process_calls! {
     component_memory_lease(key_low: u32, key_high: u32);
     component_cpu_view(key_low: u32, key_high: u32);
+    component_cpu_ack_mappings(key_low: u32, key_high: u32, epoch_low: u32, epoch_high: u32, count: u32);
     component_cpu_dirty(key_low: u32, key_high: u32, count: u32);
     component_cpu_gate(key_low: u32, key_high: u32, pc: u32);
     component_cpu_publish(key_low: u32, key_high: u32, stop: u32, detail: u32, auxiliary: u32, vector: u32, retired: u32, work: u32);

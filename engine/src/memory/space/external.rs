@@ -1,16 +1,77 @@
 use super::*;
 use crate::abi::external_memory::ExternalMemory;
 
+pub(super) struct MappingChanges {
+    pub(super) pages: Vec<u32>,
+    bits: Box<[u64]>,
+}
+
+impl MappingChanges {
+    pub(super) fn new() -> Result<Self, MemoryError> {
+        let mut pages = Vec::new();
+        pages
+            .try_reserve_exact(GUEST_PAGES)
+            .map_err(|_| MemoryError::Allocation)?;
+        Ok(Self {
+            pages,
+            bits: filled(GUEST_PAGES / 64, 0)?.into_boxed_slice(),
+        })
+    }
+
+    fn clear(&mut self) {
+        for &page in &self.pages {
+            self.bits[page as usize / 64] &= !(1u64 << (page % 64));
+        }
+        self.pages.clear();
+    }
+
+    fn mark(&mut self, page: usize) {
+        let bit = 1u64 << (page % 64);
+        if self.bits[page / 64] & bit == 0 {
+            self.bits[page / 64] |= bit;
+            self.pages.push(page as u32);
+        }
+    }
+}
+
 impl AddressSpace {
+    pub(super) fn record_external_mapping_change(&mut self, page: usize, version: u64) {
+        self.external_mapping_epoch = version;
+        if let Some(changes) = self.external_mapping_changes.as_mut() {
+            changes.mark(page);
+        }
+    }
+
+    pub(crate) fn acknowledge_external_mappings(
+        &mut self,
+        epoch: u64,
+        count: u32,
+    ) -> Result<(), MemoryError> {
+        let changes = self
+            .external_mapping_changes
+            .as_mut()
+            .ok_or(MemoryError::InvalidRange)?;
+        if epoch != self.external_mapping_epoch || count as usize != changes.pages.len() {
+            return Err(MemoryError::InvalidRange);
+        }
+        changes.clear();
+        Ok(())
+    }
+
     pub(crate) fn attach_external_backing(
         &mut self,
         backing: ExternalMemory,
     ) -> Result<(), MemoryError> {
-        self.backing.attach_external(backing)
+        let changes = MappingChanges::new()?;
+        self.backing.attach_external(backing)?;
+        self.external_mapping_changes = Some(changes);
+        Ok(())
     }
 
     pub(crate) fn release_external_backing(&mut self) -> Result<(), MemoryError> {
-        self.backing.release_external()
+        self.backing.release_external()?;
+        self.external_mapping_changes = None;
+        Ok(())
     }
 
     pub(crate) fn external_descriptor(&mut self) -> [u8; 128] {
@@ -42,6 +103,16 @@ impl AddressSpace {
             (88, self.external_mapping_epoch),
         ] {
             bytes[offset..offset + 8].copy_from_slice(&value.to_le_bytes());
+        }
+        if let Some(changes) = self.external_mapping_changes.as_ref() {
+            for (offset, value) in [
+                (96, changes.pages.as_ptr() as u32),
+                (100, changes.pages.len() as u32),
+                (104, GUEST_PAGES as u32),
+                (108, 1),
+            ] {
+                bytes[offset..offset + 4].copy_from_slice(&value.to_le_bytes());
+            }
         }
         bytes
     }

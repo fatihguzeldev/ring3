@@ -13,8 +13,8 @@ pub(crate) use component_memory::component_memory_lease;
 mod component_cpu;
 #[cfg(feature = "external-cpu")]
 pub(crate) use component_cpu::{
-    component_cpu_attach, component_cpu_dirty, component_cpu_gate, component_cpu_publish,
-    component_cpu_release, component_cpu_view, component_cpu_write_fault,
+    component_cpu_ack_mappings, component_cpu_attach, component_cpu_dirty, component_cpu_gate,
+    component_cpu_publish, component_cpu_release, component_cpu_view, component_cpu_write_fault,
 };
 
 mod clock;

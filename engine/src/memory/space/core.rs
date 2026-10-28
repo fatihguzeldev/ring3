@@ -340,6 +340,115 @@ mod external_tests {
         PageRange::new(GuestAddress(address), 1).unwrap()
     }
 
+    fn track(memory: &mut AddressSpace) {
+        memory.external_mapping_changes = Some(external::MappingChanges::new().unwrap());
+    }
+
+    fn changes(memory: &AddressSpace) -> &[u32] {
+        &memory.external_mapping_changes.as_ref().unwrap().pages
+    }
+
+    #[test]
+    fn external_mapping_changes_deduplicate_and_acknowledge_final_state() {
+        let mut memory = AddressSpace::new(4).unwrap();
+        memory
+            .map_zeroed(range(0x1000), Permissions::READ_WRITE)
+            .unwrap();
+        track(&mut memory);
+        let pointer = changes(&memory).as_ptr();
+        memory
+            .map_zeroed(range(0x2000), Permissions::READ_WRITE)
+            .unwrap();
+        memory.protect(range(0x2000), Permissions::READ).unwrap();
+        memory.unmap(range(0x1000)).unwrap();
+        memory
+            .map_zeroed(range(0x1000), Permissions::READ_WRITE)
+            .unwrap();
+        assert_eq!(changes(&memory), &[2, 1]);
+        assert_eq!(changes(&memory).as_ptr(), pointer);
+        let descriptor = memory.external_descriptor();
+        let word = |offset| u32::from_le_bytes(descriptor[offset..offset + 4].try_into().unwrap());
+        assert_eq!(word(96), pointer as usize as u32);
+        assert_eq!(word(100), 2);
+        assert_eq!(word(104), GUEST_PAGES as u32);
+        assert_eq!(word(108), 1);
+        assert_eq!(memory.permissions[2], Permissions::READ);
+        assert_ne!(memory.mappings[1], 0);
+        let epoch = memory.external_mapping_epoch;
+        memory.acknowledge_external_mappings(epoch, 2).unwrap();
+        assert!(changes(&memory).is_empty());
+        assert_eq!(&memory.external_descriptor()[100..104], &0u32.to_le_bytes());
+        memory.write(GuestAddress(0x1000), &[9]).unwrap();
+        assert!(changes(&memory).is_empty());
+        memory
+            .map_zeroed(range(0x3000), Permissions::READ_WRITE)
+            .unwrap();
+        assert_eq!(
+            memory.acknowledge_external_mappings(epoch, 1),
+            Err(MemoryError::InvalidRange)
+        );
+        assert_eq!(changes(&memory), &[3]);
+        assert_eq!(
+            memory.acknowledge_external_mappings(memory.external_mapping_epoch, 0),
+            Err(MemoryError::InvalidRange)
+        );
+        assert_eq!(changes(&memory), &[3]);
+        memory
+            .acknowledge_external_mappings(memory.external_mapping_epoch, 1)
+            .unwrap();
+        memory.protect(range(0x3000), Permissions::READ).unwrap();
+        assert_eq!(changes(&memory), &[3]);
+    }
+
+    #[test]
+    fn external_mapping_changes_include_alias_cow_and_unmap_without_dirty_noise() {
+        let mut memory = AddressSpace::new(4).unwrap();
+        let shared = memory.allocate_shared_pages(1, &[7]).unwrap();
+        memory
+            .map_shared_pages(range(0x1000), &shared, 0, Permissions::READ_WRITE, false)
+            .unwrap();
+        memory
+            .map_shared_pages(range(0x2000), &shared, 0, Permissions::READ_WRITE, true)
+            .unwrap();
+        track(&mut memory);
+        let shared_slot = memory.mappings[1] - 1;
+        memory.external_write_fault(0x2000).unwrap();
+        assert_eq!(changes(&memory), &[2]);
+        assert_ne!(memory.mappings[1], memory.mappings[2]);
+        memory.publish_external_dirty(&[shared_slot]).unwrap();
+        assert_eq!(changes(&memory), &[2]);
+        memory.unmap(range(0x1000)).unwrap();
+        assert_eq!(changes(&memory), &[2, 1]);
+        assert_eq!(memory.mappings[1], 0);
+        assert_eq!(memory.permissions[1], Permissions::NONE);
+        memory
+            .map_shared_pages(range(0x1000), &shared, 0, Permissions::READ_EXECUTE, false)
+            .unwrap();
+        assert_eq!(changes(&memory), &[2, 1]);
+        assert_eq!(memory.mappings[1], shared_slot + 1);
+    }
+
+    #[test]
+    fn external_mapping_changes_are_not_consumed_by_reads_or_failed_mutations() {
+        let mut memory = AddressSpace::new(2).unwrap();
+        track(&mut memory);
+        assert!(memory.protect(range(0x1000), Permissions::READ).is_err());
+        assert!(changes(&memory).is_empty());
+        memory
+            .map_zeroed(range(0x1000), Permissions::READ_WRITE)
+            .unwrap();
+        assert!(memory.map_zeroed(range(0x1000), Permissions::READ).is_err());
+        assert_eq!(changes(&memory), &[1]);
+        let before = changes(&memory).to_vec();
+        memory.external_descriptor();
+        memory.external_descriptor();
+        assert_eq!(changes(&memory), before);
+        memory
+            .acknowledge_external_mappings(memory.external_mapping_epoch, 1)
+            .unwrap();
+        assert!(changes(&memory).is_empty());
+    }
+
     #[test]
     fn external_mapping_epoch_tracks_permissions_unmap_and_private_detach() {
         let mut memory = AddressSpace::new(4).unwrap();

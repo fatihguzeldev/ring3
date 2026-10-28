@@ -41,6 +41,8 @@ pub struct AddressSpace {
     versions: Box<[PageVersion]>,
     #[cfg(feature = "external-cpu")]
     external_mapping_epoch: u64,
+    #[cfg(feature = "external-cpu")]
+    external_mapping_changes: Option<external::MappingChanges>,
     service_guard: service::GuardService32,
 }
 
@@ -140,6 +142,8 @@ impl AddressSpace {
             versions,
             #[cfg(feature = "external-cpu")]
             external_mapping_epoch: 0,
+            #[cfg(feature = "external-cpu")]
+            external_mapping_changes: None,
             service_guard: Default::default(),
         })
     }

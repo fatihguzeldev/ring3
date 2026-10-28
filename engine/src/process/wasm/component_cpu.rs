@@ -77,6 +77,24 @@ pub(crate) fn component_cpu_view(low: u32, high: u32) -> u32 {
     })
 }
 
+pub(crate) fn component_cpu_ack_mappings(
+    low: u32,
+    high: u32,
+    epoch_low: u32,
+    epoch_high: u32,
+    count: u32,
+) -> u32 {
+    access(low, high, true, |instance| {
+        let epoch = u64::from(epoch_low) | u64::from(epoch_high) << 32;
+        instance
+            .memory
+            .as_mut()
+            .unwrap()
+            .acknowledge_external_mappings(epoch, count)
+            .map_err(HostError::Memory)
+    })
+}
+
 pub(crate) fn component_cpu_dirty(low: u32, high: u32, count: u32) -> u32 {
     access(low, high, true, |instance| {
         if count > (TRANSFER_SIZE / 4) as u32 {

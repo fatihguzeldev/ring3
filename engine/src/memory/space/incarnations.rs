@@ -48,7 +48,7 @@ impl AddressSpace {
     pub(super) fn record_mapping_incarnation(&mut self, page: usize, version: u64) {
         #[cfg(feature = "external-cpu")]
         {
-            self.external_mapping_epoch = self.version;
+            self.record_external_mapping_change(page, self.version);
         }
         if !self.mapping_incarnations.is_empty()
             && let Ok(index) = self
