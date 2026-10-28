@@ -26,6 +26,8 @@ export class Session {
     this.recent = [];
     this.lastStatus = 0;
     this.needsSchedule = false;
+    this.fastNativeCalls = true;
+    this.fastNativeCompletions = 0;
   }
   status(state, message, extra = {}) {
     const unavailable = [];
@@ -258,8 +260,8 @@ export class Session {
     if (typeof id !== "string" || !/^[a-zA-Z0-9-]{1,80}$/.test(id)) return;
     this.requestedFrameProbe = id;
   }
-  complete(receipt) {
-    const guestClock = this.observeClock();
+  complete(receipt, observedClock) {
+    const guestClock = observedClock ?? this.observeClock();
     const probe = this.frameProbe;
     const isPresent = probe && (receipt.id === 0x4020f || receipt.id === 0x40c03);
     const before = isPresent ? frameProbeNow() : null;
@@ -427,7 +429,18 @@ export class Session {
           this.settleWindows();
           break;
         }
-        h.ok("core_capture_windows_call");
+        let fused = 256, observedClock;
+        if (this.backend === "v86" && this.fastNativeCalls && !this.measurements && !this.callDiagnostics &&
+            !this.frameProbe && !globalThis.__r3PhaseWindow &&
+            typeof h.api.component_cpu_try_complete_gate === "function") {
+          observedClock = this.observeClock();
+          fused = h.status("component_cpu_try_complete_gate", ...KEY);
+          if (fused !== 0 && fused !== 12 && fused !== 256)
+            throw Object.assign(new Error(`component_cpu_try_complete_gate returned${fused}`), {
+              operation: "component_cpu_try_complete_gate", status: fused, pc: run.pc, id: run.detail,
+            });
+        }
+        if (fused === 256) h.ok("core_capture_windows_call");
         const captured = h.resultView(112),
           token = captured.getUint32(16, true),
           args = Array.from({ length: captured.getUint32(28, true) }, (_, i) =>
@@ -444,7 +457,10 @@ export class Session {
         this.windows.capture(receipt, captured, this.thread);
         this.callDiagnostics?.capture(receipt, captured, this.thread);
         if ([0x10003, 0xfffff, 0xf0003].includes(run.detail)) this.exits.set(this.thread, receipt);
-        if (!this.complete(receipt)) {
+        if (fused === 0) {
+          this.fastNativeCompletions++;
+          this.settleWindows();
+        } else if (fused === 12 || !this.complete(receipt, observedClock)) {
           this.blocked.set(this.thread, receipt);
           this.needsSchedule = true;
           break;

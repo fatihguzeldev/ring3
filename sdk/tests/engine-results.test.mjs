@@ -142,3 +142,99 @@ test('call capture consumes borrowed fields before native completion overwrites 
   assert.equal(diagnostics.pending[0].returnEsp, 0x8004);
   assert.equal(engine.resultView(112).getUint32(0, true), 0xcccccccc);
 });
+
+async function fusedGateCase(fusedStatus, backend = 'v86') {
+  const memory = new WebAssembly.Memory({initial: 1}), calls = [], token = 37;
+  const state = new DataView(memory.buffer);
+  state.setUint32(72, 3, true);
+  function capture() {
+    const record = new DataView(memory.buffer, 140, 112);
+    for (const [offset, value] of [[16, token], [28, 1], [48, 0xaaaa]])
+      record.setUint32(offset, value, true);
+  }
+  function completed() {
+    state.setUint32(16, 0x88776655, true);
+    state.setUint32(32, 0x8008, true);
+    state.setUint32(48, 0x1234, true);
+  }
+  const engine = new Engine({
+    pending_windows_thread_schedule() { calls.push('schedule'); return 0; },
+    component_cpu_try_complete_gate() {
+      calls.push('fused');
+      if (fusedStatus !== 256) capture();
+      if (fusedStatus === 0) completed();
+      return fusedStatus;
+    },
+    core_capture_windows_call() { calls.push('capture'); capture(); return 0; },
+    core_complete_windows_call(actualToken) {
+      calls.push(['complete', actualToken]);
+      completed();
+      return 0;
+    },
+  }, memory, 'fixture');
+  let executions = 0, clocks = 0, callbacks = 0, settled = 0;
+  const session = Object.assign(Object.create(Session.prototype), {
+    running: true, paused: false, stopped: false, lastSchedule: Infinity, lastStatus: Infinity,
+    recent: [], thread: 1, blocked: new Map(), exits: new Map(), engine,
+    backend, fastNativeCalls: true, fastNativeCompletions: 0,
+    windows: {capture(receipt) { calls.push(['window', receipt.args[0]]); }},
+    media: {update() {}, async graphicsOutput() {}, graphicsTransport: {}},
+    code: {
+      publish() {}, import() {}, select: () => null,
+      execute() {
+        if (++executions === 1)
+          return {coreReason: 4, reason: 8, fastGate: false, pc: 0x1000, detail: 0x40232};
+        session.running = false;
+        return {coreReason: 2};
+      },
+    },
+    async providers() { return false; }, observeClock() { clocks++; return 123n; },
+    initializer: () => null, stack: () => [], async wait() { session.running = false; },
+    beginCallback() { callbacks++; return false; }, settleWindows() { settled++; },
+  });
+  await session.loop();
+  return {session, engine, calls, clocks, callbacks, settled, token};
+}
+
+test('fused gate completion settles and checks scheduling without a second capture or completion', async () => {
+  const {session, engine, calls, clocks, callbacks, settled, token} = await fusedGateCase(0);
+  assert.deepEqual(calls, ['schedule', 'fused', ['window', token], 'schedule']);
+  assert.equal(clocks, 2);
+  assert.equal(callbacks, 1);
+  assert.equal(settled, 1);
+  assert.equal(session.fastNativeCompletions, 1);
+  assert.deepEqual(session.lastCall, {id: 0x40232, pc: 0x1000, args: [0xaaaa]});
+  assert.equal(engine.get(16), 0x88776655);
+  assert.equal(engine.get(32), 0x8008);
+  assert.equal(engine.get(48), 0x1234);
+});
+
+test('declined fused gate captures once and reuses its already observed completion clock', async () => {
+  const {session, calls, clocks, callbacks, settled, token} = await fusedGateCase(256);
+  assert.deepEqual(calls, ['schedule', 'fused', 'capture', ['window', token], ['complete', token], 'schedule']);
+  assert.equal(clocks, 2);
+  assert.equal(callbacks, 1);
+  assert.equal(settled, 1);
+  assert.equal(session.fastNativeCompletions, 0);
+});
+
+test('busy fused gate retains the returned capture token for the existing blocked-call retry', async () => {
+  const {session, calls, clocks, callbacks, settled, token} = await fusedGateCase(12);
+  assert.deepEqual(calls, ['schedule', 'fused', ['window', token]]);
+  assert.equal(clocks, 2);
+  assert.equal(callbacks, 0);
+  assert.equal(settled, 0);
+  assert.equal(session.needsSchedule, true);
+  assert.equal(session.fastNativeCompletions, 0);
+  assert.deepEqual(session.blocked.get(1), {
+    pc: 0x1000, id: 0x40232, callArgs: [0xaaaa],
+    operation: 'core_complete_windows_call', args: [token],
+  });
+});
+
+test('the core backend keeps the ordinary capture and completion path', async () => {
+  const {session, calls, clocks, token} = await fusedGateCase(0, 'core');
+  assert.deepEqual(calls, ['schedule', 'capture', ['window', token], ['complete', token], 'schedule']);
+  assert.equal(clocks, 2);
+  assert.equal(session.fastNativeCompletions, 0);
+});

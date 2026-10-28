@@ -13,6 +13,61 @@ pub(in crate::process) struct PreparedCoreExit32 {
 }
 
 impl EngineInstance {
+    #[cfg(all(feature = "external-cpu", test))]
+    pub(in crate::process) fn try_complete_external_cpu_gate(&mut self) -> Result<bool, HostError> {
+        self.try_complete_external_cpu_gate_with(|instance, token| {
+            instance.complete_core_windows_call(token)
+        })
+    }
+
+    #[cfg(feature = "external-cpu")]
+    pub(in crate::process) fn try_complete_external_cpu_gate_with(
+        &mut self,
+        complete: impl FnOnce(&mut Self, u32) -> Result<(), HostError>,
+    ) -> Result<bool, HostError> {
+        use crate::abi::{arena::*, call_frame::CALL_FRAME_SIZE, x86::*};
+        use crate::{cpu::ExitReason, memory::GuestAddress};
+        if self.pending_call.is_some() {
+            return Err(HostError::InvalidRequest);
+        }
+        if !self.external_cpu_memory_pinned || self.guard_core_entry().is_err() {
+            return Ok(false);
+        }
+        let arena = self.arena();
+        let state = decode_state(&arena[STATE_OFFSET..STATE_OFFSET + STATE_SIZE])
+            .map_err(|_| HostError::InvalidRequest)?;
+        let exit = decode_exit(&arena[EXIT_OFFSET..EXIT_OFFSET + EXIT_SIZE])
+            .map_err(|_| HostError::InvalidRequest)?;
+        let ExitReason::Gate { id } = exit.reason else {
+            return Ok(false);
+        };
+        let gate = crate::process::execution::cache::cache_gate_at(
+            &self.modules,
+            self.callback.as_ref(),
+            state.eip,
+        );
+        let mut bytes = [0; 2];
+        if !gate.is_some_and(|gate| gate.id == id)
+            || crate::process::windows_gate_info(id).is_none()
+            || self
+                .memory()?
+                .fetch(GuestAddress(state.eip), &mut bytes)
+                .is_err()
+            || bytes != [0x0f, 0x0b]
+        {
+            return Ok(false);
+        }
+        let record = self.capture_core_windows_call()?;
+        let captured: [u8; CALL_FRAME_SIZE] = self.arena()
+            [TRANSFER_OFFSET..TRANSFER_OFFSET + CALL_FRAME_SIZE]
+            .try_into()
+            .unwrap();
+        let result = complete(self, record.token);
+        self.arena.as_mut().get_mut()[TRANSFER_OFFSET..TRANSFER_OFFSET + CALL_FRAME_SIZE]
+            .copy_from_slice(&captured);
+        result.map(|()| true)
+    }
+
     #[cfg(feature = "external-cpu")]
     pub(in crate::process) fn external_cpu_can_defer_gate(&self, pc: u32, id: u32) -> bool {
         use crate::{

@@ -161,6 +161,25 @@ pub(crate) fn component_cpu_gate(low: u32, high: u32, pc: u32) -> u32 {
     })
 }
 
+pub(crate) fn component_cpu_try_complete_gate(low: u32, high: u32) -> u32 {
+    let mut completed = false;
+    let mut captured = false;
+    let result = access(low, high, true, |instance| {
+        completed = instance.try_complete_external_cpu_gate_with(|instance, token| {
+            captured = true;
+            instance.complete_core_windows_call(token)
+        })?;
+        Ok(())
+    });
+    if result == 12 && !captured {
+        7
+    } else if result == 0 && !completed {
+        256
+    } else {
+        result
+    }
+}
+
 pub(crate) fn component_cpu_publish(
     low: u32,
     high: u32,

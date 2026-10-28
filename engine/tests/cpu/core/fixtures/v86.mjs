@@ -104,12 +104,16 @@ try {
       await new Promise(resolve => setTimeout(resolve, 0));
     }
     assert.equal(run.reason, 8); assert.equal(run.detail, wanted.id);
-    engine.ok('core_capture_windows_call');
+    const fused=typeof engine.api.component_cpu_try_complete_gate==='function'
+      ? engine.status('component_cpu_try_complete_gate',...KEY) : 256;
+    assert([0,256].includes(fused),'authored synchronous calls complete or decline before capture');
+    if(fused===256)engine.ok('core_capture_windows_call');
+    else report.nativeFusedCalls=(report.nativeFusedCalls??0)+1;
     const packet = view(engine.take(112));
     const token = packet.getUint32(16, true);
     const args = Array.from({length: packet.getUint32(28, true)}, (_, i) => packet.getUint32(48 + i * 4, true));
     assert.deepEqual(args, wanted.args);
-    engine.ok('core_complete_windows_call', token);
+    if(fused===256)engine.ok('core_complete_windows_call', token);
     assert.equal(engine.get(48), wanted.returnPc);
     assert.equal(engine.get(16), wanted.result);
     assert.deepEqual(banks(), initialBanks, 'complete extended banks survive native call and trap');
@@ -118,6 +122,7 @@ try {
     cache.import();
   }
   stage = 'final guest writes';
+  if(typeof engine.api.component_cpu_try_complete_gate==='function')assert.equal(report.nativeFusedCalls,4);
   cache.execute(cache.select()); cache.publish();
   const actual = [];
   for (let i = 0; i < 3; i++) {

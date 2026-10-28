@@ -255,3 +255,173 @@ fn external_attach_rejects_pending_module_input() {
     engine.abort_module_input().unwrap();
     assert!(engine.external_cpu_module_ready());
 }
+
+#[cfg(feature = "external-cpu")]
+fn prepare_external_fast_gate(engine: &mut EngineInstance, id: u32) {
+    let mut current = state(engine);
+    current.eip = gate(engine, id);
+    current.registers[4] -= 64;
+    engine
+        .memory
+        .as_mut()
+        .unwrap()
+        .write(
+            GuestAddress(current.registers[4]),
+            &0x401000u32.to_le_bytes(),
+        )
+        .unwrap();
+    let banks = NumericBank::from_instance(engine)
+        .unwrap()
+        .architectural_state();
+    let prepared = engine
+        .prepare_core_exit(
+            current,
+            ExecutionExit {
+                retired: 7,
+                reason: ExitReason::Gate { id },
+            },
+            11,
+            None,
+            None,
+            banks,
+        )
+        .unwrap();
+    engine.commit_core_exit(prepared);
+    engine.external_cpu_memory_pinned = true;
+}
+
+#[cfg(feature = "external-cpu")]
+#[test]
+fn external_fast_gate_completes_getter_and_preserves_work_and_numeric_banks() {
+    let mut engine = fixture();
+    call(&mut engine, WindowsApi32::SetLastError, &[0xf1234567]);
+    prepare_external_fast_gate(&mut engine, WindowsApi32::GetLastError.id());
+    let stack = state(&engine).registers[4];
+    let work = engine.arena()[WORK_OFFSET..WORK_OFFSET + WORK_SIZE].to_vec();
+    let banks = engine.arena()[X87_OFFSET..YMM_OFFSET + YMM_SIZE].to_vec();
+    assert!(engine.try_complete_external_cpu_gate().unwrap());
+    assert_eq!(state(&engine).registers[0], 0xf1234567);
+    assert_eq!(state(&engine).eip, 0x401000);
+    assert_eq!(state(&engine).registers[4], stack + 4);
+    assert_eq!(&engine.arena()[WORK_OFFSET..WORK_OFFSET + WORK_SIZE], work);
+    assert_eq!(&engine.arena()[X87_OFFSET..YMM_OFFSET + YMM_SIZE], banks);
+    assert!(engine.pending_call.is_none());
+    let record = crate::abi::call_frame::decode_call_frame(
+        &engine.arena()[TRANSFER_OFFSET..TRANSFER_OFFSET + 112],
+    )
+    .unwrap();
+    assert_eq!(record.id, WindowsApi32::GetLastError.id());
+    assert_eq!(record.return_pc, 0x401000);
+    assert!(engine.complete_core_windows_call(record.token).is_err());
+}
+
+#[cfg(feature = "external-cpu")]
+#[test]
+fn external_fast_gate_declines_mismatched_or_uncommitted_gates_without_mutation() {
+    let mut engine = fixture();
+    prepare_external_fast_gate(&mut engine, WindowsApi32::GetLastError.id());
+    let current = state(&engine);
+    publish(
+        &mut engine,
+        current,
+        ExitReason::Gate {
+            id: WindowsApi32::SetLastError.id(),
+        },
+    )
+    .unwrap();
+    let arena = engine.arena().to_vec();
+    let token = engine.call_token;
+    assert!(!engine.try_complete_external_cpu_gate().unwrap());
+    assert_eq!(engine.arena(), arena);
+    assert_eq!(engine.call_token, token);
+    assert!(engine.pending_call.is_none());
+    let mut current = state(&engine);
+    current.eip = gate(&engine, WindowsApi32::GetLastError.id());
+    publish(&mut engine, current, ExitReason::NeedCode).unwrap();
+    let arena = engine.arena().to_vec();
+    assert!(!engine.try_complete_external_cpu_gate().unwrap());
+    assert_eq!(engine.arena(), arena);
+    assert_eq!(engine.call_token, token);
+}
+
+#[cfg(feature = "external-cpu")]
+#[test]
+fn external_fast_gate_busy_retains_the_original_capture_for_one_later_completion() {
+    let mut engine = fixture();
+    prepare_external_fast_gate(&mut engine, WindowsApi32::GetLastError.id());
+    let result = engine.try_complete_external_cpu_gate_with(|engine, token| {
+        assert_eq!(engine.pending_call.as_ref().unwrap().token, token);
+        engine.arena.as_mut().get_mut()[TRANSFER_OFFSET..TRANSFER_OFFSET + 112].fill(0xcc);
+        Err(HostError::Call(CallError::Busy))
+    });
+    assert_eq!(result, Err(HostError::Call(CallError::Busy)));
+    let record = crate::abi::call_frame::decode_call_frame(
+        &engine.arena()[TRANSFER_OFFSET..TRANSFER_OFFSET + 112],
+    )
+    .unwrap();
+    assert_eq!(engine.pending_call.as_ref().unwrap().token, record.token);
+    assert_eq!(record.id, WindowsApi32::GetLastError.id());
+    assert_eq!(
+        engine.try_complete_external_cpu_gate(),
+        Err(HostError::InvalidRequest)
+    );
+    engine.complete_core_windows_call(record.token).unwrap();
+    assert!(engine.pending_call.is_none());
+    assert_eq!(state(&engine).eip, 0x401000);
+}
+
+#[cfg(feature = "external-cpu")]
+#[test]
+fn external_fast_gate_set_last_error_keeps_the_real_teb_write_and_return_state() {
+    let mut engine = fixture();
+    prepare_external_fast_gate(&mut engine, WindowsApi32::SetLastError.id());
+    let stack = state(&engine).registers[4];
+    engine
+        .memory
+        .as_mut()
+        .unwrap()
+        .write(GuestAddress(stack + 4), &0xfedc1234u32.to_le_bytes())
+        .unwrap();
+    let version = engine.memory().unwrap().transaction_version();
+    let work = engine.arena()[WORK_OFFSET..WORK_OFFSET + WORK_SIZE].to_vec();
+    assert!(engine.try_complete_external_cpu_gate().unwrap());
+    let teb = engine.module_teb_address().unwrap();
+    let mut word = [0; 4];
+    engine
+        .memory()
+        .unwrap()
+        .read(GuestAddress(teb + 0x34), &mut word)
+        .unwrap();
+    assert_eq!(u32::from_le_bytes(word), 0xfedc1234);
+    assert!(engine.memory().unwrap().transaction_version() > version);
+    assert_eq!(state(&engine).registers[0], 0);
+    assert_eq!(state(&engine).registers[4], stack + 8);
+    assert_eq!(state(&engine).eip, 0x401000);
+    assert_eq!(&engine.arena()[WORK_OFFSET..WORK_OFFSET + WORK_SIZE], work);
+    assert!(engine.pending_call.is_none());
+}
+
+#[cfg(feature = "external-cpu")]
+#[test]
+fn external_fast_gate_completes_another_registered_process_api() {
+    let mut engine = fixture();
+    prepare_external_fast_gate(
+        &mut engine,
+        crate::windows::process::ProcessApi32::GetCurrentThreadId.id(),
+    );
+    let thread = engine.current_windows_thread_id().unwrap();
+    let stack = state(&engine).registers[4];
+    assert!(engine.try_complete_external_cpu_gate().unwrap());
+    assert_eq!(state(&engine).registers[0], thread);
+    assert_eq!(state(&engine).registers[4], stack + 4);
+    assert_eq!(state(&engine).eip, 0x401000);
+    assert!(engine.pending_call.is_none());
+    let record = crate::abi::call_frame::decode_call_frame(
+        &engine.arena()[TRANSFER_OFFSET..TRANSFER_OFFSET + 112],
+    )
+    .unwrap();
+    assert_eq!(
+        record.id,
+        crate::windows::process::ProcessApi32::GetCurrentThreadId.id()
+    );
+}
