@@ -1,14 +1,18 @@
 import {KEY} from '../engine.js';
 import {PAGE,BACKING_BASE,DIRECTORY,TABLES,GDT,PRIVATE_VA} from './layout.js';
 import {CodeValidity} from './code-validity.js';
+import {DirtyPages} from './dirty-pages.js';
 
 export class PageTables {
   constructor(engine,cpu,options={}) {
     this.engine=engine;this.cpu=cpu;this.ram=cpu.mem8.byteOffset;this.pages=[];
     this.ownsPin=false;
     this.mappingEpoch=null;this.codeVersion=null;this.identity=null;
-    this.policy={selectiveCode:options.selectiveCode??true,incrementalSync:options.incrementalSync??false};
+    this.policy={selectiveCode:options.selectiveCode??true,incrementalSync:options.incrementalSync??true};
     this.codeValidity=new CodeValidity(engine.memory);
+    this.rowsByPage=new Map();this.dirty=new DirtyPages(engine.memory,this.ram,()=>cpu.full_clear_tlb());
+    this.lastMappingScanCount=0;this.lastMappingFullRebuild=false;
+    this.lastDirtyScanCount=0;this.lastDirtyDirectoryCount=0;
     this.descriptor();
     const length=this.capacity*PAGE;
     if(BACKING_BASE+length>cpu.mem8.length)throw new Error('v86 physical RAM is too small for Ring3 backing');
@@ -56,12 +60,15 @@ export class PageTables {
       permissions:d.getUint32(28,true),guestPages:d.getUint32(32,true),capacity:d.getUint32(36,true),
       mapped:d.getUint32(40,true),mappingVersions:d.getUint32(44,true),physicalVersions:d.getUint32(48,true),
       privateSlots:d.getUint32(52,true),identity:d.getBigUint64(64,true),
-      transaction:d.getBigUint64(72,true),code:d.getBigUint64(80,true),mapping:d.getBigUint64(88,true)};
+      transaction:d.getBigUint64(72,true),code:d.getBigUint64(80,true),mapping:d.getBigUint64(88,true),
+      mappingChanges:d.getUint32(96,true),mappingChangeCount:d.getUint32(100,true),
+      mappingChangeCapacity:d.getUint32(104,true),mappingChangeFlags:d.getUint32(108,true)};
     this.capacity=values.capacity;
     return values;
   }
   refresh() {
     const info=this.descriptor(),d=new DataView(this.engine.memory.buffer);
+    this.lastMappingScanCount=0;this.lastMappingFullRebuild=false;
     if(this.identity!==null && this.identity!==info.identity)throw new Error('v86 backing identity changed');
     this.identity=info.identity;
     if(!this.policy.selectiveCode && this.codeVersion!==null && this.codeVersion!==info.code)this.cpu.jit_clear_cache();
@@ -71,25 +78,49 @@ export class PageTables {
       return;
     }
     if(info.backing!==this.ram+BACKING_BASE)throw new Error('v86 backing detached unexpectedly');
-    for(const row of this.pages)d.setUint32(row.pte,0,true);
+    const incremental=this.policy.incrementalSync && this.mappingEpoch!==null && (info.mappingChangeFlags&1)!==0;
+    if((info.mappingChangeFlags&1) && (info.mappingChangeCapacity!==info.guestPages ||
+        info.mappingChangeCount>info.mappingChangeCapacity))throw new Error('invalid v86 mapping change journal');
+    if(!incremental) {
+      for(const row of this.pages)d.setUint32(row.pte,0,true);
+      this.pages=[];this.rowsByPage.clear();this.dirty.reset([]);this.lastMappingFullRebuild=true;
+    }
     const maps=new Uint32Array(this.engine.memory.buffer,info.maps,info.guestPages);
     const rights=new Uint8Array(this.engine.memory.buffer,info.permissions,info.guestPages);
     const privateSlots=info.privateSlots?new Uint32Array(this.engine.memory.buffer,info.privateSlots,info.guestPages):null;
-    const rows=[];
-    for(let page=0;page<info.guestPages;page++) {
-      const mapped=maps[page];if(!mapped)continue;
+    const changes=incremental?new Uint32Array(this.engine.memory.buffer,info.mappingChanges,info.mappingChangeCount):null;
+    const count=incremental?changes.length:info.guestPages;
+    for(let index=0;index<count;index++) {
+      const page=changes?changes[index]:index;
+      if(page>=info.guestPages)throw new Error('invalid v86 mapping change page');
+      const mapped=maps[page],old=this.rowsByPage.get(page);
+      if(!mapped) {
+        if(old) {
+          d.setUint32(old.pte,0,true);this.dirty.remove(old);this.rowsByPage.delete(page);
+          const last=this.pages.pop();
+          if(last!==old){this.pages[old.index]=last;last.index=old.index;}
+        }
+        continue;
+      }
       if(page>=(PRIVATE_VA>>>12) && page<(PRIVATE_VA>>>12)+8)
         throw new Error('Ring3 guest mapping collides with v86 private trap window');
       const permission=rights[page],physical=BACKING_BASE+(mapped-1)*PAGE,pte=this.pte(page);
       if(mapped>info.capacity)throw new Error('invalid Ring3 physical slot');
       const writable=(permission&2)!==0 && !privateSlots?.[page];
       d.setUint32(pte,physical|((permission&7)?5:0)|(writable?2:0),true);
-      rows.push({page,pte,slot:mapped-1,permission,cow:!!privateSlots?.[page]});
+      if(old)Object.assign(old,{slot:mapped-1,permission,cow:!!privateSlots?.[page]});
+      else {
+        const row={page,pte,slot:mapped-1,permission,cow:!!privateSlots?.[page],index:this.pages.length};
+        this.pages.push(row);this.rowsByPage.set(page,row);this.dirty.add(row);
+      }
     }
-    this.pages=rows;this.maps=info.maps;this.rights=info.permissions;this.privateSlots=info.privateSlots;
+    this.lastMappingScanCount=count;
+    this.maps=info.maps;this.rights=info.permissions;this.privateSlots=info.privateSlots;
     this.mappingEpoch=info.mapping;
     this.cpu.full_clear_tlb();
     if(!this.policy.selectiveCode || this.codeValidity.refresh(info,this.pages).invalidate)this.cpu.jit_clear_cache();
+    if((info.mappingChangeFlags&1) && info.mappingChangeCount)
+      this.engine.ok('component_cpu_ack_mappings',...KEY,Number(info.mapping&0xffffffffn),Number(info.mapping>>32n),info.mappingChangeCount);
   }
   isCopyOnWrite(address) {
     const page=address>>>12;
@@ -100,14 +131,9 @@ export class PageTables {
     return new Uint32Array(this.engine.memory.buffer,this.maps,1<<20)[address>>>12] ? 2 : 1;
   }
   publishDirty() {
-    const d=new DataView(this.engine.memory.buffer),dirty=new Set();
-    for(const row of this.pages) {
-      const value=d.getUint32(row.pte,true);
-      if(value&64){dirty.add(row.slot);d.setUint32(row.pte,value&~64,true);}
-    }
-    if(!dirty.size)return 0;
-    this.cpu.full_clear_tlb();
-    const slots=[...dirty];
+    const {slots,scannedPtes,scannedDirectories}=this.dirty.collect(this.policy.incrementalSync);
+    this.lastDirtyScanCount=scannedPtes;this.lastDirtyDirectoryCount=scannedDirectories;
+    if(!slots.length)return 0;
     for(let start=0;start<slots.length;start+=1024) {
       const part=slots.slice(start,start+1024);
       this.engine.request(new Uint8Array(new Uint32Array(part).buffer));
