@@ -4,6 +4,7 @@ import {readFileSync, writeFileSync} from 'node:fs';
 import {readEngine} from '../../../support/wasm/engine.mjs';
 import {Engine, KEY, view} from '../../../../../sdk/runtime/engine.js';
 import {prepareV86} from '../../../../../sdk/runtime/v86/index.js';
+import {DIRECTORY} from '../../../../../sdk/runtime/v86/layout.js';
 import {image as moduleImage} from '../../../loader/modules/wasm/fixtures/runtime/images.mjs';
 
 const [enginePath, reportPath, permissionText = '1'] = process.argv.slice(2);
@@ -157,6 +158,60 @@ try {
   const vector = Array.from({length: 4}, (_, i) => read(0x601030 + i * 4));
   assert.deepEqual(vector, [6,8,10,12], 'actual SSE integer vector addition');
   report.numeric = {binary64Words: [0,0x40000000], vector};
+  stage = 'memory policies on actual v86 page walks';
+  const dataAddress=0x680000;
+  engine.ok('map',dataAddress,1,3);
+  upload(0x600300,[0xa1,...u32(dataAddress),0xb8,...u32(gate),0xff,0xe0]);
+  upload(0x600340,[0xc7,0x05,...u32(dataAddress),...u32(0x76543210),0xb8,...u32(gate),0xff,0xe0]);
+  report.memoryPolicies=[];
+  for(const [selectiveCode,incrementalSync] of [[false,false],[true,false],[false,true],[true,true]]) {
+    cache.tables.configure({selectiveCode,incrementalSync});
+    const observations=[],original=cache.tables.publishDirty;
+    cache.tables.publishDirty=function() {
+      const d=new DataView(memory.buffer),directory=this.ram+DIRECTORY+(dataAddress>>>22)*4;
+      const observed={accessed:!!(d.getUint32(directory,true)&32),
+        dirty:!!(d.getUint32(this.pte(dataAddress>>>12),true)&64)};
+      const result=original.call(this);
+      observations.push({...observed,accessedAfter:!!(d.getUint32(directory,true)&32),
+        scannedPtes:this.lastDirtyScanCount});return result;
+    };
+    try {
+      put(dataAddress,0x12345678);
+      for(const pc of [0x600300,0x600340]) {
+        new DataView(memory.buffer).setUint32(engine.base+48,pc,true);cache.import();
+        const run=cache.execute(cache.select());assert.equal(run.reason,8);
+      }
+      assert.equal(observations[0].accessed,true,'actual read marks the page directory accessed');
+      assert.equal(observations[0].dirty,false,'read-only batch does not dirty the data PTE');
+      assert.equal(observations[1].dirty,true,'later actual store marks the data PTE dirty');
+      if(incrementalSync)assert.equal(observations[0].accessedAfter,false,'partitioned read-only collection resets access');
+      assert.equal(read(dataAddress),0x76543210);
+      report.memoryPolicies.push({selectiveCode,incrementalSync,observations});
+    } finally {cache.tables.publishDirty=original;}
+  }
+  stage='host code write invalidates actual finalized v86 code';
+  const hotPc=0x600400,hot=value=>[0xc7,0x05,...u32(dataAddress),...u32(value),0xe9,...u32(-15)];
+  upload(hotPc,hot(1));
+  const generatedBefore=cache.stats().v86.finalizedModules;
+  for(let count=0;count<24;count++) {
+    new DataView(memory.buffer).setUint32(engine.base+48,hotPc,true);
+    cache.import();cache.execute(cache.select());await new Promise(resolve=>setTimeout(resolve,2));
+  }
+  assert(cache.stats().v86.finalizedModules>generatedBefore,'the authored hot loop finalized actual Wasm');
+  assert.equal(read(dataAddress),1);
+  let clears=0;const clear=cache.cpu.jit_clear_cache;
+  cache.cpu.jit_clear_cache=function(...args){clears++;return clear.apply(this,args);};
+  try {
+    engine.ok('map',0x690000,1,3);cache.import();
+    assert.equal(clears,0,'unrelated real data mapping retains hot code');
+    upload(hotPc,hot(2));cache.import();assert.equal(clears,1,'host executable write invalidates hot code');
+    new DataView(memory.buffer).setUint32(engine.base+48,hotPc,true);cache.import();cache.execute(cache.select());
+    assert.equal(read(dataAddress),2);
+    engine.ok('unmap',0x600000,1);engine.ok('map',0x600000,1,7);upload(hotPc,hot(3));
+    new DataView(memory.buffer).setUint32(engine.base+48,hotPc,true);cache.import();cache.execute(cache.select());
+    assert.equal(read(dataAddress),3,'same-VA remap executes new canonical bytes');
+    report.hostCodeInvalidation={clears,finalizedModules:cache.stats().v86.finalizedModules};
+  } finally {cache.cpu.jit_clear_cache=clear;}
   stage = deniedPermission ? 'read-only store fault' : 'mapped NOACCESS store fault';
   put(0x601080, 0x11223344);
   upload(0x600100, [0xc7,0x05,...u32(0x601080),...u32(0x55667788),0xb8,...u32(gate),0xff,0xe0]);
