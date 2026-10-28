@@ -4,6 +4,8 @@ mod backing;
 mod code_fetch;
 mod core;
 mod cpu;
+#[cfg(feature = "external-cpu")]
+mod external;
 mod guard;
 mod incarnations;
 mod mapping;
@@ -37,6 +39,8 @@ pub struct AddressSpace {
     code_validation_version: u64,
     code_source_version: u64,
     versions: Box<[PageVersion]>,
+    #[cfg(feature = "external-cpu")]
+    external_mapping_epoch: u64,
     service_guard: service::GuardService32,
 }
 
@@ -134,6 +138,8 @@ impl AddressSpace {
             code_validation_version: 0,
             code_source_version: 0,
             versions,
+            #[cfg(feature = "external-cpu")]
+            external_mapping_epoch: 0,
             service_guard: Default::default(),
         })
     }

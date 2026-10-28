@@ -5,6 +5,8 @@ pub(super) struct Backing {
     storage: Box<[u8]>,
     offset: usize,
     length: usize,
+    #[cfg(feature = "external-cpu")]
+    external: Option<crate::abi::external_memory::ExternalMemory>,
 }
 
 impl Backing {
@@ -20,7 +22,35 @@ impl Backing {
             storage,
             offset,
             length,
+            #[cfg(feature = "external-cpu")]
+            external: None,
         })
+    }
+
+    #[cfg(feature = "external-cpu")]
+    pub(super) fn attach_external(
+        &mut self,
+        mut external: crate::abi::external_memory::ExternalMemory,
+    ) -> Result<(), MemoryError> {
+        if self.external.is_some() || external.len() != self.length {
+            return Err(MemoryError::InvalidRange);
+        }
+        external.copy_from_slice(self);
+        self.external = Some(external);
+        self.storage = Box::new([]);
+        self.offset = 0;
+        Ok(())
+    }
+
+    #[cfg(feature = "external-cpu")]
+    pub(super) fn release_external(&mut self) -> Result<(), MemoryError> {
+        if self.external.is_none() {
+            return Err(MemoryError::InvalidRange);
+        }
+        let mut owned = Self::zeroed(self.length)?;
+        owned.copy_from_slice(self);
+        *self = owned;
+        Ok(())
     }
 }
 
@@ -28,12 +58,20 @@ impl Deref for Backing {
     type Target = [u8];
 
     fn deref(&self) -> &Self::Target {
+        #[cfg(feature = "external-cpu")]
+        if let Some(external) = self.external.as_ref() {
+            return external;
+        }
         &self.storage[self.offset..self.offset + self.length]
     }
 }
 
 impl DerefMut for Backing {
     fn deref_mut(&mut self) -> &mut Self::Target {
+        #[cfg(feature = "external-cpu")]
+        if let Some(external) = self.external.as_mut() {
+            return external;
+        }
         &mut self.storage[self.offset..self.offset + self.length]
     }
 }

@@ -9,6 +9,13 @@ use crate::cpu::dbt::RegistryError;
 mod component_memory;
 #[cfg(feature = "external-cpu")]
 pub(crate) use component_memory::component_memory_lease;
+#[cfg(feature = "external-cpu")]
+mod component_cpu;
+#[cfg(feature = "external-cpu")]
+pub(crate) use component_cpu::{
+    component_cpu_attach, component_cpu_dirty, component_cpu_gate, component_cpu_publish,
+    component_cpu_release, component_cpu_view, component_cpu_write_fault,
+};
 
 mod clock;
 mod core;

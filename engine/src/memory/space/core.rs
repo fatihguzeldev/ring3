@@ -331,3 +331,77 @@ mod tests {
         assert_eq!(memory.core_read(0x1000, 4).unwrap(), 0);
     }
 }
+
+#[cfg(all(test, feature = "external-cpu"))]
+mod external_tests {
+    use super::super::*;
+
+    fn range(address: u32) -> PageRange {
+        PageRange::new(GuestAddress(address), 1).unwrap()
+    }
+
+    #[test]
+    fn external_mapping_epoch_tracks_permissions_unmap_and_private_detach() {
+        let mut memory = AddressSpace::new(4).unwrap();
+        let initial = memory.external_mapping_epoch;
+        memory
+            .map_zeroed(range(0x1000), Permissions::READ_WRITE)
+            .unwrap();
+        assert!(memory.external_mapping_epoch > initial);
+        let mapped = memory.external_mapping_epoch;
+        memory.write(GuestAddress(0x1000), &[7]).unwrap();
+        assert_eq!(memory.external_mapping_epoch, mapped);
+        memory.protect(range(0x1000), Permissions::READ).unwrap();
+        assert!(memory.external_mapping_epoch > mapped);
+        let protected = memory.external_mapping_epoch;
+        memory.unmap(range(0x1000)).unwrap();
+        assert!(memory.external_mapping_epoch > protected);
+        let shared = memory.allocate_shared_pages(1, &[9]).unwrap();
+        memory
+            .map_shared_pages(range(0x2000), &shared, 0, Permissions::READ_WRITE, true)
+            .unwrap();
+        let private = memory.external_mapping_epoch;
+        memory.write(GuestAddress(0x2000), &[10]).unwrap();
+        assert!(memory.external_mapping_epoch > private);
+    }
+
+    #[test]
+    fn external_dirty_publication_versions_shared_executable_backing() {
+        let mut memory = AddressSpace::new(3).unwrap();
+        let shared = memory.allocate_shared_pages(1, &[1]).unwrap();
+        memory
+            .map_shared_pages(range(0x1000), &shared, 0, Permissions::READ_WRITE, false)
+            .unwrap();
+        memory
+            .map_shared_pages(range(0x2000), &shared, 0, Permissions::READ_EXECUTE, false)
+            .unwrap();
+        let slot = memory.mappings[1] - 1;
+        let topology = memory.external_mapping_epoch;
+        let before = memory.transaction_version();
+        memory.backing[slot as usize * PAGE_SIZE as usize] = 0x5a;
+        memory.publish_external_dirty(&[slot]).unwrap();
+        assert!(memory.transaction_version() > before);
+        assert_eq!(
+            memory.content_version_at(GuestAddress(0x1000)).unwrap(),
+            memory.transaction_version()
+        );
+        assert_eq!(
+            memory.content_version_at(GuestAddress(0x2000)).unwrap(),
+            memory.transaction_version()
+        );
+        assert_eq!(
+            memory.code_validation_version(),
+            memory.transaction_version()
+        );
+        assert_eq!(memory.external_mapping_epoch, topology);
+        let mut value = [0];
+        memory.fetch(GuestAddress(0x2000), &mut value).unwrap();
+        assert_eq!(value, [0x5a]);
+        let before = memory.transaction_version();
+        assert_eq!(
+            memory.publish_external_dirty(&[3]),
+            Err(MemoryError::InvalidRange)
+        );
+        assert_eq!(memory.transaction_version(), before);
+    }
+}

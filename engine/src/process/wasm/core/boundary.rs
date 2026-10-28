@@ -99,8 +99,15 @@ fn exit_reason(
     core: &CoreSession32,
     stop: u32,
 ) -> Result<(ExitReason, Option<EventOrigin32>), HostError> {
-    let detail = word(core, 48);
-    let vector = word(core, 116);
+    exit_from_words(stop, word(core, 48), word(core, 52), word(core, 116))
+}
+
+pub(in crate::process::wasm) fn exit_from_words(
+    stop: u32,
+    detail: u32,
+    metadata: u32,
+    vector: u32,
+) -> Result<(ExitReason, Option<EventOrigin32>), HostError> {
     let cause = match (stop, vector) {
         (9, 0) => Some(ExceptionCause32::DivideError),
         (9, 1) => Some(ExceptionCause32::Debug(
@@ -159,7 +166,6 @@ fn exit_reason(
         1 => ExitReason::NeedCode,
         2 => ExitReason::Budget,
         3 => {
-            let metadata = word(core, 52);
             let width = if vector >> 8 != 0 {
                 vector >> 8
             } else {

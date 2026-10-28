@@ -27,6 +27,8 @@ pub(crate) use retention::{
     core_cache_format, core_cache_status_ptr, core_cache_victim, core_link_owners_ptr,
 };
 
+#[cfg(feature = "external-cpu")]
+pub(super) use boundary::exit_from_words;
 pub(crate) use boundary::{
     core_begin_windows_callback, core_capture_windows_call, core_complete_windows_call,
     core_dispatch_exception, core_export, core_finish_exception, core_finish_windows_callback,

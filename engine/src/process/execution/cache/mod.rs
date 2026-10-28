@@ -9,6 +9,8 @@ mod requests;
 mod slots;
 mod types;
 mod victims;
+#[cfg(feature = "external-cpu")]
+pub(in crate::process) use admission::cache_gate_at;
 
 pub(in crate::process) use context::ExecutionCache32;
 pub use context::ExecutionConfig32;

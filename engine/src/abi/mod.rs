@@ -3,6 +3,8 @@ pub mod call_frame;
 pub mod callback;
 pub mod cpu_helper;
 pub mod execution;
+#[cfg(feature = "external-cpu")]
+pub(crate) mod external_memory;
 pub mod far;
 pub mod files;
 pub mod graphics;

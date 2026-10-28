@@ -257,7 +257,7 @@ impl EngineInstance {
     }
 }
 
-pub(super) fn cache_gate_at(
+pub(in crate::process) fn cache_gate_at(
     modules: &crate::process::loading::modules::ModuleProcess32,
     mut callback: Option<&crate::process::calls::callback::SuspendedCallback>,
     pc: u32,
@@ -267,7 +267,8 @@ pub(super) fn cache_gate_at(
     }
     while let Some(current) = callback {
         let (return_pc, return_id) = match current.record {
-            crate::process::calls::callback::SuspendedRecord::Replacement(record) | crate::process::calls::callback::SuspendedRecord::Core(record) => {
+            crate::process::calls::callback::SuspendedRecord::Replacement(record)
+            | crate::process::calls::callback::SuspendedRecord::Core(record) => {
                 (record.return_pc, record.return_id)
             }
             crate::process::calls::callback::SuspendedRecord::Resident { record, .. } => {
