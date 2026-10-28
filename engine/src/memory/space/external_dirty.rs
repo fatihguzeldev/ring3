@@ -187,7 +187,7 @@ impl AddressSpace {
         &mut self,
         epoch: u64,
         tables: &mut crate::abi::external_memory::ExternalMemory,
-    ) -> Result<[u8; 80], MemoryError> {
+    ) -> Result<[u8; 88], MemoryError> {
         if !tables.is_cpu_page_tables_for(self.backing.as_ptr() as usize) {
             return Err(MemoryError::InvalidRange);
         }
@@ -198,7 +198,7 @@ impl AddressSpace {
         &mut self,
         epoch: u64,
         tables: &mut [u8],
-    ) -> Result<[u8; 80], MemoryError> {
+    ) -> Result<[u8; 88], MemoryError> {
         if tables.len() != TABLE_BYTES
             || epoch != self.external_mapping_epoch
             || self
@@ -214,12 +214,13 @@ impl AddressSpace {
         };
         let result = (|| {
             let observation = collector.observe(tables)?;
+            let prepublication_code = self.code_validation_version;
             // publication validates every physical slot and the next version before
             // consuming any hardware dirty/accessed evidence.
             self.publish_external_dirty(&collector.slots)?;
             collector.clear_observed(tables, &observation);
             let reset_access = observation.accessed.iter().any(|&bits| bits != 0);
-            let mut bytes = [0; 80];
+            let mut bytes = [0; 88];
             crate::abi::header::write(&mut bytes, *b"R3DC");
             for (offset, value) in [
                 (16, collector.slots.as_ptr() as usize as u32),
@@ -238,6 +239,7 @@ impl AddressSpace {
                 (48, self.version),
                 (56, self.code_validation_version),
                 (64, self.identity),
+                (80, prepublication_code),
             ] {
                 bytes[offset..offset + 8].copy_from_slice(&value.to_le_bytes());
             }
@@ -340,7 +342,7 @@ mod tests {
             .collect_external_dirty(memory.external_mapping_epoch, &mut bytes)
             .unwrap();
         assert_eq!(&result[..4], b"R3DC");
-        assert_eq!(word(&result, 8), 80);
+        assert_eq!(word(&result, 8), 88);
         assert_eq!(word(&result, 20), 1, "physical aliases publish one slot");
         assert_eq!(word(&result, 24), 1);
         assert_eq!(word(&result, 28), 1);
@@ -478,6 +480,48 @@ mod tests {
             "publication failure leaves the next collection complete"
         );
         assert_eq!(word(&bytes, pte(1)) & 64, 0);
+    }
+
+    #[test]
+    fn external_dirty_collect_reports_prepublication_code_epoch() {
+        let mut memory = AddressSpace::new(3).unwrap();
+        memory.map_zeroed(range(0x1000), Permissions::ALL).unwrap();
+        memory.map_zeroed(range(0x2000), Permissions::ALL).unwrap();
+        track(&mut memory);
+        let old_import = memory.code_validation_version();
+        memory.write(GuestAddress(0x2000), &[9]).unwrap();
+        let host_changed = memory.code_validation_version();
+        assert_ne!(host_changed, old_import);
+        let mut bytes = tables(&memory);
+        access(&mut bytes, 1, true);
+        let result = memory
+            .collect_external_dirty(memory.external_mapping_epoch, &mut bytes)
+            .unwrap();
+        assert_eq!(result.len(), 88);
+        assert_eq!(word(&result, 8), 88);
+        let before = u64::from_le_bytes(result.get(80..88).unwrap().try_into().unwrap());
+        let after = u64::from_le_bytes(result[56..64].try_into().unwrap());
+        assert_eq!(
+            before, host_changed,
+            "the stamp includes unseen host writes before collection"
+        );
+        assert!(
+            after > before,
+            "guest dirty publication has its own later stamp"
+        );
+        assert_eq!(after, memory.transaction_version());
+        assert_ne!(word(&memory.external_descriptor(), 108) & 4, 0);
+        let readonly = memory
+            .collect_external_dirty(memory.external_mapping_epoch, &mut bytes)
+            .unwrap();
+        assert_eq!(
+            u64::from_le_bytes(readonly.get(80..88).unwrap().try_into().unwrap()),
+            after
+        );
+        assert_eq!(
+            u64::from_le_bytes(readonly[56..64].try_into().unwrap()),
+            after
+        );
     }
 
     #[test]

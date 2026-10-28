@@ -6,13 +6,14 @@ import {BACKING_BASE,DIRECTORY,TABLES,PRIVATE_VA} from '../runtime/v86/layout.js
 
 const PAGE=4096, CODE=0x100, DATA=0x200;
 
-function world({journal=false,nativeDirty=false}={}) {
+function world({journal=false,nativeDirty=false,nativeDirtyEpoch=false,dirtyGateFlags=false}={}) {
   const memory=new WebAssembly.Memory({initial:512}),data=new DataView(memory.buffer);
+  const capabilities=(nativeDirty?2:0)|(nativeDirtyEpoch?4:0)|(dirtyGateFlags?8:0);
   const info={backing:16*1024*1024,length:16*PAGE,maps:8*1024*1024,permissions:12*1024*1024,
     guestPages:1<<20,capacity:16,mapped:2,mappingVersions:13*1024*1024,
     physicalVersions:21*1024*1024,privateSlots:0,executableViews:27*1024*1024,
     identity:1n,transaction:1n,code:1n,mapping:1n,
-    mappingChanges:28*1024*1024,mappingChangeCount:0,mappingChangeCapacity:1<<20,mappingChangeFlags:nativeDirty?2:0};
+    mappingChanges:28*1024*1024,mappingChangeCount:0,mappingChangeCapacity:1<<20,mappingChangeFlags:capabilities};
   const rows=new Map(),pending=new Set(),acks=[],ackAttempts=[],dirtyPublications=[],nativeCollections=[],requests=[],
     hooks={beforeAck:null,collectResult:null};
   let tracking=false;
@@ -40,8 +41,8 @@ function world({journal=false,nativeDirty=false}={}) {
     jit_clear_cache(){this.clears++;compiled.clear();},full_clear_tlb(){this.tlbClears++;}};
   const engine={memory,base:0,
     ok(operation,...args) {
-      if(operation==='component_cpu_attach') {tracking=journal;info.mappingChangeFlags=(journal?1:0)|(nativeDirty?2:0);return;}
-      if(operation==='component_cpu_release') {tracking=false;info.mappingChangeFlags=nativeDirty?2:0;pending.clear();info.mappingChangeCount=0;return;}
+      if(operation==='component_cpu_attach') {tracking=journal;info.mappingChangeFlags=(journal?1:0)|capabilities;return;}
+      if(operation==='component_cpu_release') {tracking=false;info.mappingChangeFlags=capabilities;pending.clear();info.mappingChangeCount=0;return;}
       if(operation==='component_cpu_ack_mappings') {
         const epoch=BigInt(args[2]>>>0)|(BigInt(args[3]>>>0)<<32n),count=args[4];
         ackAttempts.push({epoch,count});hooks.beforeAck?.();
@@ -77,7 +78,7 @@ function world({journal=false,nativeDirty=false}={}) {
             if(value&64){slots.add(row.slot);dirtyPtes.push([at,value&~64]);}
           }
         }
-        const values=[...slots],slotsPtr=27*1024*1024+PAGE;
+        const values=[...slots],slotsPtr=27*1024*1024+PAGE,beforeCode=info.code;
         if(values.length) {
           dirtyPublications.push(values);info.transaction++;
           for(const slot of values) {
@@ -87,14 +88,15 @@ function world({journal=false,nativeDirty=false}={}) {
         }
         for(const [at,value] of [...accessed,...dirtyPtes])data.setUint32(at,value,true);
         new Uint32Array(memory.buffer,slotsPtr,values.length).set(values);
-        const at=140;new Uint8Array(memory.buffer,at,80).fill(0);
+        const at=140,size=nativeDirtyEpoch?88:80;new Uint8Array(memory.buffer,at,size).fill(0);
         data.setUint32(at,0x43443352,true);data.setUint16(at+4,1,true);data.setUint16(at+6,1,true);
-        data.setUint32(at+8,80,true);
+        data.setUint32(at+8,size,true);
         for(const [offset,value] of [[16,slotsPtr],[20,values.length],[24,accessed.length?1:0],
           [28,accessed.length||values.length?1:0],[32,scannedPtes],[36,groups.size],
           [72,info.capacity],[76,info.physicalVersions]])data.setUint32(at+offset,value,true);
         for(const [offset,value] of [[40,info.mapping],[48,info.transaction],[56,info.code],[64,info.identity]])
           data.setBigUint64(at+offset,value,true);
+        if(nativeDirtyEpoch)data.setBigUint64(at+80,beforeCode,true);
         nativeCollections.push({epoch,directory,slots:values});hooks.collectResult?.(data,at);
         return;
       }
@@ -430,4 +432,40 @@ test('native collection uses the acknowledged COW/remap slot and retains the for
   assert.equal(tables.publishDirty(),1);assert.deepEqual(f.nativeCollections.at(-1).slots,[2]);
   assert.equal(f.data.getBigUint64(f.info.physicalVersions+8,true),original);
   tables.refresh();assert.equal(f.compiled.get(CODE),generated);
+});
+
+test('native 88-byte publication adopts a proven guest code stamp without rebuilding executable rows',()=>{
+  const f=world({journal:true,nativeDirty:true,nativeDirtyEpoch:true,dirtyGateFlags:true});f.map(CODE,0,7);
+  const tables=new PageTables(f.engine,f.cpu);
+  assert.equal(tables.nativeDirtyEpochSupported,true);assert.equal(tables.dirtyGateFlagsSupported,true);
+  f.data.setUint32(tables.pte(CODE),f.data.getUint32(tables.pte(CODE),true)|64,true);
+  f.data.setUint32(DIRECTORY,f.data.getUint32(DIRECTORY,true)|32,true);
+  assert.equal(tables.publishDirty(),1);assert.equal(tables.codeValidity.code,f.info.code);
+  const forbidden={[Symbol.iterator](){throw new Error('proven guest stamp rebuilt executable rows');}};
+  assert.equal(tables.codeValidity.refresh(f.info,forbidden).invalidate,false);
+  assert.equal(f.nativeCollections.length,1);assert.equal(f.requests.length,0);
+});
+
+test('native 88-byte publication cannot acknowledge a same-slot host write unseen before collection',()=>{
+  const f=world({journal:true,nativeDirty:true,nativeDirtyEpoch:true});f.map(CODE,0,7);
+  const tables=new PageTables(f.engine,f.cpu),generated={id:'unseen-before-collect'};
+  f.compiled.set(CODE,generated);f.write(0);
+  f.data.setUint32(tables.pte(CODE),f.data.getUint32(tables.pte(CODE),true)|64,true);
+  f.data.setUint32(DIRECTORY,f.data.getUint32(DIRECTORY,true)|32,true);
+  assert.equal(tables.publishDirty(),1);
+  assert.equal(tables.codeValidity.code,1n);assert.equal(tables.codeValidity.content.get(0),1n);
+  tables.refresh();assert.equal(f.compiled.has(CODE),false);
+});
+
+test('native 88-byte publication cannot absorb a same-slot host write after collection',()=>{
+  const f=world({journal:true,nativeDirty:true,nativeDirtyEpoch:true});f.map(CODE,0,7);
+  const tables=new PageTables(f.engine,f.cpu),generated={id:'host-after-collect'};
+  f.compiled.set(CODE,generated);
+  f.data.setUint32(tables.pte(CODE),f.data.getUint32(tables.pte(CODE),true)|64,true);
+  f.data.setUint32(DIRECTORY,f.data.getUint32(DIRECTORY,true)|32,true);
+  f.hooks.collectResult=()=>f.write(0);
+  assert.equal(tables.publishDirty(),1);
+  assert.equal(tables.codeValidity.code,2n);assert.equal(tables.codeValidity.content.get(0),2n);
+  assert.equal(f.data.getBigUint64(f.info.physicalVersions+8,true),3n);
+  tables.refresh();assert.equal(f.compiled.has(CODE),false);
 });

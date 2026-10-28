@@ -38,13 +38,17 @@ export class CodeValidity {
   }
   acknowledgeGuestWrites(info,slots) {
     if(this.identity!==info.identity)throw new Error('v86 guest write acknowledgement changed address space');
-    const data=new DataView(this.memory.buffer),updates=[];
+    const stamped=info.beforeCode!==undefined;
+    const known=!stamped || (info.beforeCode===this.code && info.mapping===this.mapping);
+    const data=stamped?null:new DataView(this.memory.buffer),updates=[];
     for(const slot of slots) {
       if(!Number.isInteger(slot) || slot<0 || slot>=info.capacity)
         throw new Error('invalid v86 guest dirty slot');
-      if(this.content.has(slot))updates.push([slot,data.getBigUint64(info.physicalVersions+slot*16+8,true)]);
+      if(known && this.content.has(slot))updates.push([slot,stamped?info.transaction:data.getBigUint64(info.physicalVersions+slot*16+8,true)]);
     }
+    if(!known)return;
     for(const [slot,version] of updates)this.content.set(slot,version);
-    // a later full comparison must still see any unrelated host changes.
+    if(stamped)this.code=info.code;
+    // legacy publication has no proven global pre-write stamp.
   }
 }

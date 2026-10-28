@@ -14,8 +14,9 @@ export class PageTables {
     this.lastMappingScanCount=0;this.lastMappingFullRebuild=false;
     this.lastDirtyScanCount=0;this.lastDirtyDirectoryCount=0;
     const info=this.descriptor();
-    this.dirtyGateFlagsSupported=(info.mappingChangeFlags&8)!==0;
     this.nativeDirtySupported=(info.mappingChangeFlags&2)!==0;
+    this.nativeDirtyEpochSupported=(info.mappingChangeFlags&4)!==0;
+    this.dirtyGateFlagsSupported=(info.mappingChangeFlags&8)!==0;
     this.nativeDirty=options.nativeDirty??this.nativeDirtySupported;
     if(typeof this.nativeDirty!=='boolean' || (this.nativeDirty && !this.nativeDirtySupported))
       throw new Error('unsupported v86 native dirty collector');
@@ -177,14 +178,15 @@ export class PageTables {
     h.ok('component_cpu_collect_dirty',...KEY,Number(epoch&0xffffffffn),Number(epoch>>32n),this.ram+DIRECTORY);
     let flushed=false;
     try {
-      const d=h.resultView(80),buffer=h.memory.buffer;
+      const size=this.nativeDirtyEpochSupported?88:80,d=h.resultView(size),buffer=h.memory.buffer;
       if(d.getUint32(0,true)!==0x43443352 || d.getUint16(4,true)!==1 || d.getUint16(6,true)!==1 ||
-          d.getUint32(8,true)!==80 || d.getUint32(12,true)!==0)
+          d.getUint32(8,true)!==size || d.getUint32(12,true)!==0)
         throw new Error('invalid v86 native dirty result header');
       const pointer=d.getUint32(16,true),count=d.getUint32(20,true),resetAccess=d.getUint32(24,true),
         flushRequired=d.getUint32(28,true),scannedPtes=d.getUint32(32,true),scannedDirectories=d.getUint32(36,true);
       const info={mapping:d.getBigUint64(40,true),transaction:d.getBigUint64(48,true),code:d.getBigUint64(56,true),
         identity:d.getBigUint64(64,true),capacity:d.getUint32(72,true),physicalVersions:d.getUint32(76,true)};
+      if(this.nativeDirtyEpochSupported)info.beforeCode=d.getBigUint64(80,true);
       if(info.identity!==this.identity || info.mapping!==epoch || info.capacity!==this.capacity ||
           info.physicalVersions!==this.physicalVersions || count>info.capacity || (count && !pointer) || pointer%4 ||
           pointer>buffer.byteLength || count>(buffer.byteLength-pointer)/4 || resetAccess>1 || flushRequired>1 ||
