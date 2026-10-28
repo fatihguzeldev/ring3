@@ -1,4 +1,6 @@
-use super::{CARRY_IN, FLAGS, FULL_BLOCK, LEFT, Output, RIGHT, SCALAR_CACHE_BASE, VALUE};
+use super::{
+    CARRY_IN, FLAGS, FULL_BLOCK, KIND, LEFT, Output, RIGHT, SCALAR_CACHE_BASE, VALUE, WIDTH,
+};
 use crate::cpu::core::{
     flags::{self, FlagKind},
     region::values::scalar::{FlagRecipe, ReadAvailability},
@@ -11,13 +13,30 @@ fn recipe(out: &Output<'_>) -> Option<FlagRecipe> {
         .and_then(|frame| out.scalar_plan.recipe(frame))
 }
 
+fn admit_recipe(out: &mut Output<'_>, recipe: FlagRecipe) {
+    out.c().local_get(FULL_BLOCK);
+    if out
+        .before_frame
+        .is_some_and(|frame| out.scalar_plan.recipe_requires_guard(frame))
+    {
+        out.c()
+            .local_get(KIND)
+            .i32_const(recipe.kind as i32)
+            .i32_eq()
+            .i32_and()
+            .local_get(WIDTH)
+            .i32_const(recipe.width as i32)
+            .i32_eq()
+            .i32_and();
+    }
+}
+
 pub(super) fn try_condition(out: &mut Output<'_>, condition: Condition) -> bool {
     let Some(recipe) = recipe(out) else {
         return false;
     };
-    out.c()
-        .local_get(FULL_BLOCK)
-        .if_(BlockType::Result(ValType::I32));
+    admit_recipe(out, recipe);
+    out.c().if_(BlockType::Result(ValType::I32));
     emit_condition(out, recipe, condition);
     out.c().else_();
     out.condition_fallback(condition);
@@ -29,7 +48,8 @@ pub(super) fn try_materialize(out: &mut Output<'_>, mask: u32) -> bool {
     let Some(recipe) = recipe(out) else {
         return false;
     };
-    out.c().local_get(FULL_BLOCK).if_(BlockType::Empty);
+    admit_recipe(out, recipe);
+    out.c().if_(BlockType::Empty);
     let written = recipe.written() & mask;
     out.c()
         .local_get(FLAGS)

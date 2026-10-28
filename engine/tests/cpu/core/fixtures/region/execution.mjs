@@ -22,6 +22,47 @@ function ordinaryFlags(witness) {
 }
 
 export function runExecutionFlagsCases(fixture) {
+  const predecessorSegments=alternate=>[[0x1000,'85d2 751c eb0a'],[0x1010,`${alternate} be30100000 ffe6`],
+    [0x1020,'01d8 eb0c'],[0x1030,'49 0f924520 ffe7']];
+  for(const c of[
+    {name:'matching-add32',alternate:'29d8',eax:0xffffffff,edx:1,value:0,esi:0,retired:7,fallback:0},
+    {name:'indirect-sub32-kind-mismatch',alternate:'29d8',eax:0,edx:0,value:0xffffffff,esi:0x1030,retired:9,fallback:1},
+    {name:'indirect-add16-width-mismatch',alternate:'6601d8',eax:0xffff,edx:0,value:0,esi:0x1030,retired:9,fallback:1},
+    {name:'indirect-materialized-carry',alternate:'f9',eax:0x13579bdf,edx:0,value:0x13579bdf,esi:0x1030,retired:9,fallback:1},
+  ])fixture(`execution-predecessor-flags-${c.name}`,{
+    segments:predecessorSegments(c.alternate),registers:[c.eax,1,c.edx,1,0x4800,0x3000,0,0x1100],
+    initialFlags:0x402,stateWitness:true,
+  },t=>{
+    t.writeExpected(0x3020,'01');
+    const{before,witness}=retained(t,{pc:0x1100,retired:c.retired,budget:c.retired,flags:0x447,ecx:0,
+      regs:{0:c.value,6:c.esi},fp:t.startingFp});
+    assert.equal(t.version(),before+1n);
+    assert.equal(witness.flags_calls,c.fallback,'only an actual mismatching predecessor uses the generic FLAGS resolver');
+    t.result.executionWitness=witness;
+  });
+  fixture('execution-predecessor-flags-fresh-secondary-entry',{
+    segments:predecessorSegments('29d8'),registers:[0x13579bdf,1,0,1,0x4800,0x3000,0,0x1100],
+    initialFlags:0x403,stateWitness:true,
+  },t=>{
+    new DataView(t.engine.memory.buffer).setUint32(t.context()+32,0x1030,true);
+    t.writeExpected(0x3020,'01');
+    const{before,witness}=retained(t,{pc:0x1100,retired:3,budget:3,flags:0x447,ecx:0,fp:t.startingFp});
+    assert.equal(t.version(),before+1n);
+    assert.equal(witness.flags_calls,1,'a public entry never trusts the skipped static writer');
+    t.result.executionWitness=witness;
+  });
+  fixture('execution-predecessor-flags-short-quota-and-interior-resume',{
+    segments:predecessorSegments('29d8'),registers:[0x13579bdf,1,0,1,0x4800,0x3000,0,0x1100],
+    initialFlags:0x403,
+  },t=>{
+    new DataView(t.engine.memory.buffer).setUint32(t.context()+32,0x1030,true);
+    const before=t.version();
+    t.check({pc:0x1031,retired:1,budget:1,flags:0x447,ecx:0,fp:t.startingFp});
+    assert.equal(t.version(),before);
+    t.writeExpected(0x3020,'01');
+    t.check({pc:0x1100,retired:3,budget:2,flags:0x447,ecx:0,fp:t.startingFp});
+    assert.equal(t.version(),before+1n);
+  });
   for(const c of[
     {name:'cmp-signed-overflow-taken',code:'39d8',eax:0x80000000,ebx:1,result:0x80000000,flags:0x816,edx:7},
     {name:'cmp-signed-overflow-untaken',code:'39d8',eax:1,ebx:0x80000000,result:1,flags:0x883,edx:9},
