@@ -2,13 +2,48 @@ import {GDT,IDT,TSS,STACK,HANDLERS,PARK,TRAP_PORT,physicalPrivate} from './layou
 import {cpuViews} from './state.js';
 
 const ERROR_VECTORS = new Set([8,10,11,12,13,14,17]);
+const PORT_IO_FAULT=Object.freeze({portIOFault:true});
+const IO_PREFIXES=new Set([0x26,0x2e,0x36,0x3e,0x64,0x65,0x66,0x67,0xf2,0xf3]);
+export const GATE_PORT=0xe1;
 
 export class Traps {
-  constructor(cpu) {
+  constructor(cpu,readCode=null) {
     this.cpu=cpu;this.memory=cpu.wasm_memory;this.ram=cpu.mem8.byteOffset;
-    this.pending=null;
+    this.pending=null;this.portGates=false;this.readCode=readCode;
     this.initialize();
     cpu.io.register_write(TRAP_PORT,this,()=>this.capture());
+    cpu.io.register_write(GATE_PORT,this,()=>this.capturePort(true),()=>this.capturePort(false),()=>this.capturePort(false));
+    cpu.io.register_read(GATE_PORT,this,()=>this.capturePort(false),()=>this.capturePort(false),()=>this.capturePort(false));
+  }
+  configurePortGates(enabled) {
+    const v=cpuViews(this.memory),bitmap=this.ram+TSS+0x68,limit=enabled?0x88:0x67;
+    v.bytes.fill(0xff,bitmap,this.ram+TSS+0x89);
+    if(enabled)v.bytes[bitmap+(GATE_PORT>>>3)]&=~(1<<(GATE_PORT&7));
+    this.setDescriptor(0x28,physicalPrivate(TSS),limit,0x89,false);v.limits[6]=limit;
+    this.portGates=enabled;
+  }
+  isPortFault(error) {return error===PORT_IO_FAULT && this.pending?.portDenied===true;}
+  isReservedStringIO(pc,dx) {
+    if(!this.portGates || (dx&0xffff)!==GATE_PORT || !this.readCode)return false;
+    for(let offset=0;offset<15;offset++) {
+      const opcode=this.readCode((pc+offset)>>>0);
+      if(opcode===0x6c || opcode===0x6e)return true;
+      if(!IO_PREFIXES.has(opcode))return false;
+    }
+    return false;
+  }
+  capturePort(write8) {
+    if(this.pending)throw new Error('nested v86 adapter trap');
+    const v=cpuViews(this.memory),d=v.data;
+    if(v.bytes[612]!==3)throw new Error('v86 gate port accessed outside guest ring3');
+    const pc=d.getUint32(560,true),candidate=this.portGates && write8 && d.getUint32(556,true)===((pc+2)>>>0)
+      && this.readCode?.(pc)===0xe6 && this.readCode((pc+1)>>>0)===GATE_PORT;
+    this.pending={vector:candidate?6:13,error:0,pc,cs:v.selectors[1],ss:v.selectors[2],
+      flags:this.cpu.wm.exports.get_eflags()>>>0,esp:v.regs[4],address:0,
+      portGate:candidate,portDenied:!candidate,privateInstructions:0,
+      registers:candidate?null:Array.from(v.regs)};
+    d.setUint32(556,PARK,true);d.setUint32(620,0xffffffff,true);
+    if(!candidate)throw PORT_IO_FAULT;
   }
   setDescriptor(selector,base,limit,access,default32=true) {
     if(!(selector & ~3))return;
@@ -57,7 +92,10 @@ export class Traps {
     this.pending={vector,error:hasError?d.getUint32(at+4,true):0,
       pc:d.getUint32(frame,true),cs,flags:d.getUint32(frame+8,true),
       esp:d.getUint32(frame+12,true),ss:d.getUint32(frame+16,true),
-      address:d.getUint32(588,true)};
+      address:d.getUint32(588,true),privateInstructions:2};
+    if(vector===14 && this.isReservedStringIO(this.pending.pc,v.regs[2])) {
+      this.pending.vector=13;this.pending.error=0;this.pending.address=0;this.pending.portDenied=true;
+    }
     d.setUint32(556,PARK,true);
     d.setUint32(620,0xffffffff,true);
   }

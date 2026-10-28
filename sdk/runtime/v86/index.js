@@ -1,6 +1,6 @@
 import {V86} from './vendor/libv86.mjs';
 import {KEY} from '../engine.js';
-import {CPU_SHA256,PHYSICAL_BYTES,PARK,SHIPPING_JIT,CODEGEN_SWITCHES} from './layout.js';
+import {CPU_SHA256,PHYSICAL_BYTES,PARK,SHIPPING_JIT,CODEGEN_SWITCHES,BACKING_BASE,PAGE} from './layout.js';
 import {PageTables} from './memory.js';
 import {Traps} from './traps.js';
 import {cpuViews,importState,exportState,rememberStateBanks,forgetStateBanks} from './state.js';
@@ -71,14 +71,26 @@ export class V86CodeCache {
     if(!Number.isInteger(budget) || budget<1 || budget>0xffffffff)throw new Error('invalid v86 execution budget');
     this.budget=Math.min(budget,100002);
     this.tables=new PageTables(engine,cpu);
-    try {this.traps=new Traps(cpu);}catch(error){this.tables.rollback(error);throw error;}
+    try {this.traps=new Traps(cpu,address=>this.readCodeByte(address));}catch(error){this.tables.rollback(error);throw error;}
     this.imported=false;this.closed=false;this.open=false;
     this.runs=0;this.regions=0;this.retired=0;this.work=0;this.gates=0;this.faults=0;
     this.dirtyPages=0;this.cowFaults=0;
     this.deferDirty=true;this.dirtyPending=false;this.deferredDirtyPublications=0;
     this.reuseNumericState=true;
+    this.portGates=false;this.portGateModeTouched=false;this.portGateCalls=0;this.deniedPortCalls=0;
   }
   get pc() {return this.engine.get(48);}
+  readCodeByte(address) {
+    const {memory,tables}=this,page=address>>>12,buffer=memory.buffer;
+    let views=this.codeByteViews;
+    if(!views || views.buffer!==buffer || views.mapsPointer!==tables.maps || views.rightsPointer!==tables.rights)
+      this.codeByteViews=views={buffer,mapsPointer:tables.maps,rightsPointer:tables.rights,
+        maps:new Uint32Array(buffer,tables.maps,1<<20),rights:new Uint8Array(buffer,tables.rights,1<<20),
+        bytes:new Uint8Array(buffer)};
+    const mapped=views.maps[page];
+    if(!mapped || mapped>tables.capacity || !(views.rights[page]&7))return null;
+    return views.bytes[tables.ram+BACKING_BASE+(mapped-1)*PAGE+(address&4095)];
+  }
   import() {
     if(this.closed)throw new Error('v86 adapter is closed');
     this.tables.refresh();
@@ -97,11 +109,14 @@ export class V86CodeCache {
       const before=cpuViews(this.memory).data.getUint32(664,true);
       new DataView(this.memory.buffer).setUint32(hp,this.budget,true);
       this.open=true;
-      try {cpu.main_loop();} finally {this.open=false;}
+      try {cpu.main_loop();} catch(error) {
+        if(!this.traps.isPortFault?.(error))throw error;
+      } finally {this.open=false;}
       const delta=(cpuViews(this.memory).data.getUint32(664,true)-before)>>>0;
       trap=this.traps.pending;
       if(!delta && !trap)throw new Error(`v86 made no progress at0x${cpuViews(this.memory).data.getUint32(556,true).toString(16)}`);
-      work+=delta;retired+=Math.max(0,delta-(trap?2:0));
+      work+=delta;retired+=Math.max(0,delta-(trap?.privateInstructions??(trap?2:0)));
+      if(trap?.registers)cpuViews(this.memory).regs.set(trap.registers);
       exportState(h,cpu,trap);
       if(this.reuseNumericState!==false)rememberStateBanks(h,cpu);
       this.dirtyPending=true;
@@ -120,7 +135,12 @@ export class V86CodeCache {
         h.ok('component_cpu_gate',...KEY,trap.pc);
         const result=h.resultView(8),gate=result.getUint32(0,true);
         deferAllowed=this.tables.dirtyGateFlagsSupported===true && (result.getUint32(4,true)&1)!==0;
-        if(gate){stop=7;vector=gate;this.gates++;}else {stop=9;this.faults++;}
+        if(gate && (!trap.portGate || (result.getUint32(4,true)&2)!==0)) {
+          stop=7;vector=gate;this.gates++;if(trap.portGate)this.portGateCalls++;
+        } else {
+          stop=9;this.faults++;
+          if(trap.portGate){vector=13;detail=0;this.deniedPortCalls++;}
+        }
       } else if(vector===14) {
         stop=3;detail=trap.address;
         const access=trap.error&2?2:trap.address===trap.pc?4:1;
@@ -130,6 +150,7 @@ export class V86CodeCache {
       } else if([0,1,3,4,5,7,10,11,12,13,16,19].includes(vector)) {
         stop=9;detail=vector===16?h.get(4236+18)&0xffff:vector===19?h.get(4364+16):trap.error;
         this.faults++;
+        if(trap.portDenied)this.deniedPortCalls++;
       } else throw new Error(`unsupported v86 CPU exception ${vector} at0x${trap.pc.toString(16)}`);
     }
     if(work>0xffffffff || retired>work)throw new Error('invalid v86 execution accounting');
@@ -150,6 +171,27 @@ export class V86CodeCache {
       throw new Error('v86 dirty deferral changes require a closed paused owner');
     this.publish();this.deferDirty=enabled;return enabled;
   }
+  applyPortGates(enabled) {
+    if(typeof this.engine.api.component_cpu_set_gate_mode!=='function') {
+      if(!enabled && !this.portGates)return false;
+      throw new Error('native v86 port gates are unsupported');
+    }
+    this.publish();this.tables.refresh();
+    this.engine.ok('component_cpu_set_gate_mode',...KEY,enabled?1:0);
+    this.portGateModeTouched=true;
+    const result=this.engine.resultView(8),mode=result.getUint32(0,true),count=result.getUint32(4,true);
+    if(mode!==(enabled?1:0) || (!enabled && count))throw new Error('invalid native v86 gate mode result');
+    this.portGates=enabled;this.traps.configurePortGates(enabled);
+    // the native version change conservatively invalidates affected executable content.
+    this.tables.refresh();this.cpu.full_clear_tlb();
+    return enabled;
+  }
+  configurePortGates(enabled,owner) {
+    if(owner?.paused!==true || owner?.open!==false || this.open || this.closed || typeof enabled!=='boolean')
+      throw new Error('v86 port gate changes require a closed paused owner');
+    if(enabled===this.portGates)return enabled;
+    return this.applyPortGates(enabled);
+  }
   sampleUsage() {return this.stats();}
   coldDiagnostics() {return null;}
   stats() {
@@ -161,6 +203,7 @@ export class V86CodeCache {
       installedUnits:counters.finalizedModules,v86:counters,jitConfig:this.runtime.jitConfig,
       workBudget:this.budget,gates:this.gates,faults:this.faults,cowFaults:this.cowFaults,
       dirtyPages:this.dirtyPages,deferDirty:this.deferDirty,
+      portGates:this.portGates,portGateCalls:this.portGateCalls,deniedPortCalls:this.deniedPortCalls,
       deferredDirtyPublications:this.deferredDirtyPublications,wasmMemoryBytes:this.memory.buffer.byteLength,
       executePermissionEnforcement:false,faultAccessLength:'one-byte conservative fault span',
       x87TagSemantics:'v86 represents occupancy and derives nonempty tags from payload; incompatible imports fail',
@@ -171,6 +214,7 @@ export class V86CodeCache {
     if(this.closed)return;
     if(this.open)throw new Error('cannot close an active v86 adapter');
     this.publish();
+    if(this.portGateModeTouched || this.portGates)this.applyPortGates(false);
     forgetStateBanks(this.cpu);
     this.tables.release();this.closed=true;this.imported=false;
   }

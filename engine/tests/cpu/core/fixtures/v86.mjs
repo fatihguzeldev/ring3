@@ -5,10 +5,12 @@ import {readEngine} from '../../../support/wasm/engine.mjs';
 import {Engine, KEY, view} from '../../../../../sdk/runtime/engine.js';
 import {prepareV86} from '../../../../../sdk/runtime/v86/index.js';
 import {DIRECTORY} from '../../../../../sdk/runtime/v86/layout.js';
+import {cpuViews} from '../../../../../sdk/runtime/v86/state.js';
 import {image as moduleImage} from '../../../loader/modules/wasm/fixtures/runtime/images.mjs';
 
-const [enginePath, reportPath, permissionText = '1'] = process.argv.slice(2);
+const [enginePath, reportPath, permissionText = '1', portText = ''] = process.argv.slice(2);
 assert(enginePath && reportPath, 'usage: v86.mjs imported-engine.wasm fresh-report.json');
+assert(['', 'port'].includes(portText));
 const deniedPermission = Number(permissionText);
 assert([0,1].includes(deniedPermission));
 const hash = bytes => createHash('sha256').update(bytes).digest('hex');
@@ -18,7 +20,7 @@ assert.equal(hash(image), '7c0451977a0818d5f4905a2b00f3a3bae63b9449ef22775ea003e
 const cpuBytes = readFileSync(new URL('../../../../../sdk/runtime/v86/vendor/v86.wasm', import.meta.url));
 const report = {complete: false, engineSha256: artifact.sha256, cpuSha256: hash(cpuBytes),
   scope: 'actual unmodified v86 CPU, shared RAM, authored PE with four Ring3 Windows calls; no game/FPS claim',
-  calls: [], runs: [], ownCpuCalls: 0};
+  portControls:portText==='port',calls: [], runs: [], ownCpuCalls: 0};
 writeFileSync(reportPath, JSON.stringify(report), {flag: 'wx'});
 const save = () => writeFileSync(reportPath, JSON.stringify(report, (_key, value) =>
   typeof value === 'bigint' ? String(value) : value, 2) + '\n');
@@ -238,6 +240,130 @@ try {
     assert.equal(read(dataAddress),3,'same-VA remap executes new canonical bytes');
     report.hostCodeInvalidation={clears,finalizedModules:cache.stats().v86.finalizedModules};
   } finally {cache.cpu.jit_clear_cache=clear;}
+  if(portText==='port') {
+    stage='owned port gates and denied I/O forms';
+    assert.equal(cache.portGates,false,'the existing default remains UD2');
+    const probePc=0x600700,source=0x601600,destination=0x601640,unmapped=0x6f0000;
+    const savedBanks=banks(),gateWord=read(gate)&0xffff;
+    assert.equal(gateWord,0x0b0f);
+    const seed=(pc,{count=4,unmappedSource=false,unmappedDestination=false}={})=>{
+      const registers=[0x11223344,count,0xe1,0x3456789a,0x601800,0x456789ab,
+        unmappedSource?unmapped:source,unmappedDestination?unmapped:destination];
+      const data=new DataView(memory.buffer);
+      for(let index=0;index<8;index++)data.setUint32(engine.base+16+index*4,registers[index],true);
+      data.setUint32(engine.base+48,pc,true);data.setUint32(engine.base+52,0x646,true);
+      return registers;
+    };
+    const stateEquals=(pc,registers)=>{
+      assert.equal(engine.get(48),pc);
+      assert.deepEqual(Array.from({length:8},(_,index)=>engine.get(16+index*4)),registers);
+      assert.equal(engine.get(52),0x646);
+      assert.deepEqual(banks(),savedBanks,'I/O preserves x87/SIMD/YMM and guest segment banks');
+    };
+    const ownedGate=()=>{
+      const registers=seed(gate);cache.import();
+      const run=cache.execute(cache.select());cache.publish();
+      assert.equal(run.reason,8);assert.equal(run.detail,0x10001);
+      stateEquals(gate,registers);
+      if(cache.portGates)assert.equal(cpuViews(memory).bytes[612],3,'owned OUT never enters ring0');
+      return run;
+    };
+    const forms=[
+      {name:'out-imm',bytes:[0xe6,0xe1]}, {name:'out-dx',bytes:[0xee]},
+      {name:'in-imm',bytes:[0xe4,0xe1]}, {name:'in-dx',bytes:[0xec]},
+      {name:'out-wide',bytes:[0xe7,0xe1]}, {name:'in-wide',bytes:[0xe5,0xe1]},
+      {name:'ins',bytes:[0x6c]}, {name:'outs',bytes:[0x6e]},
+      {name:'rep-ins',bytes:[0xf3,0x6c]}, {name:'rep-outs',bytes:[0xf3,0x6e]},
+      {name:'rep-ins-unmapped',bytes:[0xf3,0x6c],unmappedDestination:true},
+      {name:'rep-outs-unmapped',bytes:[0xf3,0x6e],unmappedSource:true},
+      {name:'rep-ins-zero',bytes:[0xf3,0x6c],count:0},
+      {name:'rep-outs-zero',bytes:[0xf3,0x6e],count:0},
+      {name:'out-other-port',bytes:[0xe6,0xe2]},
+    ];
+    report.portGates={forms:[],semantics:'nonterminal denied runs intercept native exception publication only; each is followed by a real ordinary gate, then one terminal #GP is genuinely committed'};
+    for(const enabled of [false,true]) {
+      assert.equal(cache.configurePortGates(enabled,{paused:true,open:cache.open}),enabled);
+      assert.equal(read(gate)&0xffff,enabled?0xe1e6:gateWord);
+      report.portGates[enabled?'ownedPort':'ownedUd2']=ownedGate();
+      if(enabled) {
+        engine.ok('register_user32_module',0x71000000);
+        engine.ok('load_library_module',engine.name('user32.dll'),0);
+        let dynamic;
+        for(let start=0,total=1;start<total&&!dynamic;) {
+          engine.ok('module_gates_page',start,128);const rows=engine.resultView(4096);
+          total=rows.getUint32(16,true);const count=rows.getUint32(24,true);
+          assert(count>0);
+          for(let index=0;index<count;index++) {
+            const id=rows.getUint32(36+index*8,true);
+            if(id>>>16===2){dynamic={pc:rows.getUint32(32+index*8,true),id};break;}
+          }
+          start+=count;
+        }
+        assert(dynamic,'new system module exposes a registered gate');
+        assert.equal(read(dynamic.pc)&0xffff,0x0b0f,'newly loaded gate starts with real UD2');
+        const count=cache.stats().portGateCalls,runs=[];
+        for(let index=0;index<2;index++) {
+          const registers=seed(dynamic.pc);cache.import();
+          const run=cache.execute(cache.select());cache.publish();
+          assert.equal(run.reason,8);assert.equal(run.detail,dynamic.id);stateEquals(dynamic.pc,registers);
+          assert.equal(cache.stats().portGateCalls-count,index,'first UD2 falls back before the next owned OUT');
+          runs.push(run);
+        }
+        report.portGates.dynamicModule={...dynamic,runs};
+        const warmPc=0x600780,budget=cache.budget,before=runtime.counters();
+        upload(warmPc,[0xb9,...u32(20000),0x49,0x75,0xfd,0xb8,...u32(gate),0xff,0xe0]);
+        try {
+          cache.budget=100002;
+          for(let index=0;index<16;index++) {
+            const registers=seed(warmPc);registers[0]=gate;registers[1]=0;
+            cache.import();const run=cache.execute(cache.select());cache.publish();
+            assert.equal(run.reason,8);assert.equal(run.detail,0x10001);stateEquals(gate,registers);
+            assert.equal(cpuViews(memory).bytes[612],3);
+            await new Promise(resolve=>setTimeout(resolve,2));
+          }
+        } finally {cache.budget=budget;}
+        const after=runtime.counters();
+        assert(after.finalizedModules>before.finalizedModules,'port gate program finalizes actual hot Wasm');
+        report.portGates.warmJit={before,after};
+      }
+      for(const form of forms) {
+        stage=`${enabled?'port':'legacy'} denied I/O ${form.name}`;
+        upload(probePc,[...form.bytes,0x0f,0x0b,0xeb,0xfe]);
+        for(let index=0;index<32;index++)put(source+index*4,0x8899aabb+index);
+        const canary=Array.from({length:32},(_,index)=>read(source+index*4));
+        const registers=seed(probePc,form),original=engine.ok;
+        let publication=null;
+        engine.ok=function(operation,...args) {
+          if(operation==='component_cpu_publish'&&args[2]===9) {
+            publication={stop:args[2],error:args[3],vector:args[5]};return;
+          }
+          return original.call(this,operation,...args);
+        };
+        try {cache.import();cache.execute(cache.select());cache.publish();}
+        finally {engine.ok=original;}
+        report.portGates.pendingCase={enabled,name:form.name,publication,registers,
+          actualRegisters:Array.from({length:8},(_,index)=>engine.get(16+index*4)),pc:engine.get(48),flags:engine.get(52)};save();
+        const skipped=form.count===0,expectedVector=skipped?6:13,expectedPc=probePc+(skipped?form.bytes.length:0);
+        assert.deepEqual(publication,{stop:9,error:0,vector:expectedVector},
+          `${enabled?'port':'legacy'} ${form.name} matches denied-mode v86 behavior`);
+        stateEquals(expectedPc,registers);
+        assert.deepEqual(Array.from({length:32},(_,index)=>read(source+index*4)),canary,
+          `${form.name} must preserve source and destination bytes`);
+        const followOn=ownedGate();
+        report.portGates.forms.push({enabled,name:form.name,publication,expectedVector,expectedPc,registers,followOn});save();
+      }
+    }
+    delete report.portGates.pendingCase;
+    assert.equal(cache.configurePortGates(false,{paused:true,open:cache.open}),false);
+    assert.equal(read(gate)&0xffff,gateWord,'mode-off restores original gate bytes');
+    assert.equal(cache.configurePortGates(true,{paused:true,open:cache.open}),true);
+    upload(probePc,[0xe6,0xe1,0xeb,0xfe]);
+    const registers=seed(probePc);cache.import();
+    const fault=cache.execute(cache.select());cache.publish();
+    assert.equal(fault.coreReason,9);assert.equal(fault.reason,11);assert.equal(fault.detail,0);
+    stateEquals(probePc,registers);
+    report.portGates.committedGeneralProtection=fault;
+  } else {
   stage = deniedPermission ? 'read-only store fault' : 'mapped NOACCESS store fault';
   put(0x601080, 0x11223344);
   upload(0x600100, [0xc7,0x05,...u32(0x601080),...u32(0x55667788),0xb8,...u32(gate),0xff,0xe0]);
@@ -253,6 +379,7 @@ try {
   assert.equal(fault.reason, 5); assert.equal(fault.detail, 2, 'mapped denied page is a permission fault');
   assert.equal(new DataView(engine.memory.buffer).getUint32(physical, true), 0x11223344, 'faulting write preserves canonical RAM');
   report.deniedPageFault = {permission: deniedPermission, ...fault};
+  }
   report.stats = cache.stats(); report.complete = true;
 } catch (error) {
   report.failure = {stage, message: error.message, stack: error.stack}; throw error;
