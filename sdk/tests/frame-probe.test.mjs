@@ -135,6 +135,178 @@ test('exclusive scopes close in finally and a thrown child cannot retain a paren
   assert.equal(phases.snapshot().outer.selfElapsedNs,2_000_000,'snapshots cannot rewrite retained accounting');
 });
 
+function v86MeasurementFixture() {
+  const calls=[],result={coreReason:2,reason:1,retired:1,work:1},failure=new Error('guest stop');
+  const record=(name,self,args)=>{calls.push({name,self,args});};
+  const cache={open:false,
+    import(...args){record('import',this,args);return result;},
+    select(...args){record('select',this,args);return result;},
+    execute(...args){record('execute',this,args);if(args[0]===failure)throw failure;return result;},
+    cpu:{
+      main_loop(...args){record('cpu',this,args);return result;},
+      full_clear_tlb(){},jit_clear_cache(){},
+    },
+    traps:{capture(...args){record('trap',this,args);return result;}},
+    tables:{pages:[],mappingEpoch:0n,codeVersion:0n,refresh(){},publishDirty(){return 0;},
+      descriptor(){return {guestPages:1048576};}},
+    engine:{ok(...args){record('native',this,args);return result;}},
+  };
+  return {cache,calls,result,failure};
+}
+
+test('v86 aggregate hooks preserve receivers, arguments, return identity and thrown errors', async () => {
+  const {instrumentV86}=await import('../runtime/v86/measurement.js');
+  const f=v86MeasurementFixture(),argument={value:7};
+  const installed=instrumentV86(f.cache,new PhaseMeasurements());
+  try {
+    for(const [object,name] of [[f.cache,'import'],[f.cache,'select'],[f.cache,'execute'],
+      [f.cache.cpu,'main_loop'],[f.cache.traps,'capture']]) {
+      assert.equal(object[name](argument,42),f.result);
+      const last=f.calls.at(-1);assert.equal(last.self,object);assert.deepEqual(last.args,[argument,42]);
+    }
+    assert.equal(f.cache.engine.ok('component_cpu_view',argument),f.result);
+    assert.equal(f.calls.at(-1).self,f.cache.engine);
+    assert.deepEqual(f.calls.at(-1).args,['component_cpu_view',argument]);
+    assert.throws(()=>f.cache.execute(f.failure),error=>error===f.failure);
+  } finally {installed.restore();}
+});
+
+test('v86 aggregate restore reinstates own descriptors and removes wrappers over inherited methods', async () => {
+  const {instrumentV86}=await import('../runtime/v86/measurement.js');
+  const f=v86MeasurementFixture(),original=f.cache.execute;
+  Object.defineProperty(f.cache,'execute',{value:original,writable:false,enumerable:false,configurable:true});
+  const prototype={main_loop:f.cache.cpu.main_loop};
+  delete f.cache.cpu.main_loop;Object.setPrototypeOf(f.cache.cpu,prototype);
+  const own=Object.getOwnPropertyDescriptor(f.cache,'execute');
+  const installed=instrumentV86(f.cache,new PhaseMeasurements());
+  assert.notEqual(f.cache.execute,original);assert(Object.hasOwn(f.cache.cpu,'main_loop'));
+  installed.restore();installed.restore();
+  assert.deepEqual(Object.getOwnPropertyDescriptor(f.cache,'execute'),own);
+  assert.equal(Object.getOwnPropertyDescriptor(f.cache.cpu,'main_loop'),undefined);
+  assert.equal(f.cache.cpu.main_loop,prototype.main_loop);
+});
+
+test('restored v86 hooks add no clock reads or counter writes and return detached snapshots', async t => {
+  const {instrumentV86}=await import('../runtime/v86/measurement.js');
+  let reads=0;
+  t.mock.method(performance,'now',()=>++reads);
+  const f=v86MeasurementFixture(),installed=instrumentV86(f.cache,new PhaseMeasurements());
+  f.cache.cpu.main_loop();f.cache.traps.capture();
+  assert.equal(installed.snapshot().enabled,true);
+  installed.restore();
+  const stopped=installed.snapshot(),before=reads;
+  assert.equal(stopped.enabled,false);
+  f.cache.import();f.cache.select();f.cache.execute();f.cache.cpu.main_loop();
+  f.cache.cpu.full_clear_tlb();f.cache.cpu.jit_clear_cache();f.cache.traps.capture();
+  f.cache.tables.refresh();f.cache.tables.publishDirty();f.cache.tables.descriptor();
+  f.cache.engine.ok('component_cpu_view');
+  assert.equal(reads,before,'off methods perform no instrumentation clock reads');
+  assert.deepEqual(installed.snapshot(),stopped,'off methods leave retained counters unchanged');
+  stopped.counters.cpuRuns=99;
+  assert.notEqual(installed.snapshot().counters.cpuRuns,99);
+});
+
+test('v86 aggregate installation rejects active or duplicate owners and rolls back failed property replacement', async () => {
+  const {instrumentV86}=await import('../runtime/v86/measurement.js');
+  const active=v86MeasurementFixture();active.cache.open=true;
+  const original=Object.getOwnPropertyDescriptors(active.cache);
+  assert.throws(()=>instrumentV86(active.cache,new PhaseMeasurements()));
+  assert.deepEqual(Object.getOwnPropertyDescriptors(active.cache),original);
+  active.cache.open=false;
+  const installed=instrumentV86(active.cache,new PhaseMeasurements());
+  assert.throws(()=>instrumentV86(active.cache,new PhaseMeasurements()));
+  installed.restore();
+  const again=instrumentV86(active.cache,new PhaseMeasurements());again.restore();
+  const broken=v86MeasurementFixture();
+  Object.defineProperty(broken.cache.tables,'descriptor',{
+    value:broken.cache.tables.descriptor,writable:false,enumerable:false,configurable:false,
+  });
+  const objects=[broken.cache,broken.cache.cpu,broken.cache.traps,broken.cache.tables,broken.cache.engine];
+  const descriptors=objects.map(object=>Object.getOwnPropertyDescriptors(object));
+  assert.throws(()=>instrumentV86(broken.cache,new PhaseMeasurements()));
+  objects.forEach((object,index)=>assert.deepEqual(Object.getOwnPropertyDescriptors(object),descriptors[index]));
+});
+
+function sessionMeasurementFixture(methods={}) {
+  return {paused:true,pauseStarted:0,pausedDuration:0,started:0,code:{open:false},
+    complete(){return true;},async providers(){return false;},async wait(){},
+    engine:{status(){return 0;}},...methods};
+}
+
+test('session await remainder subtracts nested synchronous roots once and preserves the awaited result', async t => {
+  const {instrumentSession}=await import('../runtime/session/diagnostics/phases.js');
+  let now=0,resolve;
+  t.mock.method(performance,'now',()=>now);
+  const pending=new Promise(done=>{resolve=done;}),result={ready:true};
+  const owner=sessionMeasurementFixture({providers(){now=2;return pending;}});
+  const phases=new PhaseMeasurements(),installed=instrumentSession(owner,phases);
+  owner.paused=false;
+  const operation=owner.providers();
+  assert.equal(installed.snapshot().activeAwaitScopes,1);
+  now=4;
+  phases.runExclusive('callback',()=>{
+    now=5;phases.runExclusive('nested',()=>{now=7;});now=10;
+  });
+  now=15;resolve(result);
+  assert.equal(await operation,result);
+  const snapshot=installed.snapshot();
+  assert.deepEqual(snapshot.awaits['providers.await'],{selfElapsedNs:7_000_000,maximumNs:7_000_000,count:1});
+  assert.equal(snapshot.syncRootNs,8_000_000);
+  assert.equal(Object.values(snapshot.sync).reduce((sum,row)=>sum+row.selfElapsedNs,0),8_000_000);
+  assert.equal(snapshot.activeSyncScopes,0);assert.equal(snapshot.activeAwaitScopes,0);
+  assert.equal(snapshot.syncRootNs+snapshot.awaits['providers.await'].selfElapsedNs,15_000_000);
+  owner.paused=true;owner.pauseStarted=now;installed.restore();
+});
+
+test('session active await time excludes a pause and paused native calls remain unmeasured', async t => {
+  const {activeClock,instrumentSession}=await import('../runtime/session/diagnostics/phases.js');
+  let now=0,resolve;
+  t.mock.method(performance,'now',()=>now);
+  const pending=new Promise(done=>{resolve=done;});
+  const owner=sessionMeasurementFixture({wait(){return pending;}});
+  const phases=new PhaseMeasurements(),installed=instrumentSession(owner,phases);
+  owner.paused=false;
+  const operation=owner.wait(4);
+  now=5;owner.paused=true;owner.pauseStarted=now;
+  now=105;
+  assert.equal(activeClock(owner),5);
+  owner.engine.status('paused-query');
+  assert.equal(installed.snapshot().sync['host.native'],undefined);
+  owner.pausedDuration=100;owner.paused=false;
+  now=112;resolve();await operation;
+  const snapshot=installed.snapshot();
+  assert.equal(activeClock(owner),12);
+  assert.deepEqual(snapshot.awaits['scheduler.await'],{selfElapsedNs:12_000_000,maximumNs:12_000_000,count:1});
+  assert.equal(snapshot.syncRootNs,0);assert.equal(snapshot.activeAwaitScopes,0);
+  owner.paused=true;owner.pauseStarted=now;installed.restore();
+});
+
+test('session instrumentation rejects overlapping waits and active restore, then unwinds rejected awaits', async t => {
+  const {instrumentSession}=await import('../runtime/session/diagnostics/phases.js');
+  let now=0,reject;
+  t.mock.method(performance,'now',()=>now);
+  const pending=new Promise((_resolve,fail)=>{reject=fail;}),failure=new Error('provider failed');
+  const owner=sessionMeasurementFixture({providers(){now=2;return pending;}}),original=owner.providers;
+  const phases=new PhaseMeasurements(),installed=instrumentSession(owner,phases);
+  owner.paused=false;
+  const operation=owner.providers();
+  await assert.rejects(owner.wait(1),/overlapping/);
+  now=4;owner.paused=true;owner.pauseStarted=now;
+  assert.throws(()=>installed.restore(),/active/);
+  assert.notEqual(owner.providers,original);
+  now=104;reject(failure);
+  await assert.rejects(operation,error=>error===failure);
+  const snapshot=installed.snapshot();
+  assert.equal(snapshot.activeAwaitScopes,0);assert.equal(snapshot.activeSyncScopes,0);
+  assert.deepEqual(snapshot.awaits['providers.await'],{selfElapsedNs:2_000_000,maximumNs:2_000_000,count:1});
+  assert.equal(snapshot.awaits['scheduler.await'],undefined);
+  phases.runExclusive('manual',()=>assert.throws(()=>installed.restore(),/active/));
+  installed.restore();installed.restore();
+  assert.equal(owner.providers,original);
+  const stopped=installed.snapshot();owner.engine.status('restored-query');
+  assert.deepEqual(installed.snapshot(),stopped);
+});
+
 test('observed phases retain their schema, detailed scopes and counter exports', async t => {
   let now = 0;
   t.mock.method(performance, 'now', () => now);
