@@ -114,6 +114,27 @@ pub(crate) fn component_cpu_dirty(low: u32, high: u32, count: u32) -> u32 {
     })
 }
 
+pub(crate) fn component_cpu_collect_dirty(
+    low: u32,
+    high: u32,
+    epoch_low: u32,
+    epoch_high: u32,
+    mut tables: ExternalMemory,
+) -> u32 {
+    access(low, high, true, |instance| {
+        let epoch = u64::from(epoch_low) | u64::from(epoch_high) << 32;
+        let bytes = instance
+            .memory
+            .as_mut()
+            .unwrap()
+            .collect_external_dirty_tables(epoch, &mut tables)
+            .map_err(HostError::Memory)?;
+        instance.arena.as_mut().get_mut()[TRANSFER_OFFSET..TRANSFER_OFFSET + bytes.len()]
+            .copy_from_slice(&bytes);
+        Ok(())
+    })
+}
+
 fn gate(instance: &EngineInstance, pc: u32) -> Option<u32> {
     let gate = crate::process::execution::cache::cache_gate_at(
         &instance.modules,

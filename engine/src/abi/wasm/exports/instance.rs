@@ -31,3 +31,22 @@ pub extern "C" fn component_cpu_attach(
     };
     crate::process::wasm::component_cpu_attach(key_low, key_high, backing)
 }
+
+#[cfg(feature = "external-cpu")]
+#[allow(unsafe_code)]
+#[unsafe(export_name = "ring3_abi_v1_component_cpu_collect_dirty")]
+pub extern "C" fn component_cpu_collect_dirty(
+    key_low: u32,
+    key_high: u32,
+    epoch_low: u32,
+    epoch_high: u32,
+    directory: u32,
+) -> u32 {
+    let Some(tables) = crate::abi::external_memory::ExternalMemory::admit(directory, 4096 * 1025)
+    else {
+        return 7;
+    };
+    crate::process::wasm::component_cpu_collect_dirty(
+        key_low, key_high, epoch_low, epoch_high, tables,
+    )
+}

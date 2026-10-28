@@ -54,6 +54,11 @@ impl AddressSpace {
         if epoch != self.external_mapping_epoch || count as usize != changes.pages.len() {
             return Err(MemoryError::InvalidRange);
         }
+        if let Some(collector) = self.external_dirty.as_mut() {
+            for &page in &changes.pages {
+                collector.update_mapping(page as usize, self.mappings[page as usize] != 0);
+            }
+        }
         changes.clear();
         Ok(())
     }
@@ -65,12 +70,14 @@ impl AddressSpace {
         let changes = MappingChanges::new()?;
         self.backing.attach_external(backing)?;
         self.external_mapping_changes = Some(changes);
+        self.external_dirty = None;
         Ok(())
     }
 
     pub(crate) fn release_external_backing(&mut self) -> Result<(), MemoryError> {
         self.backing.release_external()?;
         self.external_mapping_changes = None;
+        self.external_dirty = None;
         Ok(())
     }
 
@@ -104,12 +111,14 @@ impl AddressSpace {
         ] {
             bytes[offset..offset + 8].copy_from_slice(&value.to_le_bytes());
         }
+        // bit 1 advertises the collector even before the backing is attached.
+        bytes[108..112].copy_from_slice(&2u32.to_le_bytes());
         if let Some(changes) = self.external_mapping_changes.as_ref() {
             for (offset, value) in [
                 (96, changes.pages.as_ptr() as u32),
                 (100, changes.pages.len() as u32),
                 (104, GUEST_PAGES as u32),
-                (108, 1),
+                (108, 3),
             ] {
                 bytes[offset..offset + 4].copy_from_slice(&value.to_le_bytes());
             }

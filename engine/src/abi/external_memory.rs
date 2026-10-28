@@ -8,6 +8,10 @@ pub(crate) struct ExternalMemory {
 }
 
 impl ExternalMemory {
+    pub(crate) fn is_cpu_page_tables_for(&self, backing: usize) -> bool {
+        cpu_page_tables_range(self.address, self.length, backing)
+    }
+
     #[cfg(target_arch = "wasm32")]
     pub(crate) fn admit(address: u32, length: u32) -> Option<Self> {
         unsafe extern "C" {
@@ -27,6 +31,20 @@ impl ExternalMemory {
             length: length as usize,
         })
     }
+}
+
+fn cpu_page_tables_range(address: usize, length: usize, backing: usize) -> bool {
+    const PREFIX: usize = 16 * 1024 * 1024;
+    const DIRECTORY: usize = 0x200000;
+    const TABLE_BYTES: usize = 4096 * 1025;
+    let Some(ram) = backing.checked_sub(PREFIX) else {
+        return false;
+    };
+    length == TABLE_BYTES
+        && ram.checked_add(DIRECTORY) == Some(address)
+        && address
+            .checked_add(length)
+            .is_some_and(|end| end <= backing)
 }
 
 fn valid_range(address: usize, length: usize, available: usize) -> bool {
@@ -58,7 +76,26 @@ impl DerefMut for ExternalMemory {
 
 #[cfg(test)]
 mod tests {
-    use super::valid_range;
+    use super::{cpu_page_tables_range, valid_range};
+
+    #[test]
+    fn external_dirty_collect_range_is_exact_and_disjoint_from_backing() {
+        let ram = 80 * 1024 * 1024;
+        let backing = ram + 16 * 1024 * 1024;
+        let address = ram + 0x200000;
+        let length = 4096 * 1025;
+        assert!(cpu_page_tables_range(address, length, backing));
+        assert!(!cpu_page_tables_range(address + 4096, length, backing));
+        assert!(!cpu_page_tables_range(address, length - 4096, backing));
+        assert!(!cpu_page_tables_range(backing, length, backing));
+        assert!(!cpu_page_tables_range(ram + 0x100000, length, backing));
+        assert!(!cpu_page_tables_range(address, length, 4096));
+        assert!(!cpu_page_tables_range(
+            usize::MAX - 4095,
+            length,
+            usize::MAX
+        ));
+    }
 
     #[test]
     fn external_range_rejects_alignment_overflow_and_out_of_memory() {

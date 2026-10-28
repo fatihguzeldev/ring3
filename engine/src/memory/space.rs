@@ -6,6 +6,8 @@ mod core;
 mod cpu;
 #[cfg(feature = "external-cpu")]
 mod external;
+#[cfg(feature = "external-cpu")]
+mod external_dirty;
 mod guard;
 mod incarnations;
 mod mapping;
@@ -43,6 +45,8 @@ pub struct AddressSpace {
     external_mapping_epoch: u64,
     #[cfg(feature = "external-cpu")]
     external_mapping_changes: Option<external::MappingChanges>,
+    #[cfg(feature = "external-cpu")]
+    external_dirty: Option<external_dirty::Collector>,
     service_guard: service::GuardService32,
 }
 
@@ -144,6 +148,8 @@ impl AddressSpace {
             external_mapping_epoch: 0,
             #[cfg(feature = "external-cpu")]
             external_mapping_changes: None,
+            #[cfg(feature = "external-cpu")]
+            external_dirty: None,
             service_guard: Default::default(),
         })
     }
