@@ -26,7 +26,7 @@ export class Session {
     this.recent = [];
     this.lastStatus = 0;
     this.needsSchedule = false;
-    this.fastNativeCalls = true;
+    this.fastNativeCalls = false;
     this.fastNativeCompletions = 0;
   }
   status(state, message, extra = {}) {
