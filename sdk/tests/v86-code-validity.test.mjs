@@ -6,14 +6,15 @@ import {BACKING_BASE,DIRECTORY,TABLES,PRIVATE_VA} from '../runtime/v86/layout.js
 
 const PAGE=4096, CODE=0x100, DATA=0x200;
 
-function world({journal=false,nativeDirty=false,nativeDirtyEpoch=false,dirtyGateFlags=false}={}) {
+function world({journal=false,nativeDirty=false,nativeDirtyEpoch=false,dirtyGateFlags=false,preciseExecutable=false}={}) {
   const memory=new WebAssembly.Memory({initial:512}),data=new DataView(memory.buffer);
-  const capabilities=(nativeDirty?2:0)|(nativeDirtyEpoch?4:0)|(dirtyGateFlags?8:0);
+  const capabilities=(nativeDirty?2:0)|(nativeDirtyEpoch?4:0)|(dirtyGateFlags?8:0)|(preciseExecutable?16:0);
   const info={backing:16*1024*1024,length:16*PAGE,maps:8*1024*1024,permissions:12*1024*1024,
     guestPages:1<<20,capacity:16,mapped:2,mappingVersions:13*1024*1024,
     physicalVersions:21*1024*1024,privateSlots:0,executableViews:27*1024*1024,
     identity:1n,transaction:1n,code:1n,mapping:1n,
     mappingChanges:28*1024*1024,mappingChangeCount:0,mappingChangeCapacity:1<<20,mappingChangeFlags:capabilities};
+  if(preciseExecutable)info.executableEpoch=1n;
   const rows=new Map(),pending=new Set(),acks=[],ackAttempts=[],dirtyPublications=[],nativeCollections=[],requests=[],
     hooks={beforeAck:null,collectResult:null};
   let tracking=false;
@@ -31,10 +32,16 @@ function world({journal=false,nativeDirty=false,nativeDirtyEpoch=false,dirtyGate
   }
   function content(slot,version) {data.setBigUint64(info.physicalVersions+slot*16+8,version,true);}
   function changeMapping(page,slot,permission) {
+    const executable=(rows.get(page)?.permission&4)||(permission&4);
     info.transaction++;info.code=info.transaction;info.mapping=info.transaction;
     map(page,slot,permission);
+    if(preciseExecutable && executable)info.executableEpoch=info.transaction;
   }
-  function write(slot) {info.transaction++;info.code=info.transaction;content(slot,info.transaction);}
+  function write(slot) {
+    info.transaction++;info.code=info.transaction;content(slot,info.transaction);
+    if(preciseExecutable && [...rows.values()].some(row=>row.slot===slot&&(row.permission&4)))
+      info.executableEpoch=info.transaction;
+  }
   map(CODE,0,5);map(DATA,1,3);content(0,1n);content(1,1n);
   data.setUint32(info.executableViews,1,true);
   const compiled=new Map(),cpu={mem8:{byteOffset:0,length:160*1024*1024},clears:0,tlbClears:0,
@@ -54,7 +61,9 @@ function world({journal=false,nativeDirty=false,nativeDirtyEpoch=false,dirtyGate
         dirtyPublications.push(slots);info.transaction++;
         for(const slot of slots) {
           content(slot,info.transaction);
-          if([...rows.values()].some(row=>row.slot===slot&&(row.permission&4)))info.code=info.transaction;
+          if([...rows.values()].some(row=>row.slot===slot&&(row.permission&4))) {
+            info.code=info.transaction;if(preciseExecutable)info.executableEpoch=info.transaction;
+          }
         }
         return;
       }
@@ -83,7 +92,9 @@ function world({journal=false,nativeDirty=false,nativeDirtyEpoch=false,dirtyGate
           dirtyPublications.push(values);info.transaction++;
           for(const slot of values) {
             content(slot,info.transaction);
-            if([...rows.values()].some(row=>row.slot===slot&&(row.permission&4)))info.code=info.transaction;
+            if([...rows.values()].some(row=>row.slot===slot&&(row.permission&4))) {
+              info.code=info.transaction;if(preciseExecutable)info.executableEpoch=info.transaction;
+            }
           }
         }
         for(const [at,value] of [...accessed,...dirtyPtes])data.setUint32(at,value,true);
@@ -111,6 +122,7 @@ function world({journal=false,nativeDirty=false,nativeDirtyEpoch=false,dirtyGate
         data.setUint32(at+offset,info[name],true);
       for(const [offset,name] of [[64,'identity'],[72,'transaction'],[80,'code'],[88,'mapping']])
         data.setBigUint64(at+offset,info[name],true);
+      if(preciseExecutable)data.setBigUint64(at+112,info.executableEpoch,true);
     },
     resultView(length){return new DataView(memory.buffer,140,length);},
     request(bytes){requests.push(bytes);new Uint8Array(memory.buffer,140,bytes.length).set(bytes);},
@@ -435,12 +447,13 @@ test('native collection uses the acknowledged COW/remap slot and retains the for
 });
 
 test('native 88-byte publication adopts a proven guest code stamp without rebuilding executable rows',()=>{
-  const f=world({journal:true,nativeDirty:true,nativeDirtyEpoch:true,dirtyGateFlags:true});f.map(CODE,0,7);
+  const f=world({journal:true,nativeDirty:true,nativeDirtyEpoch:true,dirtyGateFlags:true,preciseExecutable:true});f.map(CODE,0,7);
   const tables=new PageTables(f.engine,f.cpu);
   assert.equal(tables.nativeDirtyEpochSupported,true);assert.equal(tables.dirtyGateFlagsSupported,true);
   f.data.setUint32(tables.pte(CODE),f.data.getUint32(tables.pte(CODE),true)|64,true);
   f.data.setUint32(DIRECTORY,f.data.getUint32(DIRECTORY,true)|32,true);
   assert.equal(tables.publishDirty(),1);assert.equal(tables.codeValidity.code,f.info.code);
+  assert.equal(tables.codeValidity.executableEpoch,f.info.executableEpoch);
   const forbidden={[Symbol.iterator](){throw new Error('proven guest stamp rebuilt executable rows');}};
   assert.equal(tables.codeValidity.refresh(f.info,forbidden).invalidate,false);
   assert.equal(f.nativeCollections.length,1);assert.equal(f.requests.length,0);
@@ -468,4 +481,28 @@ test('native 88-byte publication cannot absorb a same-slot host write after coll
   assert.equal(tables.codeValidity.code,2n);assert.equal(tables.codeValidity.content.get(0),2n);
   assert.equal(f.data.getBigUint64(f.info.physicalVersions+8,true),3n);
   tables.refresh();assert.equal(f.compiled.has(CODE),false);
+});
+
+test('precise executable epoch skips executable rows for data-only mapping and protection updates',()=>{
+  const f=world({journal:true,preciseExecutable:true}),tables=new PageTables(f.engine,f.cpu);
+  assert.equal(tables.descriptor().executableEpoch,1n);
+  const watch=tables.codeValidity,pages=watch.pages;
+  const forbidden={[Symbol.iterator](){throw new Error('data-only change walked executable rows');}};
+  f.changeMapping(DATA+1,2,3);f.content(2,f.info.transaction);
+  assert.equal(watch.refresh(f.info,forbidden).invalidate,false);
+  f.changeMapping(DATA,1,1);
+  assert.equal(watch.refresh(f.info,forbidden).invalidate,false);
+  assert.equal(watch.pages,pages);assert.equal(watch.code,f.info.code);assert.equal(watch.mapping,f.info.mapping);
+});
+
+test('changed precise executable epoch still validates executable identity and physical content',()=>{
+  const f=world({preciseExecutable:true}),watch=new CodeValidity(f.memory);
+  watch.refresh(f.info,f.rows.values());
+  f.changeMapping(CODE,0,7);
+  assert.equal(watch.refresh(f.info,f.rows.values()).reason,'executable-mapping');
+  f.write(0);
+  assert.equal(watch.refresh(f.info,f.rows.values()).reason,'host-code-write');
+  f.content(0,f.info.transaction+1n);f.info.executableEpoch++;
+  assert.equal(watch.refresh(f.info,f.rows.values()).reason,'host-code-write',
+    'a precise epoch change cannot be skipped even when broad markers are unchanged');
 });

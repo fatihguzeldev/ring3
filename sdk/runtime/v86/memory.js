@@ -78,6 +78,7 @@ export class PageTables {
       transaction:d.getBigUint64(72,true),code:d.getBigUint64(80,true),mapping:d.getBigUint64(88,true),
       mappingChanges:d.getUint32(96,true),mappingChangeCount:d.getUint32(100,true),
       mappingChangeCapacity:d.getUint32(104,true),mappingChangeFlags:d.getUint32(108,true)};
+    if(values.mappingChangeFlags&16)values.executableEpoch=d.getBigUint64(112,true);
     this.capacity=values.capacity;
     return values;
   }

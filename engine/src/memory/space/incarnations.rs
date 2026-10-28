@@ -49,6 +49,9 @@ impl AddressSpace {
         #[cfg(feature = "external-cpu")]
         {
             self.record_external_mapping_change(page, self.version);
+            if self.permissions[page].allows(Access::Execute) {
+                self.external_executable_epoch = self.version;
+            }
         }
         if !self.mapping_incarnations.is_empty()
             && let Ok(index) = self

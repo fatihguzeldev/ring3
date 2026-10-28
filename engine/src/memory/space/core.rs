@@ -348,6 +348,129 @@ mod external_tests {
         &memory.external_mapping_changes.as_ref().unwrap().pages
     }
 
+    fn executable_epoch(memory: &mut AddressSpace) -> u64 {
+        u64::from_le_bytes(memory.external_descriptor()[112..120].try_into().unwrap())
+    }
+
+    #[test]
+    fn external_executable_epoch_ignores_data_mapping_churn() {
+        let mut memory = AddressSpace::new(4).unwrap();
+        memory
+            .map_zeroed(range(0x1000), Permissions::READ_EXECUTE)
+            .unwrap();
+        let executable = executable_epoch(&mut memory);
+        let broad = memory.code_validation_version();
+        memory
+            .map_zeroed(range(0x4000), Permissions::READ_WRITE)
+            .unwrap();
+        assert!(
+            memory.code_validation_version() > broad,
+            "own CPU invalidation remains broad"
+        );
+        assert_eq!(executable_epoch(&mut memory), executable);
+        for rights in [
+            Permissions::READ,
+            Permissions::NONE,
+            Permissions::READ_WRITE,
+        ] {
+            let broad = memory.code_validation_version();
+            memory.protect(range(0x4000), rights).unwrap();
+            assert!(memory.code_validation_version() > broad);
+            assert_eq!(executable_epoch(&mut memory), executable);
+        }
+        memory.write(GuestAddress(0x4000), &[1]).unwrap();
+        memory.unmap(range(0x4000)).unwrap();
+        assert_eq!(executable_epoch(&mut memory), executable);
+        assert_ne!(
+            u32::from_le_bytes(memory.external_descriptor()[108..112].try_into().unwrap()) & 16,
+            0
+        );
+    }
+
+    #[test]
+    fn external_executable_epoch_tracks_mapping_rights_alias_writes_and_publication() {
+        let mut memory = AddressSpace::new(6).unwrap();
+        let shared = memory.allocate_shared_pages(1, &[7]).unwrap();
+        memory
+            .map_shared_pages(range(0x1000), &shared, 0, Permissions::READ_EXECUTE, false)
+            .unwrap();
+        let mapped = executable_epoch(&mut memory);
+        assert!(mapped > 0);
+        memory
+            .map_shared_pages(range(0x2000), &shared, 0, Permissions::READ_WRITE, false)
+            .unwrap();
+        assert_eq!(executable_epoch(&mut memory), mapped);
+        memory.write(GuestAddress(0x2000), &[8]).unwrap();
+        let written = executable_epoch(&mut memory);
+        assert!(written > mapped);
+        memory
+            .install_pages_with_word_writes(
+                &[PageInitialization {
+                    address: GuestAddress(0x4000),
+                    permissions: Permissions::READ_WRITE,
+                    bytes: &[],
+                }],
+                &[WordWrite32 {
+                    address: GuestAddress(0x2000),
+                    value: 11,
+                }],
+            )
+            .unwrap();
+        let aliased_output = executable_epoch(&mut memory);
+        assert!(aliased_output > written);
+        let slot = memory.mappings[1] - 1;
+        memory.publish_external_dirty(&[slot]).unwrap();
+        assert_eq!(executable_epoch(&mut memory), memory.transaction_version());
+        let dirty = executable_epoch(&mut memory);
+        memory.protect(range(0x1000), Permissions::ALL).unwrap();
+        let rights = executable_epoch(&mut memory);
+        assert!(rights > dirty);
+        memory.unmap(range(0x1000)).unwrap();
+        let removed = executable_epoch(&mut memory);
+        assert!(removed > rights);
+        memory
+            .map_zeroed(range(0x1000), Permissions::READ_EXECUTE)
+            .unwrap();
+        let remapped = executable_epoch(&mut memory);
+        assert!(remapped > removed);
+        memory.version = u64::MAX;
+        assert_eq!(
+            memory.protect(range(0x1000), Permissions::READ),
+            Err(MemoryError::VersionExhausted)
+        );
+        assert_eq!(executable_epoch(&mut memory), remapped);
+    }
+
+    #[test]
+    fn external_executable_epoch_distinguishes_data_and_executable_cow_detach() {
+        let mut memory = AddressSpace::new(6).unwrap();
+        let shared = memory.allocate_shared_pages(1, &[7]).unwrap();
+        memory
+            .map_shared_pages(range(0x1000), &shared, 0, Permissions::READ_EXECUTE, false)
+            .unwrap();
+        let executable = executable_epoch(&mut memory);
+        memory
+            .map_shared_pages(range(0x2000), &shared, 0, Permissions::READ_WRITE, true)
+            .unwrap();
+        memory.external_write_fault(0x2000).unwrap();
+        memory.write(GuestAddress(0x2000), &[9]).unwrap();
+        assert_eq!(
+            executable_epoch(&mut memory),
+            executable,
+            "private data writes leave the executable shared slot intact"
+        );
+        memory
+            .map_shared_pages(range(0x3000), &shared, 0, Permissions::ALL, true)
+            .unwrap();
+        let before_detach = executable_epoch(&mut memory);
+        let incarnation = memory.mapping_versions[3];
+        let old_slot = memory.mappings[3];
+        memory.external_write_fault(0x3000).unwrap();
+        assert_eq!(memory.mapping_versions[3], incarnation);
+        assert_ne!(memory.mappings[3], old_slot);
+        assert!(executable_epoch(&mut memory) > before_detach);
+    }
+
     #[test]
     fn external_mapping_changes_deduplicate_and_acknowledge_final_state() {
         let mut memory = AddressSpace::new(4).unwrap();
@@ -371,7 +494,7 @@ mod external_tests {
         assert_eq!(word(96), pointer as usize as u32);
         assert_eq!(word(100), 2);
         assert_eq!(word(104), GUEST_PAGES as u32);
-        assert_eq!(word(108), 15);
+        assert_eq!(word(108), 31);
         assert_eq!(memory.permissions[2], Permissions::READ);
         assert_ne!(memory.mappings[1], 0);
         let epoch = memory.external_mapping_epoch;

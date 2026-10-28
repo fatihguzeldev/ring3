@@ -426,6 +426,10 @@ impl AddressSpace {
         #[cfg(feature = "external-cpu")]
         {
             self.record_external_mapping_change(page, version);
+            if self.permissions[page].allows(Access::Execute) || permissions.allows(Access::Execute)
+            {
+                self.external_executable_epoch = version;
+            }
         }
         self.executable_views[slot] -= u32::from(self.permissions[page].allows(Access::Execute));
         self.executable_views[slot] += u32::from(permissions.allows(Access::Execute));
@@ -498,6 +502,9 @@ impl AddressSpace {
         #[cfg(feature = "external-cpu")]
         {
             self.record_external_mapping_change(page, version);
+            if executable != 0 {
+                self.external_executable_epoch = version;
+            }
         }
         self.release_slot(shared as u32);
         private

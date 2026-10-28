@@ -3,10 +3,16 @@ const unchanged=Object.freeze({invalidate:false,reason:'unchanged'});
 export class CodeValidity {
   constructor(memory) {
     this.memory=memory;this.identity=null;this.code=null;this.mapping=null;
+    this.executableEpoch=undefined;
     this.pages=new Map();this.content=new Map();
   }
   refresh(info,rows) {
-    if(this.identity===info.identity && this.code===info.code && this.mapping===info.mapping)return unchanged;
+    const precise=info.executableEpoch!==undefined;
+    if(this.identity===info.identity && (precise?this.executableEpoch===info.executableEpoch:
+        this.code===info.code && this.mapping===info.mapping)) {
+      this.code=info.code;this.mapping=info.mapping;
+      return unchanged;
+    }
     const data=new DataView(this.memory.buffer),pages=new Map(),content=new Map();
     for(const row of rows) {
       if(!(row.permission&4))continue;
@@ -33,6 +39,7 @@ export class CodeValidity {
       }
     }
     this.identity=info.identity;this.code=info.code;this.mapping=info.mapping;
+    this.executableEpoch=info.executableEpoch;
     this.pages=pages;this.content=content;
     return reason==='unchanged'?unchanged:{invalidate:true,reason};
   }
@@ -48,7 +55,10 @@ export class CodeValidity {
     }
     if(!known)return;
     for(const [slot,version] of updates)this.content.set(slot,version);
-    if(stamped)this.code=info.code;
+    if(stamped) {
+      this.code=info.code;
+      if(this.executableEpoch!==undefined && info.code!==info.beforeCode)this.executableEpoch=info.code;
+    }
     // legacy publication has no proven global pre-write stamp.
   }
 }

@@ -44,6 +44,8 @@ pub struct AddressSpace {
     #[cfg(feature = "external-cpu")]
     external_mapping_epoch: u64,
     #[cfg(feature = "external-cpu")]
+    external_executable_epoch: u64,
+    #[cfg(feature = "external-cpu")]
     external_mapping_changes: Option<external::MappingChanges>,
     #[cfg(feature = "external-cpu")]
     external_dirty: Option<external_dirty::Collector>,
@@ -146,6 +148,8 @@ impl AddressSpace {
             versions,
             #[cfg(feature = "external-cpu")]
             external_mapping_epoch: 0,
+            #[cfg(feature = "external-cpu")]
+            external_executable_epoch: 0,
             #[cfg(feature = "external-cpu")]
             external_mapping_changes: None,
             #[cfg(feature = "external-cpu")]
@@ -366,6 +370,10 @@ impl AddressSpace {
             if self.executable_views[slot] != 0 {
                 self.code_validation_version = version;
                 self.code_source_version = version;
+                #[cfg(feature = "external-cpu")]
+                {
+                    self.external_executable_epoch = version;
+                }
             }
             return Ok(());
         }
@@ -533,6 +541,10 @@ impl AddressSpace {
             if self.executable_views[slot] != 0 {
                 self.code_validation_version = version;
                 self.code_source_version = version;
+                #[cfg(feature = "external-cpu")]
+                {
+                    self.external_executable_epoch = version;
+                }
             }
             copied += count;
         }

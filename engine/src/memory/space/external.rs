@@ -116,17 +116,18 @@ impl AddressSpace {
             (72, self.version),
             (80, self.code_validation_version),
             (88, self.external_mapping_epoch),
+            (112, self.external_executable_epoch),
         ] {
             bytes[offset..offset + 8].copy_from_slice(&value.to_le_bytes());
         }
-        // collector, pre-publication epoch and gate flags are available before attach.
-        bytes[108..112].copy_from_slice(&14u32.to_le_bytes());
+        // collector, pre-publication epoch, gate flags and executable epoch are available before attach.
+        bytes[108..112].copy_from_slice(&30u32.to_le_bytes());
         if let Some(changes) = self.external_mapping_changes.as_ref() {
             for (offset, value) in [
                 (96, changes.pages.as_ptr() as u32),
                 (100, changes.pages.len() as u32),
                 (104, GUEST_PAGES as u32),
-                (108, 15),
+                (108, 31),
             ] {
                 bytes[offset..offset + 4].copy_from_slice(&value.to_le_bytes());
             }
@@ -151,6 +152,7 @@ impl AddressSpace {
             if self.executable_views[slot as usize] != 0 {
                 self.code_validation_version = version;
                 self.code_source_version = version;
+                self.external_executable_epoch = version;
             }
         }
         Ok(())
