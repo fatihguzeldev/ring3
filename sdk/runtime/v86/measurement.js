@@ -120,7 +120,7 @@ export function instrumentV86(cache, measurements) {
       run:'synchronous v86 main_loop excluding measured bridge trap handling; includes CPU code generation, not later asynchronous Wasm compilation',
       import:'self time excludes page refresh; includes canonical state import and adapter bookkeeping',
       execute:'self time includes state export, accounting and fault classification; pure state export is not separately measured',
-      scans:'completed mapping/leaf/directory visits use actual policy scan counts; mappingRebuilds counts only full rebuilds; failed partial scans are not claimed',
+      scans:'completed harvest candidates use policy scan counts; native validation and clear passes are included in elapsed time but not counted again; mappingRebuilds counts only full rebuilds',
       flushes:'adapter calls through JS cpu properties only; internal v86 Wasm flushes are included in v86.run',
       off:'restore removes all wrappers; no stage clocks or instrumentation counter writes remain',
     }});
