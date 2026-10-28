@@ -49,6 +49,13 @@ test('media values survive later arena reuse without retaining the borrowed resu
   assert.deepEqual(second, {epoch: 11n, values: [11n, 12n, 13n, 14n, 15n]});
 });
 
+test('an absent Windows callback returns its boolean synchronously', () => {
+  const session=Object.create(Session.prototype),operations=[];
+  session.engine={get:()=>3,ok:operation=>operations.push(operation),take:()=>new Uint8Array(96)};
+  assert.equal(session.beginCallback(),false);
+  assert.deepEqual(operations,['pending_windows_callback']);
+});
+
 test('call capture consumes borrowed fields before native completion overwrites the arena', async () => {
   const memory = new WebAssembly.Memory({initial: 1});
   const api = {
@@ -82,7 +89,7 @@ test('call capture consumes borrowed fields before native completion overwrites 
       },
     },
     async providers() { return false; }, observeClock: () => 0n, initializer: () => null,
-    stack: () => [], async wait() {}, async beginCallback() { return false; }, settleWindows() {},
+    stack: () => [], async wait() {}, beginCallback() { return false; }, settleWindows() {},
   });
   await session.loop();
   assert.equal(calls, 2);

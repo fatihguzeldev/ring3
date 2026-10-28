@@ -186,7 +186,7 @@ export class Session {
     if (!this.returnPc) throw new Error("canonical callback return gate absent");
     return this.returnPc;
   }
-  async beginCallback() {
+  beginCallback() {
     const h = this.engine;
     if (h.get(72) === 9) return false;
     h.ok("pending_windows_callback");
@@ -236,7 +236,7 @@ export class Session {
       pending = true;
     }
     this.settleWindows();
-    await this.beginCallback();
+    this.beginCallback();
     return pending;
   }
   observeClock() {
@@ -338,7 +338,7 @@ export class Session {
             continue;
           }
           if (state === 4) {
-            await this.beginCallback();
+            this.beginCallback();
             continue;
           }
           if (state === 5) {
@@ -372,7 +372,7 @@ export class Session {
           continue;
         } else {
           this.blocked.delete(this.thread);
-          await this.beginCallback();
+          this.beginCallback();
         }
       }
       if (h.get(72) === 9) continue;
@@ -449,7 +449,7 @@ export class Session {
           this.needsSchedule = true;
           break;
         }
-        const callbackStarted = await this.beginCallback();
+        const callbackStarted = this.beginCallback();
         this.needsSchedule = run.detail === 0xffffe || !!h.api.pending_windows_thread_schedule();
         if (
           run.detail === 0x1001e ||
