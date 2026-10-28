@@ -3,7 +3,7 @@ import {KEY} from '../engine.js';
 import {CPU_SHA256,PHYSICAL_BYTES,PARK,SHIPPING_JIT,CODEGEN_SWITCHES} from './layout.js';
 import {PageTables} from './memory.js';
 import {Traps} from './traps.js';
-import {cpuViews,importState,exportState} from './state.js';
+import {cpuViews,importState,exportState,rememberStateBanks,forgetStateBanks} from './state.js';
 
 export async function prepareV86(options={}, {signal}={}) {
   const memorySize=options.memorySize??PHYSICAL_BYTES;
@@ -74,7 +74,7 @@ class V86CodeCache {
     try {this.traps=new Traps(cpu);}catch(error){this.tables.rollback(error);throw error;}
     this.imported=false;this.closed=false;this.open=false;
     this.runs=0;this.regions=0;this.retired=0;this.work=0;this.gates=0;this.faults=0;
-    this.dirtyPages=0;this.cowFaults=0;
+    this.dirtyPages=0;this.cowFaults=0;this.reuseNumericState=true;
   }
   get pc() {return this.engine.get(48);}
   import() {
@@ -101,6 +101,7 @@ class V86CodeCache {
       if(!delta && !trap)throw new Error(`v86 made no progress at0x${cpuViews(this.memory).data.getUint32(556,true).toString(16)}`);
       work+=delta;retired+=Math.max(0,delta-(trap?2:0));
       exportState(h,cpu,trap);
+      if(this.reuseNumericState!==false)rememberStateBanks(h,cpu);
       this.dirtyPages+=this.tables.publishDirty();
       if(trap?.vector===14 && (trap.error&2) && this.tables.isCopyOnWrite(trap.address)) {
         h.ok('component_cpu_write_fault',...KEY,trap.address);
@@ -154,6 +155,7 @@ class V86CodeCache {
   close() {
     if(this.closed)return;
     if(this.open)throw new Error('cannot close an active v86 adapter');
+    forgetStateBanks(this.cpu);
     this.tables.release();this.closed=true;this.imported=false;
   }
 }

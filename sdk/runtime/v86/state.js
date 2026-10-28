@@ -2,6 +2,29 @@ import {X87, SIMD, SEGMENTS, YMM, SEGMENT_BASES} from './layout.js';
 
 const CACHE_OFFSETS = [28,32,36,40,44,56];
 const USER_FLAGS = 0x254fd7;
+const NUMERIC_WORDS = (SIMD+160-X87)/4;
+const numericBanks = new WeakMap();
+
+export function forgetStateBanks(cpu) {numericBanks.delete(cpu);}
+
+export function rememberStateBanks(engine,cpu) {
+  const buffer=engine.memory.buffer,offset=engine.base+X87;
+  if(offset%4){forgetStateBanks(cpu);return;}
+  let memo=numericBanks.get(cpu);
+  if(!memo){memo={values:new Uint32Array(NUMERIC_WORDS)};numericBanks.set(cpu,memo);}
+  memo.values.set(new Uint32Array(buffer,offset,NUMERIC_WORDS));
+  memo.engine=engine;memo.buffer=buffer;memo.base=engine.base;memo.valid=true;
+}
+
+function consumeStateBanks(engine,cpu) {
+  const memo=numericBanks.get(cpu);
+  if(!memo?.valid)return false;
+  memo.valid=false;
+  if(memo.engine!==engine || memo.buffer!==engine.memory.buffer || memo.base!==engine.base)return false;
+  const current=new Uint32Array(memo.buffer,memo.base+X87,NUMERIC_WORDS);
+  for(let i=0;i<NUMERIC_WORDS;i++)if(current[i]!==memo.values[i])return false;
+  return true;
+}
 
 export function cpuViews(memory) {
   const buffer = memory.buffer;
@@ -12,6 +35,7 @@ export function cpuViews(memory) {
 
 export function importState(engine, cpu, traps) {
   const v = cpuViews(engine.memory), d = v.data, b = engine.base;
+  const retained=consumeStateBanks(engine,cpu);
   if (d.getUint32(b+12,true)) throw new Error('v86 does not support a pending SS debug shadow');
   for (let i=16;i<144;i++) if(v.bytes[b+YMM+i]) throw new Error('v86 does not support nonzero YMM upper lanes');
   for (let i=0;i<8;i++) v.regs[i]=d.getUint32(b+16+i*4,true);
@@ -37,23 +61,25 @@ export function importState(engine, cpu, traps) {
   }
   v.bytes[800]=1;v.bytes[804]=1;v.bytes[808]=1;
   d.setUint32(620,0xffffffff,true);
-  const fp=b+X87, sw=d.getUint16(fp+18,true), tags=d.getUint16(fp+20,true);
-  v.bytes[1032]=(sw>>>11)&7;
-  d.setUint16(1036,d.getUint16(fp+16,true),true);
-  d.setUint16(1040,sw & ~0x3800,true);
-  let empty=0;
-  for(let i=0;i<8;i++) {
-    if(((tags>>>(i*2))&3)===3)empty|=1<<i;
-    v.bytes.fill(0,1152+i*16,1152+(i+1)*16);
-    v.bytes.set(v.bytes.subarray(fp+40+i*10,fp+50+i*10),1152+i*16);
+  if(!retained) {
+    const fp=b+X87, sw=d.getUint16(fp+18,true), tags=d.getUint16(fp+20,true);
+    v.bytes[1032]=(sw>>>11)&7;
+    d.setUint16(1036,d.getUint16(fp+16,true),true);
+    d.setUint16(1040,sw & ~0x3800,true);
+    let empty=0;
+    for(let i=0;i<8;i++) {
+      if(((tags>>>(i*2))&3)===3)empty|=1<<i;
+      v.bytes.fill(0,1152+i*16,1152+(i+1)*16);
+      v.bytes.set(v.bytes.subarray(fp+40+i*10,fp+50+i*10),1152+i*16);
+    }
+    v.bytes[816]=empty;
+    if((cpu.wm.exports.fpu_load_tag_word()&0xffff)!==tags)
+      throw new Error('v86 cannot represent the supplied independent x87 tag word');
+    for(const [to,from,size] of [[1044,22,2],[1048,24,4],[1052,32,2],[1056,28,4],[1060,34,2]])
+      d.setUint32(to,size===2?d.getUint16(fp+from,true):d.getUint32(fp+from,true),true);
+    d.setUint32(824,d.getUint32(b+SIMD+16,true),true);
+    v.bytes.set(v.bytes.subarray(b+SIMD+32,b+SIMD+160),832);
   }
-  v.bytes[816]=empty;
-  if((cpu.wm.exports.fpu_load_tag_word()&0xffff)!==tags)
-    throw new Error('v86 cannot represent the supplied independent x87 tag word');
-  for(const [to,from,size] of [[1044,22,2],[1048,24,4],[1052,32,2],[1056,28,4],[1060,34,2]])
-    d.setUint32(to,size===2?d.getUint16(fp+from,true):d.getUint32(fp+from,true),true);
-  d.setUint32(824,d.getUint32(b+SIMD+16,true),true);
-  v.bytes.set(v.bytes.subarray(b+SIMD+32,b+SIMD+160),832);
   v.bytes[632]=0;
   cpu.update_state_flags();
 }
