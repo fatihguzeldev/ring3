@@ -57,6 +57,7 @@ fn geometry(
     permission: i32,
     miss_index: u32,
     failure_depth: u32,
+    page_cache: cache::Locals,
 ) {
     debug_assert!(matches!(width, 1 | 2 | 4));
     if width != 1 {
@@ -67,7 +68,7 @@ fn geometry(
             .i32_gt_u()
             .br_if(failure_depth);
     }
-    cache::translate_at(code, permission, miss_index, failure_depth);
+    cache::translate_at(code, permission, miss_index, failure_depth, page_cache);
 }
 
 pub(super) fn read(
@@ -77,6 +78,7 @@ pub(super) fn read(
     miss_index: u32,
     prepare: bool,
     grouped: bool,
+    page_cache: cache::Locals,
 ) {
     let width = encoded_width & 0xff;
     let modify = encoded_width & 0x100 != 0;
@@ -98,6 +100,7 @@ pub(super) fn read(
         if modify { 3 } else { 1 },
         miss_index,
         u32::from(grouped),
+        page_cache,
     );
     if grouped {
         code.end();
@@ -123,7 +126,7 @@ pub(super) fn read(
         .local_get(ADDRESS)
         .i32_const(encoded_width as i32)
         .call(slow_index);
-    cache::invalidate(code);
+    cache::invalidate(code, page_cache);
     authority::load(code);
     code.end();
 }
@@ -137,6 +140,7 @@ pub(super) fn write(
     miss_index: u32,
     prepared: bool,
     group_fallback: bool,
+    page_cache: cache::Locals,
 ) {
     debug_assert!(matches!(width, 1 | 2 | 4));
     code.block(BlockType::Result(ValType::I32))
@@ -152,7 +156,7 @@ pub(super) fn write(
                 .local_get(PREPARED_POINTER)
                 .local_set(POINTER)
                 .else_();
-            geometry(code, width, 2, miss_index, 1);
+            geometry(code, width, 2, miss_index, 1, page_cache);
             code.end();
         } else {
             // slow reads can change mappings, so their writes repeat canonical preflight.
@@ -167,7 +171,7 @@ pub(super) fn write(
                 .local_set(POINTER);
         }
     } else {
-        geometry(code, width, 2, miss_index, 0);
+        geometry(code, width, 2, miss_index, 0, page_cache);
     }
 
     code.local_get(CTX)
@@ -189,7 +193,7 @@ pub(super) fn write(
         .i32_const(width as i32)
         .local_get(source)
         .call(slow_index);
-    cache::invalidate(code);
+    cache::invalidate(code, page_cache);
     authority::load(code);
     code.end();
 }

@@ -699,6 +699,10 @@ fn run(
     ));
     locals.push((8, ValType::I64));
     locals.push((1, ValType::F64));
+    let page_cache = super::memory::cache::Locals {
+        secondary: 2 + locals.iter().map(|(count, _)| count).sum::<u32>(),
+    };
+    locals.push((4, ValType::I32));
     let points = graph
         .blocks
         .iter()
@@ -724,6 +728,7 @@ fn run(
         executable: &execution.executable,
         local_layout: &local_layout,
         fp_entry_marker,
+        page_cache,
         recovery: recovery::State::new(recovery_limit, recovery_locals),
         owner_identity: identity,
         numeric_kernels: Vec::new(),
@@ -910,6 +915,7 @@ pub(super) struct Output<'a> {
     executable: &'a super::region::values::executable::ExecutablePlan,
     local_layout: &'a executable::locals::Layout,
     fp_entry_marker: u32,
+    page_cache: super::memory::cache::Locals,
     recovery: recovery::State,
     owner_identity: u64,
     numeric_kernels: Vec<PrivateKernel>,
@@ -1397,7 +1403,16 @@ impl Output<'_> {
             self.check_span(width & 0xff);
         }
         let translate = self.internal(9);
-        super::memory::read(self.c().raw(), width, 0, translate, prepare, grouped);
+        let page_cache = self.page_cache;
+        super::memory::read(
+            self.c().raw(),
+            width,
+            0,
+            translate,
+            prepare,
+            grouped,
+            page_cache,
+        );
         self.c()
             .local_tee(WIDE)
             .i64_const(32)
@@ -1451,6 +1466,7 @@ impl Output<'_> {
         }
         let commit = support::owner_store(width, !self.native.is_empty());
         let translate = self.internal(9);
+        let page_cache = self.page_cache;
         super::memory::write(
             self.c().raw(),
             width,
@@ -1460,6 +1476,7 @@ impl Output<'_> {
             translate,
             prepared || grouped,
             grouped,
+            page_cache,
         );
         self.c()
             .local_tee(WRITE_STATUS)

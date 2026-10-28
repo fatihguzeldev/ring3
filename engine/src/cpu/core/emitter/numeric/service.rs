@@ -318,7 +318,8 @@ pub(in crate::cpu::core::emitter) fn emit(out: &mut Output<'_>) {
     }
     out.c().local_set(WRITE_STATUS);
     crate::cpu::core::memory::authority::load(out.c().raw());
-    crate::cpu::core::memory::cache::invalidate(out.c().raw());
+    let page_cache = out.page_cache;
+    crate::cpu::core::memory::cache::invalidate(out.c().raw(), page_cache);
     out.c()
         .local_get(WRITE_STATUS)
         .i32_const(StopReason::SystemEntry as i32)

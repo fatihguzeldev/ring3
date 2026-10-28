@@ -30,6 +30,7 @@ function checked(t,wanted,{writes=0,helpers=0,precise=0,version=t.version()}={})
 
 export function runAccessEpochCases(fixture,{mechanism=true}={}) {
   const proofs=[];
+  const pageProofs=[];
   const remember=(t,witness,wanted)=>{
     t.result.accessEpochWitness=witness;
     proofs.push({result:t.result,witness,wanted,hasPrivate:t.word(t.context(),76)!==0});
@@ -143,6 +144,35 @@ export function runAccessEpochCases(fixture,{mechanism=true}={}) {
     remember(t,witness,{groups:2,exec:2,private:2});
   });
 
+  fixture('page-cache-retains-data-and-stack-across-an-alternating-access-prefix',{
+    segments:[[0x1000,'8b03 8b1424 8b0f ffe5']],
+    registers:[A,B,C,0x3000,0x4800,0x1100,0x77777777,0x3004],stateWitness:true,
+  },t=>{
+    const before=t.version();
+    const witness=checked(t,{pc:0x1100,retired:4,budget:4,ecx:0x40000000,
+      regs:{0:0x40400000,2:0},fp:t.startingFp},{version:before});
+    pageProofs.push({name:t.result.name,witness,translations:2});
+  });
+
+  fixture('page-cache-secondary-read-only-hit-cannot-authorize-a-write',{
+    segments:[[0x1000,'8b03 8b1424 8903 ffe5']],registers,stateWitness:true,
+  },t=>{
+    t.status('protect',0,0x3000,1,1);const before=t.version();
+    const witness=checked(t,{pc:0x1005,retired:2,budget:4,work:2,remaining:2,stop:3,
+      regs:{0:0x40400000,2:0},fault:[0x3000,0x20204,14],fp:t.startingFp},
+      {version:before});
+    pageProofs.push({name:t.result.name,witness,translations:2,canonicalWrites:1});
+  });
+
+  fixture('page-cache-canonical-boundary-invalidates-both-retained-pages',{
+    segments:[[0x1000,'8b03 8b1424 dbe2 8b0b 8b3424 ffe5']],registers,stateWitness:true,
+  },t=>{
+    const before=t.version();
+    const witness=checked(t,{pc:0x1100,retired:6,budget:6,ecx:0x40400000,
+      regs:{0:0x40400000,2:0,6:0},fp:t.startingFp},{helpers:1,version:before});
+    pageProofs.push({name:t.result.name,witness,translations:4});
+  });
+
   // all independent full-state, RAM and transaction oracles finish before the
   // mechanism check, so the pinned baseline can fail only after semantics pass.
   for(const{result,witness,wanted,hasPrivate}of proofs){
@@ -156,5 +186,9 @@ export function runAccessEpochCases(fixture,{mechanism=true}={}) {
     assert.equal(witness.executable_context_reads,wanted.exec,`${result.name}: no hidden repeated executable-table base loads`);
     // the actual null COW-table pointer remains a required one-load observation.
     assert.equal(witness.private_context_reads,wanted.private,`${result.name}: no hidden repeated COW-table base loads`);
+  }
+  if(mechanism)for(const{name,witness,translations,canonicalWrites=0}of pageProofs){
+    assert.equal(witness.page_translations,translations,`${name}: only cold page qualifications call the translator`);
+    assert.equal(witness.canonical_writes,canonicalWrites,`${name}: denied writes retain the canonical fault path`);
   }
 }

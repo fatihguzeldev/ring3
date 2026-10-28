@@ -91,11 +91,13 @@ fn prepare_address(
             .br_if(u32::from(grouped));
     }
     let translate = out.internal(9);
+    let page_cache = out.page_cache;
     cache::translate_at(
         out.c().raw(),
         if write { 2 } else { 1 },
         translate,
         u32::from(grouped),
+        page_cache,
     );
     if grouped {
         out.c().end();
