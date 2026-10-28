@@ -13,7 +13,11 @@ export class PageTables {
     this.rowsByPage=new Map();this.dirty=new DirtyPages(engine.memory,this.ram,()=>cpu.full_clear_tlb());
     this.lastMappingScanCount=0;this.lastMappingFullRebuild=false;
     this.lastDirtyScanCount=0;this.lastDirtyDirectoryCount=0;
-    this.descriptor();
+    const info=this.descriptor();
+    this.nativeDirtySupported=(info.mappingChangeFlags&2)!==0;
+    this.nativeDirty=options.nativeDirty??this.nativeDirtySupported;
+    if(typeof this.nativeDirty!=='boolean' || (this.nativeDirty && !this.nativeDirtySupported))
+      throw new Error('unsupported v86 native dirty collector');
     const length=this.capacity*PAGE;
     if(BACKING_BASE+length>cpu.mem8.length)throw new Error('v86 physical RAM is too small for Ring3 backing');
     engine.ok('component_cpu_attach',...KEY,this.ram+BACKING_BASE,length);
@@ -40,6 +44,15 @@ export class PageTables {
     try {this.release();}catch(cleanup){error.cleanupFailure=cleanup.message;}
   }
   pte(page) {return this.ram+TABLES+page*4;}
+  configureDirty(nativeDirty,owner) {
+    if(owner?.paused!==true || owner?.open!==false)
+      throw new Error('v86 dirty collector changes require a closed paused owner');
+    if(typeof nativeDirty!=='boolean' || (nativeDirty && !this.nativeDirtySupported))
+      throw new Error('unsupported v86 native dirty collector');
+    if(this.nativeDirty===nativeDirty)return nativeDirty;
+    this.publishDirty();this.nativeDirty=nativeDirty;
+    return nativeDirty;
+  }
   configure(policy) {
     if(typeof policy?.selectiveCode!=='boolean' || typeof policy?.incrementalSync!=='boolean')
       throw new Error('v86 memory policy requires two boolean switches');
@@ -71,6 +84,7 @@ export class PageTables {
     this.lastMappingScanCount=0;this.lastMappingFullRebuild=false;
     if(this.identity!==null && this.identity!==info.identity)throw new Error('v86 backing identity changed');
     this.identity=info.identity;
+    this.physicalVersions=info.physicalVersions;this.guestPages=info.guestPages;
     if(!this.policy.selectiveCode && this.codeVersion!==null && this.codeVersion!==info.code)this.cpu.jit_clear_cache();
     this.codeVersion=info.code;
     if(this.mappingEpoch===info.mapping) {
@@ -132,6 +146,7 @@ export class PageTables {
     return new Uint32Array(this.engine.memory.buffer,this.maps,1<<20)[address>>>12] ? 2 : 1;
   }
   publishDirty() {
+    if(this.nativeDirty && this.policy.incrementalSync)return this.publishDirtyNative();
     let result;
     if(this.policy.incrementalSync)result=this.dirty.collect(true);
     else {
@@ -155,5 +170,37 @@ export class PageTables {
     const info=this.descriptor();this.codeVersion=info.code;
     if(this.policy.selectiveCode)this.codeValidity.acknowledgeGuestWrites(info,slots);
     return slots.length;
+  }
+  publishDirtyNative() {
+    const h=this.engine,epoch=this.mappingEpoch;
+    h.ok('component_cpu_collect_dirty',...KEY,Number(epoch&0xffffffffn),Number(epoch>>32n),this.ram+DIRECTORY);
+    let flushed=false;
+    try {
+      const d=h.resultView(80),buffer=h.memory.buffer;
+      if(d.getUint32(0,true)!==0x43443352 || d.getUint16(4,true)!==1 || d.getUint16(6,true)!==1 ||
+          d.getUint32(8,true)!==80 || d.getUint32(12,true)!==0)
+        throw new Error('invalid v86 native dirty result header');
+      const pointer=d.getUint32(16,true),count=d.getUint32(20,true),resetAccess=d.getUint32(24,true),
+        flushRequired=d.getUint32(28,true),scannedPtes=d.getUint32(32,true),scannedDirectories=d.getUint32(36,true);
+      const info={mapping:d.getBigUint64(40,true),transaction:d.getBigUint64(48,true),code:d.getBigUint64(56,true),
+        identity:d.getBigUint64(64,true),capacity:d.getUint32(72,true),physicalVersions:d.getUint32(76,true)};
+      if(info.identity!==this.identity || info.mapping!==epoch || info.capacity!==this.capacity ||
+          info.physicalVersions!==this.physicalVersions || count>info.capacity || (count && !pointer) || pointer%4 ||
+          pointer>buffer.byteLength || count>(buffer.byteLength-pointer)/4 || resetAccess>1 || flushRequired>1 ||
+          ((resetAccess || count) && !flushRequired) || scannedPtes>this.guestPages || scannedDirectories>1024)
+        throw new Error('invalid v86 native dirty result bounds or identity');
+      const slots=new Uint32Array(buffer,pointer,count);
+      if(flushRequired){this.cpu.full_clear_tlb();flushed=true;}
+      this.lastDirtyScanCount=scannedPtes;this.lastDirtyDirectoryCount=scannedDirectories;
+      if(count) {
+        if(this.policy.selectiveCode)this.codeValidity.acknowledgeGuestWrites(info,slots);
+        this.codeVersion=info.code;
+      }
+      return count;
+    } catch(error) {
+      // a successful native call may already have reset page-table access or dirty bits.
+      if(!flushed)this.cpu.full_clear_tlb();
+      throw error;
+    }
   }
 }

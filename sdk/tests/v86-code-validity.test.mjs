@@ -2,18 +2,19 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {PageTables} from '../runtime/v86/memory.js';
 import {CodeValidity} from '../runtime/v86/code-validity.js';
-import {BACKING_BASE,DIRECTORY,PRIVATE_VA} from '../runtime/v86/layout.js';
+import {BACKING_BASE,DIRECTORY,TABLES,PRIVATE_VA} from '../runtime/v86/layout.js';
 
 const PAGE=4096, CODE=0x100, DATA=0x200;
 
-function world({journal=false}={}) {
+function world({journal=false,nativeDirty=false}={}) {
   const memory=new WebAssembly.Memory({initial:512}),data=new DataView(memory.buffer);
   const info={backing:16*1024*1024,length:16*PAGE,maps:8*1024*1024,permissions:12*1024*1024,
     guestPages:1<<20,capacity:16,mapped:2,mappingVersions:13*1024*1024,
     physicalVersions:21*1024*1024,privateSlots:0,executableViews:27*1024*1024,
     identity:1n,transaction:1n,code:1n,mapping:1n,
-    mappingChanges:28*1024*1024,mappingChangeCount:0,mappingChangeCapacity:1<<20,mappingChangeFlags:0};
-  const rows=new Map(),pending=new Set(),acks=[],ackAttempts=[],dirtyPublications=[],hooks={beforeAck:null};
+    mappingChanges:28*1024*1024,mappingChangeCount:0,mappingChangeCapacity:1<<20,mappingChangeFlags:nativeDirty?2:0};
+  const rows=new Map(),pending=new Set(),acks=[],ackAttempts=[],dirtyPublications=[],nativeCollections=[],requests=[],
+    hooks={beforeAck:null,collectResult:null};
   let tracking=false;
   function enqueue(page) {
     pending.add(page);info.mappingChangeCount=pending.size;
@@ -35,12 +36,12 @@ function world({journal=false}={}) {
   function write(slot) {info.transaction++;info.code=info.transaction;content(slot,info.transaction);}
   map(CODE,0,5);map(DATA,1,3);content(0,1n);content(1,1n);
   data.setUint32(info.executableViews,1,true);
-  const compiled=new Map(),cpu={mem8:{byteOffset:0,length:160*1024*1024},clears:0,
-    jit_clear_cache(){this.clears++;compiled.clear();},full_clear_tlb(){}};
+  const compiled=new Map(),cpu={mem8:{byteOffset:0,length:160*1024*1024},clears:0,tlbClears:0,
+    jit_clear_cache(){this.clears++;compiled.clear();},full_clear_tlb(){this.tlbClears++;}};
   const engine={memory,base:0,
     ok(operation,...args) {
-      if(operation==='component_cpu_attach') {tracking=journal;info.mappingChangeFlags=journal?1:0;return;}
-      if(operation==='component_cpu_release') {tracking=false;info.mappingChangeFlags=0;pending.clear();info.mappingChangeCount=0;return;}
+      if(operation==='component_cpu_attach') {tracking=journal;info.mappingChangeFlags=(journal?1:0)|(nativeDirty?2:0);return;}
+      if(operation==='component_cpu_release') {tracking=false;info.mappingChangeFlags=nativeDirty?2:0;pending.clear();info.mappingChangeCount=0;return;}
       if(operation==='component_cpu_ack_mappings') {
         const epoch=BigInt(args[2]>>>0)|(BigInt(args[3]>>>0)<<32n),count=args[4];
         ackAttempts.push({epoch,count});hooks.beforeAck?.();
@@ -56,6 +57,47 @@ function world({journal=false}={}) {
         }
         return;
       }
+      if(operation==='component_cpu_collect_dirty') {
+        const epoch=BigInt(args[2]>>>0)|(BigInt(args[3]>>>0)<<32n),directory=args[4];
+        if(epoch!==info.mapping || pending.size || directory!==DIRECTORY)throw new Error('invalid native dirty source');
+        const groups=new Map(),slots=new Set(),accessed=[],dirtyPtes=[];
+        for(const row of rows.values()) {
+          const group=row.page>>>10;
+          if(!groups.has(group))groups.set(group,[]);
+          groups.get(group).push(row);
+        }
+        let scannedPtes=0;
+        for(const [group,members] of groups) {
+          const at=DIRECTORY+group*4,value=data.getUint32(at,true);
+          if(!(value&32))continue;
+          accessed.push([at,value&~32]);
+          for(const row of members) {
+            scannedPtes++;
+            const at=TABLES+row.page*4,value=data.getUint32(at,true);
+            if(value&64){slots.add(row.slot);dirtyPtes.push([at,value&~64]);}
+          }
+        }
+        const values=[...slots],slotsPtr=27*1024*1024+PAGE;
+        if(values.length) {
+          dirtyPublications.push(values);info.transaction++;
+          for(const slot of values) {
+            content(slot,info.transaction);
+            if([...rows.values()].some(row=>row.slot===slot&&(row.permission&4)))info.code=info.transaction;
+          }
+        }
+        for(const [at,value] of [...accessed,...dirtyPtes])data.setUint32(at,value,true);
+        new Uint32Array(memory.buffer,slotsPtr,values.length).set(values);
+        const at=140;new Uint8Array(memory.buffer,at,80).fill(0);
+        data.setUint32(at,0x43443352,true);data.setUint16(at+4,1,true);data.setUint16(at+6,1,true);
+        data.setUint32(at+8,80,true);
+        for(const [offset,value] of [[16,slotsPtr],[20,values.length],[24,accessed.length?1:0],
+          [28,accessed.length||values.length?1:0],[32,scannedPtes],[36,groups.size],
+          [72,info.capacity],[76,info.physicalVersions]])data.setUint32(at+offset,value,true);
+        for(const [offset,value] of [[40,info.mapping],[48,info.transaction],[56,info.code],[64,info.identity]])
+          data.setBigUint64(at+offset,value,true);
+        nativeCollections.push({epoch,directory,slots:values});hooks.collectResult?.(data,at);
+        return;
+      }
       if(operation!=='component_cpu_view')return;
       const at=140;new Uint8Array(memory.buffer,at,128).fill(0);
       data.setUint32(at,0x56433352,true);data.setUint16(at+4,1,true);data.setUint16(at+6,1,true);
@@ -69,10 +111,10 @@ function world({journal=false}={}) {
         data.setBigUint64(at+offset,info[name],true);
     },
     resultView(length){return new DataView(memory.buffer,140,length);},
-    request(bytes){new Uint8Array(memory.buffer,140,bytes.length).set(bytes);},
+    request(bytes){requests.push(bytes);new Uint8Array(memory.buffer,140,bytes.length).set(bytes);},
   };
   return {memory,data,info,rows,cpu,engine,compiled,map,content,changeMapping,write,
-    pending,acks,ackAttempts,dirtyPublications,hooks,enqueue};
+    pending,acks,ackAttempts,dirtyPublications,nativeCollections,requests,hooks,enqueue};
 }
 
 test('data-only mapping retains an already generated v86 code module',()=>{
@@ -254,4 +296,138 @@ test('policy switches flush pending writes and preserve mappings in legacy, JIT-
   const before=f.cpu.clears;
   assert.deepEqual(tables.configure({selectiveCode:true,incrementalSync:true}),tables.policy);
   assert.equal(f.cpu.clears,before,'reapplying the same policy is a no-op');
+});
+
+test('native dirty publication borrows deduplicated slots and acknowledges guest SMC without a JS request',()=>{
+  const f=world({journal:true,nativeDirty:true});
+  f.map(CODE,0,7);f.map(DATA,0,3);
+  const tables=new PageTables(f.engine,f.cpu),generated={id:'guest-smc'};
+  f.compiled.set(CODE,generated);
+  const acknowledge=tables.codeValidity.acknowledgeGuestWrites;
+  let borrowed=false;
+  tables.codeValidity.acknowledgeGuestWrites=function(info,slots) {
+    borrowed=slots instanceof Uint32Array && slots.buffer===f.memory.buffer && slots.byteOffset===27*1024*1024+PAGE;
+    return acknowledge.call(this,info,slots);
+  };
+  for(const page of [CODE,DATA])f.data.setUint32(tables.pte(page),f.data.getUint32(tables.pte(page),true)|64,true);
+  const directory=DIRECTORY+(DATA>>>10)*4;
+  f.data.setUint32(directory,f.data.getUint32(directory,true)|32,true);
+  const flushes=f.cpu.tlbClears;
+  assert.equal(tables.publishDirty(),1);
+  assert.equal(f.nativeCollections.length,1,'capable combined mode must call the bulk native collector');
+  assert.deepEqual(f.nativeCollections[0].slots,[0]);assert.deepEqual(f.dirtyPublications,[[0]]);
+  assert.equal(f.requests.length,0,'native-owned slot results must not be copied through the request buffer');
+  assert.equal(borrowed,true,'code validity consumes the native-owned shared-memory result directly');
+  assert.equal(f.cpu.tlbClears,flushes+1);assert.equal(tables.lastDirtyScanCount,2);
+  assert.equal(tables.lastDirtyDirectoryCount,1);
+  tables.refresh();assert.equal(f.compiled.get(CODE),generated);
+  f.write(0);tables.refresh();assert.equal(f.compiled.has(CODE),false,'later host alias writes still invalidate');
+});
+
+test('native read-only directory access resets require a TLB flush even without dirty slots',()=>{
+  const f=world({journal:true,nativeDirty:true}),tables=new PageTables(f.engine,f.cpu);
+  f.data.setUint32(DIRECTORY,f.data.getUint32(DIRECTORY,true)|32,true);
+  const flushes=f.cpu.tlbClears,transaction=f.info.transaction;
+  assert.equal(tables.publishDirty(),0);
+  assert.equal(f.nativeCollections.length,1);
+  assert.equal(f.cpu.tlbClears,flushes+1);
+  assert.equal(f.data.getUint32(DIRECTORY,true)&32,0);
+  assert.equal(f.info.transaction,transaction);assert.equal(f.requests.length,0);
+});
+
+test('malformed native dirty results fail closed after a safety TLB flush and before guest acknowledgement',()=>{
+  const changes=[
+    (d,at)=>d.setUint32(at,0,true),
+    (d,at)=>d.setUint16(at+4,2,true),
+    (d,at)=>d.setUint16(at+6,2,true),
+    (d,at)=>d.setUint32(at+8,79,true),
+    (d,at)=>d.setUint32(at+12,1,true),
+    (d,at)=>d.setUint32(at+16,0,true),
+    (d,at)=>d.setUint32(at+16,3,true),
+    (d,at)=>d.setUint32(at+16,d.byteLength,true),
+    (d,at)=>d.setUint32(at+20,17,true),
+    (d,at)=>d.setUint32(at+24,2,true),
+    (d,at)=>d.setUint32(at+28,0,true),
+    (d,at)=>d.setUint32(at+32,(1<<20)+1,true),
+    (d,at)=>d.setUint32(at+36,1025,true),
+    (d,at)=>d.setBigUint64(at+40,99n,true),
+    (d,at)=>d.setBigUint64(at+64,99n,true),
+    (d,at)=>d.setUint32(at+72,17,true),
+    (d,at)=>d.setUint32(at+76,0,true),
+  ];
+  for(const corrupt of changes) {
+    const f=world({journal:true,nativeDirty:true});f.map(CODE,0,7);
+    const tables=new PageTables(f.engine,f.cpu);
+    f.data.setUint32(tables.pte(CODE),f.data.getUint32(tables.pte(CODE),true)|64,true);
+    f.data.setUint32(DIRECTORY,f.data.getUint32(DIRECTORY,true)|32,true);
+    f.hooks.collectResult=corrupt;
+    const flushes=f.cpu.tlbClears,baseline=tables.codeValidity.content.get(0);
+    assert.throws(()=>tables.publishDirty(),/native dirty/);
+    assert.equal(f.cpu.tlbClears,flushes+1,'a successful native call may already have reset cached A/D state');
+    assert.equal(tables.codeValidity.content.get(0),baseline,'malformed results cannot acknowledge guest code');
+    assert.equal(f.requests.length,0,'malformed native results cannot fall back to JS publication');
+  }
+});
+
+test('native dirty collector errors preserve the JS view and do not flush or silently fall back',()=>{
+  const f=world({journal:true,nativeDirty:true}),tables=new PageTables(f.engine,f.cpu);
+  f.changeMapping(DATA+1,2,3);
+  const flushes=f.cpu.tlbClears;
+  assert.throws(()=>tables.publishDirty(),/invalid native dirty source/);
+  assert.equal(f.cpu.tlbClears,flushes);assert.equal(f.requests.length,0);
+  assert.equal(f.nativeCollections.length,0);assert.equal(f.dirtyPublications.length,0);
+});
+
+test('an untouched native dirty result does not flush or advance publication',()=>{
+  const f=world({journal:true,nativeDirty:true}),tables=new PageTables(f.engine,f.cpu);
+  const flushes=f.cpu.tlbClears,transaction=f.info.transaction;
+  assert.equal(tables.publishDirty(),0);assert.equal(f.nativeCollections.length,1);
+  assert.equal(f.cpu.tlbClears,flushes);assert.equal(f.info.transaction,transaction);
+  assert.equal(tables.lastDirtyScanCount,0);assert.equal(tables.lastDirtyDirectoryCount,1);
+});
+
+test('dirty collector switching requires a closed paused owner and publishes the old mode before switching',()=>{
+  const f=world({journal:true,nativeDirty:true}),tables=new PageTables(f.engine,f.cpu);
+  const generated={id:'mode-retains-code'};f.compiled.set(CODE,generated);
+  const mapping=tables.mappingEpoch,clears=f.cpu.clears;
+  for(const owner of [undefined,{paused:false,open:false},{paused:true,open:true}])
+    assert.throws(()=>tables.configureDirty(false,owner),/paused/);
+  for(const mode of [false,true]) {
+    f.data.setUint32(tables.pte(DATA),f.data.getUint32(tables.pte(DATA),true)|64,true);
+    f.data.setUint32(DIRECTORY,f.data.getUint32(DIRECTORY,true)|32,true);
+    const calls=f.nativeCollections.length,requests=f.requests.length;
+    assert.equal(tables.configureDirty(mode,{paused:true,open:false}),mode);
+    assert.equal(tables.nativeDirty,mode);
+    assert.equal(f.nativeCollections.length-calls,mode?0:1,'the outgoing collector publishes pending writes');
+    assert.equal(f.requests.length-requests,mode?1:0);
+    assert.equal(tables.mappingEpoch,mapping);assert.equal(f.cpu.clears,clears);
+    assert.equal(f.compiled.get(CODE),generated);
+  }
+  const legacy=world(),legacyTables=new PageTables(legacy.engine,legacy.cpu);
+  assert.equal(legacyTables.nativeDirty,false);
+  assert.throws(()=>legacyTables.configureDirty(true,{paused:true,open:false}),/unsupported/);
+});
+
+test('native guest acknowledgement preserves an unreviewed host write to another executable slot',()=>{
+  const f=world({journal:true,nativeDirty:true});
+  f.map(CODE,0,7);f.map(CODE+1,2,5);f.content(2,1n);
+  const tables=new PageTables(f.engine,f.cpu),generated={id:'unreviewed-host-write'};
+  f.compiled.set(CODE,generated);f.write(2);
+  f.data.setUint32(tables.pte(CODE),f.data.getUint32(tables.pte(CODE),true)|64,true);
+  f.data.setUint32(DIRECTORY,f.data.getUint32(DIRECTORY,true)|32,true);
+  assert.equal(tables.publishDirty(),1);
+  tables.refresh();assert.equal(f.compiled.has(CODE),false);
+});
+
+test('native collection uses the acknowledged COW/remap slot and retains the former executable alias',()=>{
+  const f=world({journal:true,nativeDirty:true});f.map(DATA,0,3);
+  const tables=new PageTables(f.engine,f.cpu),generated={id:'cow-keeps-former-alias'};
+  f.compiled.set(CODE,generated);
+  f.changeMapping(DATA,2,3);f.content(2,f.info.transaction);tables.refresh();
+  f.data.setUint32(tables.pte(DATA),f.data.getUint32(tables.pte(DATA),true)|64,true);
+  f.data.setUint32(DIRECTORY,f.data.getUint32(DIRECTORY,true)|32,true);
+  const original=f.data.getBigUint64(f.info.physicalVersions+8,true);
+  assert.equal(tables.publishDirty(),1);assert.deepEqual(f.nativeCollections.at(-1).slots,[2]);
+  assert.equal(f.data.getBigUint64(f.info.physicalVersions+8,true),original);
+  tables.refresh();assert.equal(f.compiled.get(CODE),generated);
 });

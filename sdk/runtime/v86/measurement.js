@@ -2,6 +2,7 @@ const active = new WeakMap();
 const nativePhases = new Map([
   ['component_cpu_view','nativeView'], ['component_cpu_dirty','nativeDirty'],
   ['component_cpu_ack_mappings','nativeMappingAck'],
+  ['component_cpu_collect_dirty','nativeDirtyCollect'],
   ['component_cpu_gate','nativeGate'], ['component_cpu_publish','nativePublish'],
   ['component_cpu_write_fault','nativeCow'],
 ]);
@@ -18,7 +19,7 @@ export function instrumentV86(cache, measurements) {
     dirtyPublications:0,scannedPtes:0,scannedDirectories:0,dirtySlots:0,tlbFlushes:0,jitFlushes:0,
     tlbFlushReasons:{mappingChange:0,dirtyReset:0,other:0},
     jitFlushReasons:{hostCodeVersion:0,mappingChange:0,other:0},
-    nativeCalls:{nativeView:0,nativeDirty:0,nativeMappingAck:0,nativeGate:0,nativePublish:0,nativeCow:0}};
+    nativeCalls:{nativeView:0,nativeDirty:0,nativeMappingAck:0,nativeDirtyCollect:0,nativeGate:0,nativePublish:0,nativeCow:0}};
   let enabled=true, refreshContext=null, dirtyDepth=0, guestPages=1<<20;
   const phase=(name,operation)=>measurements.runExclusive(name==='run'?'v86.run':`v86.bridge.${name}`,operation);
   const wrap=(owner,name,operation)=>{
