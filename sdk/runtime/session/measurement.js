@@ -5,14 +5,16 @@ export class PhaseMeasurements {
     this.observer = observation?.observer ?? null;
     this.detailed = observation?.capture.observer(categories.hostWorker, "detailed") ?? null;
     this.phases = new Map();
+    this.exclusiveStack = [];
+    this.exclusiveRootMilliseconds = 0;
     this.observer?.event("measurement.schema", {
       unit: "ns",
       semantics: "cumulative inclusive elapsed time; not exclusive CPU time",
       clock: "performance.now; nanosecond values preserve its actual clock precision",
     });
   }
-  add(name, start, classification) {
-    const elapsed = performance.now() - start;
+  add(name, start, classification, end = performance.now()) {
+    const elapsed = end - start;
     const phase = this.phases.get(name) ?? { milliseconds: 0, maximumMs: 0, count: 0 };
     phase.milliseconds += elapsed;
     phase.maximumMs = Math.max(phase.maximumMs, elapsed);
@@ -30,6 +32,23 @@ export class PhaseMeasurements {
   }
   lastMilliseconds(name) {
     return this.phases.get(name)?.lastMilliseconds ?? null;
+  }
+  runExclusive(name, operation) {
+    // returned promises are not awaited; this scope measures the synchronous invocation.
+    const start = performance.now(), frame = { name, children: 0 };
+    this.exclusiveStack.push(frame);
+    try {
+      return operation();
+    } finally {
+      const end = performance.now(), elapsed = end - start;
+      this.exclusiveStack.pop();
+      this.add(name, start, undefined, end);
+      const phase = this.phases.get(name);
+      phase.selfMilliseconds = (phase.selfMilliseconds ?? 0) + elapsed - frame.children;
+      const parent = this.exclusiveStack.at(-1);
+      if (parent) parent.children += elapsed;
+      else this.exclusiveRootMilliseconds += elapsed;
+    }
   }
   run(name, operation, classification) {
     const start = performance.now();
@@ -63,6 +82,7 @@ export class PhaseMeasurements {
         name,
         {
           elapsedNs: Math.round(phase.milliseconds * 1e6),
+          ...(phase.selfMilliseconds === undefined ? {} : { selfElapsedNs: Math.round(phase.selfMilliseconds * 1e6) }),
           maximumNs: Math.round(phase.maximumMs * 1e6),
           count: phase.count,
           ...(phase.breakdown ? {

@@ -71,6 +71,70 @@ test('aggregate phases require no observer and close throwing scopes in finally'
   assert.doesNotThrow(() => phases.report());
 });
 
+test('exclusive phases subtract direct child spans once across three nested levels', t => {
+  let now=0,reads=0;
+  t.mock.method(performance,'now',()=>{reads++;return now;});
+  const phases=new PhaseMeasurements();
+  assert.equal(phases.runExclusive('outer',()=>{
+    now=2;
+    phases.runExclusive('cpu',()=>{
+      now=5;
+      phases.runExclusive('trap',()=>{now=7;});
+      now=11;
+    });
+    now=13;
+    return 42;
+  }),42);
+  const snapshot=phases.snapshot();
+  assert.deepEqual(snapshot,{
+    trap:{elapsedNs:2_000_000,selfElapsedNs:2_000_000,maximumNs:2_000_000,count:1},
+    cpu:{elapsedNs:9_000_000,selfElapsedNs:7_000_000,maximumNs:9_000_000,count:1},
+    outer:{elapsedNs:13_000_000,selfElapsedNs:4_000_000,maximumNs:13_000_000,count:1},
+  });
+  assert.equal(Object.values(snapshot).reduce((sum,row)=>sum+row.selfElapsedNs,0),13_000_000);
+  assert.equal(reads,6,'each synchronous scope uses one clock pair; snapshots add no clock reads');
+});
+
+test('exclusive sibling and later root scopes retain counts and maxima without counting uncovered gaps', t => {
+  let now=0;
+  t.mock.method(performance,'now',()=>now);
+  const phases=new PhaseMeasurements();
+  phases.runExclusive('outer',()=>{
+    now=2;phases.runExclusive('child',()=>{now=5;});
+    now=6;phases.runExclusive('child',()=>{now=8;});
+    now=10;
+  });
+  now=14;
+  phases.runExclusive('outer',()=>{now=19;});
+  const snapshot=phases.snapshot();
+  assert.deepEqual(snapshot,{
+    child:{elapsedNs:5_000_000,selfElapsedNs:5_000_000,maximumNs:3_000_000,count:2},
+    outer:{elapsedNs:15_000_000,selfElapsedNs:10_000_000,maximumNs:10_000_000,count:2},
+  });
+  assert.equal(snapshot.child.selfElapsedNs+snapshot.outer.selfElapsedNs,15_000_000,
+    'exclusive rows cover the two roots; the four ms between them remain outside the measured ledger');
+});
+
+test('exclusive scopes close in finally and a thrown child cannot retain a parent for later work', t => {
+  let now=0;
+  t.mock.method(performance,'now',()=>now);
+  const phases=new PhaseMeasurements(),failure=new Error('child failed');
+  assert.throws(()=>phases.runExclusive('outer',()=>{
+    now=2;
+    phases.runExclusive('throwing',()=>{now=5;throw failure;});
+  }),error=>error===failure);
+  now=8;
+  phases.runExclusive('after',()=>{now=11;});
+  const snapshot=phases.snapshot();
+  assert.deepEqual(snapshot,{
+    throwing:{elapsedNs:3_000_000,selfElapsedNs:3_000_000,maximumNs:3_000_000,count:1},
+    outer:{elapsedNs:5_000_000,selfElapsedNs:2_000_000,maximumNs:5_000_000,count:1},
+    after:{elapsedNs:3_000_000,selfElapsedNs:3_000_000,maximumNs:3_000_000,count:1},
+  });
+  snapshot.outer.selfElapsedNs=99;
+  assert.equal(phases.snapshot().outer.selfElapsedNs,2_000_000,'snapshots cannot rewrite retained accounting');
+});
+
 test('observed phases retain their schema, detailed scopes and counter exports', async t => {
   let now = 0;
   t.mock.method(performance, 'now', () => now);
