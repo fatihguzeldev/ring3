@@ -180,17 +180,27 @@ try {
         dirty:!!(d.getUint32(this.pte(dataAddress>>>12),true)&64)};
       const result=original.call(this);
       observations.push({...observed,accessedAfter:!!(d.getUint32(directory,true)&32),
-        scannedPtes:this.lastDirtyScanCount});return result;
+        scannedPtes:this.lastDirtyScanCount,dirtySlots:result});return result;
     };
     try {
       put(dataAddress,0x12345678);
+      const contentVersion=()=>{
+        engine.ok('component_cpu_view',...KEY);const descriptor=engine.resultView(128),d=new DataView(memory.buffer);
+        const slot=d.getUint32(descriptor.getUint32(24,true)+(dataAddress>>>12)*4,true)-1;
+        return d.getBigUint64(descriptor.getUint32(48,true)+slot*16+8,true);
+      };
+      const beforeVersion=contentVersion();let readVersion;
       for(const pc of [0x600300,0x600340]) {
         new DataView(memory.buffer).setUint32(engine.base+48,pc,true);cache.import();
         const run=cache.execute(cache.select());assert.equal(run.reason,8);
+        if(pc===0x600300)readVersion=contentVersion();
       }
       assert.equal(observations[0].accessed,true,'actual read marks the page directory accessed');
       assert.equal(observations[0].dirty,false,'read-only batch does not dirty the data PTE');
       assert.equal(observations[1].dirty,true,'later actual store marks the data PTE dirty');
+      assert.equal(observations[0].dirtySlots,0);assert.equal(observations[1].dirtySlots,1);
+      assert.equal(readVersion,beforeVersion,'read-only collection preserves canonical content version');
+      assert(contentVersion()>beforeVersion,'actual guest write advances canonical content version');
       if(incrementalSync)assert.equal(observations[0].accessedAfter,false,'partitioned read-only collection resets access');
       if(incrementalSync) {
         const first=order.indexOf('cpu'),second=order.indexOf('cpu',first+1);
