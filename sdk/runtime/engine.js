@@ -24,11 +24,35 @@ export function record(magic, size, profile = 1) {
 export class Engine {
   #stateView;
 
-  static async create(url, pages = RESIDENT_PAGES, signal, compiled) {
+  static async create(url, pages = RESIDENT_PAGES, signal, compiled, shared) {
     const { module, hash } = await loadEngineModule(url, signal, compiled);
-    const instance = await WebAssembly.instantiate(module, {
+    const imports = {
       ring3_observability: { now_ns: epochNowNs },
-    });
+    };
+    if (shared) {
+      const { memory, minimumMemoryBytes } = shared;
+      if (!(memory instanceof WebAssembly.Memory) || !Number.isSafeInteger(minimumMemoryBytes) || minimumMemoryBytes < 0)
+        throw new TypeError("invalid shared CPU memory");
+      if (!WebAssembly.Module.imports(module).some(item => item.kind === "memory" && item.module === "env" && item.name === "memory"))
+        throw new Error("the external CPU requires a Ring3 engine built with imported memory");
+      const missing = Math.ceil(minimumMemoryBytes / 65536) - memory.buffer.byteLength / 65536;
+      if (missing > 0) memory.grow(missing);
+      imports.env = { memory };
+    }
+    const instance = await WebAssembly.instantiate(module, imports);
+    if (shared && instance.exports.memory !== shared.memory)
+      throw new Error("the external CPU and Ring3 must use the same Wasm memory");
+    if (shared) {
+      const { __stack_pointer: stack, __data_end: dataEnd, __heap_base: heapBase } = instance.exports;
+      const boundary = 512 * 1024 * 1024;
+      if (!(stack instanceof WebAssembly.Global) || typeof stack.value !== "number" ||
+          !(dataEnd instanceof WebAssembly.Global) || dataEnd.value < boundary ||
+          !(heapBase instanceof WebAssembly.Global) || heapBase.value < boundary)
+        throw new Error("the external CPU requires a Ring3 engine with high memory layout exports");
+      // rust's stack-first layout starts low; reserve 511..512 mib for its downward-growing stack.
+      try { stack.value = boundary; }
+      catch { throw new Error("the external CPU requires an exported mutable Ring3 stack pointer"); }
+    }
     const api = Object.fromEntries(
       Object.entries(instance.exports)
         .filter(([name]) => name.startsWith("ring3_abi_v1_"))

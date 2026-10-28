@@ -19,11 +19,12 @@ export function createSession({container, engineUrl = '/engine.wasm', onStatus =
     const element = document.createElement('div'); element.setAttribute(`data-dialog-${name}`,''); dialog.append(element);
   }
   host.append(title,display,dialog); container.append(host);
-  let state = Object.freeze({state:'idle',backend:'core'}), disposed = false, pending = Promise.resolve(), stopping = null, generation = 0;
+  let state = Object.freeze({state:'idle',backend:'core'}), selectedBackend = 'core',
+    disposed = false, pending = Promise.resolve(), stopping = null, generation = 0;
   const waiters = new Set();
   const runtime = new BrowserSession({canvas,gdiCanvas,title,dialog,onDiagnostic,onAudioStats,onCapture,onObservation,
     onStatus(value) {
-      state = Object.freeze({...value,backend:'core'});
+      state = Object.freeze({...value,backend:value.backend ?? value.stats?.backend ?? selectedBackend});
       for (const item of [...waiters]) {
         if (value.state === 'error') item.reject(new Error(value.message));
         else if (item.states.includes(value.state)) item.resolve(state);
@@ -56,6 +57,9 @@ export function createSession({container, engineUrl = '/engine.wasm', onStatus =
   return Object.freeze({
     launch(options) {return operation(async () => {
       if (!['idle','stopped'].includes(state.state)) throw new Error('stop the current session before launching another');
+      const backend = options?.backend ?? 'core';
+      if (!['core','v86'].includes(backend)) throw new TypeError('unknown CPU backend');
+      selectedBackend = backend;
       const ready = changed(['running','exited'],120000);
       try {await runtime.start({...options,engineUrl:options?.engineUrl ?? engineUrl}); return await ready.promise;}
       catch (error) {ready.cancel(error); await ready.promise.catch(() => {}); throw error;}

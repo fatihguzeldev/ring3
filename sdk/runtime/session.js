@@ -50,6 +50,8 @@ export class Session {
       type: "status",
       state,
       message,
+      backend: this.backend ?? "core",
+      cpuHash: this.externalCpu?.hash,
       pc: read("pc", () => this.engine?.get(48)),
       stats: read("cache.stats", () => this.code?.stats()),
       windowsCalls: read("windowsCalls.snapshot", () => this.callDiagnostics?.snapshot()),
@@ -70,17 +72,26 @@ export class Session {
   }
   async initialize(options) {
     if (options.receiptMode !== undefined) throw new Error("execution receipt modes are not supported by the core SDK");
+    this.backend = options.backend ?? "core";
+    if (!["core", "v86"].includes(this.backend)) throw new TypeError("unknown CPU backend");
+    if (this.backend === "v86" && options.frameProbe) throw new Error("frame probing is unavailable for the v86 backend");
     this.observation = options.observation;
     this.frameProbeEnabled = options.frameProbe === true;
     if (options.frameProbeCensus) throw new Error("resident execution census is not supported by the core SDK");
     this.frameProbe = null;
     this.status("loading", "loading engine and local file manifest");
+    if (this.backend === "v86") {
+      const { prepareV86 } = await import("./v86/index.js");
+      this.externalCpu = await prepareV86(options.v86, { signal: this.abort.signal });
+      this.abort.signal.throwIfAborted();
+    }
     const loadEngine = () =>
       Engine.create(
         options.engineUrl ?? "/engine.wasm",
         RESIDENT_PAGES,
         this.abort.signal,
         options.compiledEngine,
+        this.externalCpu ? { memory: this.externalCpu.memory, minimumMemoryBytes: 805306368 } : undefined,
       );
     this.engine = await (this.observation
       ? this.observation.observer.scopeAsync("engine.load", {}, loadEngine)
@@ -127,8 +138,10 @@ export class Session {
     h.ok("start_module_process", h.name(executable), 0, 0x7e000000, 256, 0x7f000000);
     while (await this.files.sourceProgress()) this.abort.signal.throwIfAborted();
     this.abort.signal.throwIfAborted();
-    this.code = new CodeCache(h, execution);
-    this.observation?.observer.event("execution.backend", { backend: "core", callback_backend: "core", engine_sha256: h.hash });
+    this.code = this.externalCpu ? await this.externalCpu.attach(h, execution) : new CodeCache(h, execution);
+    this.abort.signal.throwIfAborted();
+    this.observation?.observer.event("execution.backend", { backend: this.backend, callback_backend: this.backend,
+      engine_sha256: h.hash, cpu_sha256: this.externalCpu?.hash });
     this.started = performance.now();
     this.lastSchedule = this.started;
     this.pausedDuration = 0;
@@ -524,7 +537,9 @@ export class Session {
   stop(notify = true) {
     if (this.stopped) return;
     this.cancel();
+    this.code?.close?.();
     if (this.engine) this.engine.ok("close");
+    this.externalCpu?.dispose();
     if (this.paused) {
       this.pausedDuration = (this.pausedDuration ?? 0) + performance.now() - this.pauseStarted;
       this.paused = false;

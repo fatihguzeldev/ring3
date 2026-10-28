@@ -89,3 +89,24 @@ test('stop cancels a waiting launch and a later launch uses a fresh acknowledgem
     assert.equal(starts,2);
   });
 });
+
+test('an explicit CPU backend reaches the worker and its identity remains visible in public status', async () => {
+  const cpuHash='a'.repeat(64),engineHash='b'.repeat(64),v86={wasmUrl:'/v86.wasm',sha256:cpuHash};
+  let starts=0;
+  await fixture({
+    async start(options) {
+      starts++;
+      if(starts===1) {
+        assert.equal(options.backend,'v86');assert.deepEqual(options.v86,v86);
+        this.status('running','running',{backend:'v86',cpuHash,engineHash,stats:{backend:'v86'}});
+      } else this.status('running','running',{stats:{backend:'core'}});
+    },
+    async stop() {this.status('stopped');},
+  }, async session => {
+    const running=await session.launch({backend:'v86',v86});
+    assert.equal(running.backend,'v86');assert.equal(session.status().backend,'v86');
+    assert.equal(running.cpuHash,cpuHash);assert.equal(running.engineHash,engineHash);
+    assert.equal((await session.stop()).backend,'v86');
+    assert.equal((await session.launch({})).backend,'core');
+  });
+});

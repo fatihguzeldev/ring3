@@ -1,6 +1,7 @@
 export interface SessionStatus {
   readonly state: string;
-  readonly backend: 'core';
+  readonly backend: 'core'|'v86';
+  readonly cpuHash?: string;
   readonly message?: string;
   readonly pc?: number;
   readonly stats?: Readonly<Record<string,unknown>>;
@@ -8,6 +9,8 @@ export interface SessionStatus {
 }
 export interface LaunchOptions {
   engineUrl?: string;
+  backend?: 'core'|'v86';
+  v86?: {wasmUrl?:string;sha256?:string};
   executable?: string;
   commandLine?: string;
   manifestUrl?: string;
