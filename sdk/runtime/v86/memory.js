@@ -93,7 +93,7 @@ export class PageTables {
     for(let index=0;index<count;index++) {
       const page=changes?changes[index]:index;
       if(page>=info.guestPages)throw new Error('invalid v86 mapping change page');
-      const mapped=maps[page],old=this.rowsByPage.get(page);
+      const mapped=maps[page],old=incremental?this.rowsByPage.get(page):null;
       if(!mapped) {
         if(old) {
           d.setUint32(old.pte,0,true);this.dirty.remove(old);this.rowsByPage.delete(page);
@@ -111,7 +111,8 @@ export class PageTables {
       if(old)Object.assign(old,{slot:mapped-1,permission,cow:!!privateSlots?.[page]});
       else {
         const row={page,pte,slot:mapped-1,permission,cow:!!privateSlots?.[page],index:this.pages.length};
-        this.pages.push(row);this.rowsByPage.set(page,row);this.dirty.add(row);
+        this.pages.push(row);
+        if(this.policy.incrementalSync){this.rowsByPage.set(page,row);this.dirty.add(row);}
       }
     }
     this.lastMappingScanCount=count;
@@ -131,7 +132,18 @@ export class PageTables {
     return new Uint32Array(this.engine.memory.buffer,this.maps,1<<20)[address>>>12] ? 2 : 1;
   }
   publishDirty() {
-    const {slots,scannedPtes,scannedDirectories}=this.dirty.collect(this.policy.incrementalSync);
+    let result;
+    if(this.policy.incrementalSync)result=this.dirty.collect(true);
+    else {
+      const d=new DataView(this.engine.memory.buffer),dirty=new Set();
+      for(const row of this.pages) {
+        const value=d.getUint32(row.pte,true);
+        if(value&64){dirty.add(row.slot);d.setUint32(row.pte,value&~64,true);}
+      }
+      if(dirty.size)this.cpu.full_clear_tlb();
+      result={slots:[...dirty],scannedPtes:this.pages.length,scannedDirectories:0};
+    }
+    const {slots,scannedPtes,scannedDirectories}=result;
     this.lastDirtyScanCount=scannedPtes;this.lastDirtyDirectoryCount=scannedDirectories;
     if(!slots.length)return 0;
     for(let start=0;start<slots.length;start+=1024) {

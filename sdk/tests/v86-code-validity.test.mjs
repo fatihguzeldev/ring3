@@ -236,13 +236,20 @@ test('policy switches flush pending writes and preserve mappings in legacy, JIT-
     assert.deepEqual(tables.configure(policy),policy);
     assert.deepEqual(tables.policy,policy);assert(f.cpu.clears>clears);
     assert.deepEqual(f.dirtyPublications.slice(published),[[1]],'pending old-mode writes publish before switching');
-    assert.equal(f.data.getUint32(pte,true)&64,0);assert.equal(tables.rowsByPage.get(DATA).slot,1);
+    assert.equal(f.data.getUint32(pte,true)&64,0);assert.equal(tables.pages.find(row=>row.page===DATA).slot,1);
+    if(!policy.incrementalSync) {
+      assert.equal(tables.rowsByPage.size,0,'legacy full-sync does not populate a per-VA index');
+      assert.equal(tables.dirty.groups.size,0,'legacy dirty collection does not populate directory groups');
+    }
     assert.equal(tables.lastMappingFullRebuild,true);assert.equal(tables.lastMappingScanCount,1<<20);
     const generated={policy};f.compiled.set(CODE,generated);
     f.changeMapping(DATA+1,2,3);f.content(2,f.info.transaction);tables.refresh();
     assert.equal(tables.lastMappingScanCount,policy.incrementalSync?1:1<<20);
     assert.equal(f.compiled.get(CODE),policy.selectiveCode?generated:undefined);
-    assert.equal(f.pending.size,0);assert.equal(tables.rowsByPage.get(DATA+1).slot,2);
+    assert.equal(f.pending.size,0);assert.equal(tables.pages.find(row=>row.page===DATA+1).slot,2);
+    if(!policy.incrementalSync) {
+      assert.equal(tables.rowsByPage.size,0);assert.equal(tables.dirty.groups.size,0);
+    }
   }
   const before=f.cpu.clears;
   assert.deepEqual(tables.configure({selectiveCode:true,incrementalSync:true}),tables.policy);
