@@ -1,0 +1,12 @@
+{
+  "source": "https://github.com/jenissimo/v86",
+  "branch": "bottleship",
+  "sourceReviewRevision": "2e9d1a2c16ee12899891f3e68ded05402c566710",
+  "binarySourceBinding": "existing local bottleship artifacts; source review revision is not a reproducible-build claim",
+  "license": "BSD-2-Clause",
+  "files": {
+    "libv86.mjs": {"sha256": "5aff37a7cc1ef3b339872bf3be38a0a7168da6c92b218a96f84280288ceff55e", "source": ".cache/browser-runtime/vendor/v86/build/libv86.mjs"},
+    "v86.wasm": {"sha256": "ce21a0e21e2e2c9cc0bae9acfdf4615daf22664a5a3b94e907aea139e9693fa6", "source": ".cache/browser-runtime/public/v86.wasm"}
+  },
+  "modifications": []
+}
