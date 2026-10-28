@@ -227,7 +227,7 @@ const server = createServer(async (request, response) => {
     if (url.pathname.startsWith("/sdk/")) {
       const root = resolve(here, "../sdk"),
         source = resolve(root, decodeURIComponent(url.pathname.slice("/sdk/".length)));
-      if (!source.startsWith(root + sep) || ![".html", ".js", ".mjs", ".css"].includes(extname(source)))
+      if (!source.startsWith(root + sep) || ![".html", ".js", ".mjs", ".css", ".wasm"].includes(extname(source)))
         return json(response, { error: "not found" }, 404);
       if ((await realpath(source)) !== source)
         return json(response, { error: "symbolic link denied" }, 403);
