@@ -1,0 +1,54 @@
+import assert from "node:assert/strict";
+import { test } from "node:test";
+import { fixture } from "./support.mjs";
+
+test("diagnostics expose the actual rejected gate and native key without changing delivery", (t) => {
+  const f = fixture(t);
+  f.host.setDiagnostics(true);
+  f.host.enable();
+  f.host.windowFocused = false;
+  const rejected = f.event(f.window, "keydown", { code: "ArrowDown", key: "ArrowDown" });
+  let status = f.host.snapshot();
+  assert.equal(rejected.defaultPrevented, false);
+  assert.equal(status.enabled, true);
+  assert.equal(status.windowFocused, false);
+  assert.equal(status.documentFocused, true);
+  assert.equal(status.canvasFocused, true);
+  assert.equal(status.active, false);
+  assert.equal(status.lastKey.code, "ArrowDown");
+  assert.equal(status.lastKey.accepted, false);
+  assert.equal(status.lastKey.defaultPrevented, false);
+  f.focus();
+  const accepted = f.event(f.window, "keydown", { code: "ArrowDown", key: "ArrowDown" });
+  status = f.host.snapshot();
+  assert.equal(accepted.defaultPrevented, true);
+  assert.equal(status.active, true);
+  assert.equal(status.keyAccepted, 1);
+  assert.equal(status.keyRejected, 1);
+  assert.equal(status.lastKey.accepted, true);
+  assert.deepEqual(f.events.at(-1), { kind: "key", code: 0xd0, down: true });
+});
+
+test("diagnostics retain bounded mouse and lifecycle summaries and can be disabled", (t) => {
+  const f = fixture(t);
+  assert.equal(f.host.snapshot(), undefined);
+  f.host.setDiagnostics(true);
+  f.host.enable();
+  f.event(f.canvas, "mousedown", { button: 0, clientX: 20, clientY: 30 });
+  f.event(f.window, "mouseup", { button: 0 });
+  f.host.setBlocked(true);
+  f.event(f.window, "keydown", { code: "Unknown", key: "?" });
+  const status = f.host.snapshot();
+  assert.equal(status.blocked, true);
+  assert.equal(status.mouseAccepted, 2);
+  assert.equal(status.lastMouse.type, "mouseup");
+  assert.equal(status.unknownKeyEvents, 1);
+  assert.equal(status.controls.enable, 1);
+  assert.equal(status.controls.block, 1);
+  f.host.setDiagnostics(false);
+  assert.equal(f.host.snapshot(), undefined);
+  assert.equal(f.host.diagnostics, null);
+  f.host.setBlocked(false);
+  f.event(f.window, "keydown", { code: "KeyW" });
+  assert.equal(f.host.diagnostics, null);
+});

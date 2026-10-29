@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Ring3 browser input proof</title>
+    <link rel="stylesheet" href="../style.css" />
+    <script type="module" src="./browser-proof.js"></script>
+  </head>
+  <body>
+    <header class="topbar"><h1>browser input proof</h1></header>
+    <main>
+      <section class="launch" aria-label="Input controls">
+        <p>Start input, then use real keys and mouse on the canvas. Events stay in this page.</p>
+        <div class="buttons">
+          <button id="start" class="primary">start input</button>
+          <button id="disable">disable input</button>
+          <button id="clear">clear log</button>
+        </div>
+        <output id="counts" aria-live="polite">no accepted batches</output>
+      </section>
+      <section class="viewport" aria-label="Input canvas">
+        <div class="display-heading">click this canvas to focus keyboard and mouse</div>
+        <div class="stage">
+          <canvas id="input-canvas" width="640" height="240" tabindex="0"
+            aria-label="Input proof canvas. Click to focus, then press keys."></canvas>
+        </div>
+      </section>
+      <section class="launch" aria-label="Current input state">
+        <strong>current state</strong>
+        <pre id="state"></pre>
+      </section>
+      <section class="launch" aria-label="Recent native events and accepted batches">
+        <strong>latest 30 records</strong>
+        <pre id="events" tabindex="0" aria-label="Recent input records"></pre>
+      </section>
+    </main>
+  </body>
+</html>

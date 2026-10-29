@@ -1,0 +1,31 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Pointer lock diagnostic</title>
+<style>body{background:#181a1c;color:#eee;font:16px system-ui;margin:2rem}button{font:inherit;padding:.7rem}canvas{display:block;background:#343a40;margin:1rem 0;max-width:100%}pre{white-space:pre-wrap}</style>
+<h1>Pointer lock diagnostic</h1>
+<p>This page tests browser capture without starting the engine.</p>
+<button id="capture">Capture pointer</button>
+<button id="release">Release pointer</button>
+<canvas id="surface" width="640" height="240" tabindex="0"></canvas>
+<pre id="result" role="status"></pre>
+<script type="module">
+const canvas = document.querySelector('canvas');
+const result = document.querySelector('#result');
+const log = (type, fields = {}) => {
+  const row = { at: new Date().toISOString(), type, ...fields };
+  result.textContent += JSON.stringify(row) + '\n';
+};
+log('ready', { secure: isSecureContext, api: typeof canvas.requestPointerLock, userAgent: navigator.userAgent });
+document.querySelector('#capture').onclick = async () => {
+  log('request', { focused: document.hasFocus(), visibility: document.visibilityState, userActivation: navigator.userActivation?.isActive });
+  canvas.focus();
+  try { await canvas.requestPointerLock(); log('resolved', { locked: document.pointerLockElement === canvas }); }
+  catch (error) { log('rejected', { name: error.name, message: error.message }); }
+};
+document.querySelector('#release').onclick = () => document.exitPointerLock();
+document.addEventListener('pointerlockchange', () => log('change', { locked: document.pointerLockElement === canvas }));
+document.addEventListener('pointerlockerror', () => log('error-event'));
+let motion = 0, x = 0, y = 0;
+canvas.addEventListener('mousemove', event => { if (document.pointerLockElement === canvas) { motion++; x += event.movementX; y += event.movementY; } });
+setInterval(() => { if (motion) { log('motion', { count: motion, x, y }); motion = x = y = 0; } }, 1000);
+</script>
