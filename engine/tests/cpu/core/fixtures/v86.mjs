@@ -11,7 +11,7 @@ import {image as moduleImage} from '../../../loader/modules/wasm/fixtures/runtim
 
 const [enginePath, reportPath, permissionText = '1', portText = ''] = process.argv.slice(2);
 assert(enginePath && reportPath, 'usage: v86.mjs imported-engine.wasm fresh-report.json');
-assert(['', 'port', 'inline', 'direct', 'direct-bindings', 'guest-ret', 'global', 'simd'].includes(portText));
+assert(['', 'port', 'inline', 'direct', 'direct-bindings', 'guest-ret', 'global', 'overlap', 'simd'].includes(portText));
 const deniedPermission = Number(permissionText);
 assert([0,1].includes(deniedPermission));
 const hash = bytes => createHash('sha256').update(bytes).digest('hex');
@@ -241,6 +241,16 @@ try {
     assert.equal(read(dataAddress),3,'same-VA remap executes new canonical bytes');
     report.hostCodeInvalidation={clears,finalizedModules:cache.stats().v86.finalizedModules};
   } finally {cache.cpu.jit_clear_cache=clear;}
+  if(portText==='overlap') {
+    stage='graphics overlap ABI mode handoff';cache.tables.refresh();
+    const owner={paused:true,open:cache.open},initial=cache.getGraphicsOverlap();
+    assert.deepEqual(initial,{enabled:false,completed:0n});assert.equal(cache.graphicsOverlap,false);
+    assert.equal(cache.configureGraphicsOverlap(true,owner),true);
+    const enabled=cache.getGraphicsOverlap();assert.deepEqual(enabled,{enabled:true,completed:initial.completed});
+    assert.equal(cache.graphicsOverlap,true);assert.equal(cache.configureGraphicsOverlap(false,owner),false);
+    const restored=cache.getGraphicsOverlap();assert.deepEqual(restored,initial);assert.equal(cache.graphicsOverlap,false);
+    report.graphicsOverlap={initial,enabled,restored,scope:'real ABI mode/counter handoff only; no D3D device or positive overlap dispatch'};save();
+  }
   if(portText==='global') {
     stage='global RX code with non-global dirty evidence';
     upload(0x600380,[0xb8,...u32(gate),0xff,0xe0]);

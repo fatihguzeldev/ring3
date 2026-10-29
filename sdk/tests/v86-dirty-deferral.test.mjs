@@ -373,6 +373,52 @@ test('guest RET mode changes commit SDK state only after successful native owner
   c.tables.guestReturnsSupported=false;assert.throws(()=>c.configureGuestReturns(true,owner),/unsupported/);
 });
 
+function overlapFixture() {
+  const f=fixture([]),c=f.cache,h=c.engine,result=h.resultView();
+  c.graphicsOverlap=false;let enabled=false,completed=(1n<<63n)+7n,busy=false,corrupt=null;
+  h.api={component_cpu_set_graphics_overlap(){},component_cpu_graphics_overlap(){}};
+  const ordinary=h.ok;
+  h.ok=(operation,...args)=>{
+    if(operation!=='component_cpu_set_graphics_overlap' && operation!=='component_cpu_graphics_overlap')return ordinary(operation,...args);
+    f.events.push(operation==='component_cpu_graphics_overlap'?'query':'set');
+    if(operation==='component_cpu_set_graphics_overlap') {
+      if(busy)throw Object.assign(new Error('overlap Busy'),{status:12});
+      enabled=!!args[2];
+    }
+    result.setUint32(0,enabled?1:0,true);result.setUint32(4,0,true);result.setBigUint64(8,completed,true);corrupt?.(result);
+  };
+  return {...f,setBusy(value){busy=value;},setNative(value,count){enabled=value;completed=count;},corrupt(fn){corrupt=fn;}};
+}
+
+test('graphics overlap publishes before guarded mode changes and queries the exact fresh u64 counter',()=>{
+  const f=overlapFixture(),c=f.cache,owner={paused:true,open:false};
+  for(const invalid of [undefined,{paused:false,open:false},{paused:true,open:true}])
+    assert.throws(()=>c.configureGraphicsOverlap(true,invalid),/paused/);
+  assert.deepEqual(f.events,[]);c.dirtyPending=true;
+  assert.equal(c.configureGraphicsOverlap(true,owner),true);assert.equal(c.graphicsOverlap,true);
+  assert.deepEqual(f.events,['dirty','set']);
+  assert.deepEqual(c.getGraphicsOverlap(),{enabled:true,completed:(1n<<63n)+7n});
+  f.setNative(false,(1n<<63n)+11n);
+  assert.deepEqual(c.getGraphicsOverlap(),{enabled:false,completed:(1n<<63n)+11n});
+  assert.equal(c.graphicsOverlap,true,'a read-only query does not silently rewrite the cached configured mode');
+});
+
+test('graphics overlap Busy unsupported hosts and malformed native results cannot commit cached mode',()=>{
+  const owner={paused:true,open:false},busy=overlapFixture();busy.setBusy(true);busy.cache.dirtyPending=true;
+  assert.throws(()=>busy.cache.configureGraphicsOverlap(true,owner),error=>error.status===12);
+  assert.equal(busy.cache.graphicsOverlap,false);assert.deepEqual(busy.events,['dirty','set']);
+  const unsupported=overlapFixture();delete unsupported.cache.engine.api.component_cpu_graphics_overlap;
+  assert.throws(()=>unsupported.cache.configureGraphicsOverlap(true,owner),/unsupported/);
+  assert.equal(unsupported.cache.graphicsOverlap,false);assert.deepEqual(unsupported.events,[]);
+  for(const corrupt of [d=>d.setUint32(0,2,true),d=>d.setUint32(4,1,true),d=>d.setUint32(0,0,true)]) {
+    const f=overlapFixture();f.corrupt(corrupt);
+    assert.throws(()=>f.cache.configureGraphicsOverlap(true,owner),/invalid/);
+    assert.equal(f.cache.graphicsOverlap,false);
+  }
+  const f=overlapFixture();f.corrupt(d=>d.setUint32(4,1,true));
+  assert.throws(()=>f.cache.getGraphicsOverlap(),/invalid/);
+});
+
 test('inline eligibility does not expand with future native safe flags or stale ownership',()=>{
   for(const options of [{id:0x4023d},{flags:1},{flags:2},{pendingBefore:true},{allow:()=>false},{allow:check=>check<2}]) {
     const f=inlineFixture(options);

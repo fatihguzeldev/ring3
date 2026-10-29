@@ -87,6 +87,7 @@ export class V86CodeCache {
     this.directGates=false;this.directCompletions=0;this.directDeclines=0;
     this.directBindings=false;this.directBindingCompletions=0;
     this.guestReturns=false;this.guestReturnCompletions=0;
+    this.graphicsOverlap=false;
   }
   get pc() {return this.engine.get(48);}
   get guestReturnsSupported() {return this.tables.guestReturnsSupported===true;}
@@ -299,6 +300,28 @@ export class V86CodeCache {
     if(current.mode!==this.portGateMode)throw new Error('native v86 gate mode owner changed');
     this.applyPortGates(true,enabled?2:1);return enabled;
   }
+  readGraphicsOverlap() {
+    const d=this.engine.resultView(16),enabled=d.getUint32(0,true);
+    if(enabled>1 || d.getUint32(4,true)!==0)throw new Error('invalid native v86 graphics overlap result');
+    return {enabled:enabled===1,completed:d.getBigUint64(8,true)};
+  }
+  getGraphicsOverlap() {
+    if(typeof this.engine.api.component_cpu_graphics_overlap!=='function')
+      throw new Error('native v86 graphics overlap is unsupported');
+    this.engine.ok('component_cpu_graphics_overlap',...KEY);return this.readGraphicsOverlap();
+  }
+  configureGraphicsOverlap(enabled,owner) {
+    if(owner?.paused!==true || owner?.open!==false || this.open || this.closed || typeof enabled!=='boolean')
+      throw new Error('v86 graphics overlap changes require a closed paused owner');
+    if(this.inlineFailure)throw this.inlineFailure;
+    if(enabled===this.graphicsOverlap)return enabled;
+    if(typeof this.engine.api.component_cpu_set_graphics_overlap!=='function' ||
+        typeof this.engine.api.component_cpu_graphics_overlap!=='function')
+      throw new Error('native v86 graphics overlap is unsupported');
+    this.publish();this.engine.ok('component_cpu_set_graphics_overlap',...KEY,enabled?1:0);
+    if(this.readGraphicsOverlap().enabled!==enabled)throw new Error('invalid native v86 graphics overlap mode');
+    this.graphicsOverlap=enabled;return enabled;
+  }
   configureInlineGates(enabled,owner) {
     if(owner?.paused!==true || owner?.open!==false || this.open || this.closed || typeof enabled!=='boolean')
       throw new Error('v86 inline gate changes require a closed paused owner');
@@ -357,6 +380,7 @@ export class V86CodeCache {
       portGates:this.portGates,portGateCalls:this.portGateCalls,deniedPortCalls:this.deniedPortCalls,
       portGateMode:this.portGateMode,portGatePatchedCount:this.portGatePatchedCount,
       guestReturns:this.guestReturns,guestReturnsSupported:this.guestReturnsSupported,guestReturnCompletions:this.guestReturnCompletions,
+      graphicsOverlap:this.graphicsOverlap,
       inlineGates:this.inlineGates,inlineCompletions:this.inlineCompletions,inlineYields:this.inlineYields,
       directGates:this.directGates,directCompletions:this.directCompletions,directDeclines:this.directDeclines,
       directBindings:this.directBindings,directBindingCompletions:this.directBindingCompletions,
