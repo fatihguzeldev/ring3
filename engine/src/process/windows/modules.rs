@@ -425,6 +425,11 @@ impl EngineInstance {
         extra_ranges.extend(self.automation_process_scratch_ranges());
         extra_ranges.sort_unstable_by_key(|range| range.first);
         let media = self.prepare_media_process_exit()?;
+        extra_ranges
+            .try_reserve(media.unmaps().len())
+            .map_err(|_| HostError::Infrastructure)?;
+        extra_ranges.extend_from_slice(media.unmaps());
+        extra_ranges.sort_unstable_by_key(|range| range.first);
         let automation_arrays: crate::process::windows::automation::PreparedAutomationArrays32 =
             self.prepare_automation_array_retirement(None)?;
         let automation_allocations = self.automation_process_temporary_allocations()?;

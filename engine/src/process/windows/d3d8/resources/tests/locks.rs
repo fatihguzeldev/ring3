@@ -409,3 +409,76 @@ fn repeated_guest_locks_reuse_free_staging_while_held_locks_and_failed_publicati
             .contains_resource(runtime.resource(buffers[0], device).unwrap().resource)
     );
 }
+
+#[test]
+fn idle_staging_reuses_buffer_mappings_with_normal_unlock_publication() {
+    let (mut runtime, mut memory, device) = runtime();
+    assert_eq!(runtime.locks.staging_status(), [0, 0, 0, 0]);
+    runtime
+        .locks
+        .configure_staging_reuse(&mut memory, true)
+        .unwrap();
+    runtime
+        .device_resource_call(&mut memory, device, 23, &[device.0, 16, 0, 0, 2, DATA])
+        .unwrap();
+    let buffer = GuestAddress(read(&memory, DATA));
+    let surface = runtime.resource(buffer, device).unwrap();
+    let mut identity = None;
+    for byte in 1..=3u8 {
+        runtime
+            .resource_call(
+                &mut memory,
+                buffer,
+                InterfaceKind::VertexBuffer,
+                11,
+                &[buffer.0, 0, 16, DATA + 4, 0],
+            )
+            .unwrap();
+        let address = GuestAddress(read(&memory, DATA + 4));
+        let current = (address, memory.mapping_version_at(address).unwrap());
+        assert_eq!(*identity.get_or_insert(current), current);
+        assert!(
+            runtime
+                .locks
+                .configure_staging_reuse(&mut memory, false)
+                .is_err()
+        );
+        memory.write(address, &[byte; 16]).unwrap();
+        runtime
+            .resource_call(
+                &mut memory,
+                buffer,
+                InterfaceKind::VertexBuffer,
+                12,
+                &[buffer.0],
+            )
+            .unwrap();
+        assert_eq!(
+            runtime
+                .device(device)
+                .unwrap()
+                .resources()
+                .bytes(surface)
+                .unwrap(),
+            &[byte; 16]
+        );
+        assert_eq!(
+            runtime
+                .device(device)
+                .unwrap()
+                .resources()
+                .version(surface.resource)
+                .unwrap(),
+            u64::from(byte) + 1
+        );
+        assert_eq!(memory.mapping_version_at(address).unwrap(), current.1);
+        assert!(!runtime.locks.contains_resource(surface.resource));
+    }
+    assert_eq!(runtime.locks.staging_status(), [1, 4096, 2, 0]);
+    runtime
+        .locks
+        .configure_staging_reuse(&mut memory, false)
+        .unwrap();
+    assert!(memory.read(identity.unwrap().0, &mut [0]).is_err());
+    assert_eq!(runtime.locks.staging_status(), [0, 0, 2, 0]);
+}

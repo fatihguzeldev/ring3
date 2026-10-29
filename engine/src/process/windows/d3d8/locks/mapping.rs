@@ -49,6 +49,32 @@ impl LockRegistry32 {
             });
             return Ok(());
         }
+        let candidate = self.cache_candidate(bytes.len(), volume);
+        if candidate && let Some(range) = self.reusable_staging(memory, bytes.len())? {
+            let address = GuestAddress((range.first * PAGE_SIZE as usize) as u32);
+            let pointer = (address.0 + data_offset).to_le_bytes();
+            let padding =
+                (PAGE_SIZE as usize - bytes.len() % PAGE_SIZE as usize) % PAGE_SIZE as usize;
+            let zero = [0; PAGE_SIZE as usize];
+            memory.write_spans(&[
+                (address, bytes),
+                (
+                    GuestAddress(address.0 + bytes.len() as u32),
+                    &zero[..padding],
+                ),
+                (GuestAddress(output), &pointer),
+            ])?;
+            let mapping = memory.mapping_version_at(address)?;
+            self.reused_staging(resource);
+            self.entries.push(GuestLock32 {
+                resource,
+                info,
+                range,
+                mapping,
+                data_offset,
+            });
+            return Ok(());
+        }
         let count = bytes.len().div_ceil(PAGE_SIZE as usize);
         let range = memory
             .find_unmapped_range(self.range, count as u32, PAGE_SIZE)
@@ -98,6 +124,9 @@ impl LockRegistry32 {
         memory
             .install_pages_with_word_writes(&pages, &words[..count])
             .map_err(publication_error)?;
+        if candidate {
+            self.remember_staging(memory, resource, range);
+        }
         self.entries.push(GuestLock32 {
             resource,
             info,

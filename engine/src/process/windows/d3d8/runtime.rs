@@ -77,7 +77,52 @@ impl D3D8Reply32 {
     }
 }
 
+impl D3D8Runtime32 {
+    pub(in crate::process) fn append_lock_staging_exit_ranges(
+        &self,
+        memory: &crate::memory::AddressSpace,
+        ranges: &mut Vec<crate::memory::PageRange>,
+    ) -> Result<(), HostError> {
+        self.locks
+            .append_staging_exit_ranges(memory, ranges)
+            .map_err(|_| HostError::Infrastructure)
+    }
+}
+
 impl EngineInstance {
+    #[cfg(feature = "external-cpu")]
+    pub(in crate::process) fn set_external_lock_staging_reuse(
+        &mut self,
+        enabled: u32,
+    ) -> Result<(), HostError> {
+        if enabled > 1 || !self.external_cpu_memory_pinned {
+            return Err(HostError::InvalidRequest);
+        }
+        self.guard_core_owner(self.core_owner.ok_or(HostError::InvalidArtifact)?)?;
+        self.guard_owned_host_mutation()?;
+        let runtime = self
+            .d3d8
+            .as_mut()
+            .ok_or(HostError::D3D8(D3D8Error32::NotConfigured))?;
+        if runtime.locks.active_locks() {
+            return Err(HostError::Call(CallError::Busy));
+        }
+        runtime
+            .locks
+            .configure_staging_reuse(self.memory.as_mut().ok_or(HostError::Closed)?, enabled != 0)
+            .map_err(|_| HostError::InvalidRequest)
+    }
+
+    #[cfg(feature = "external-cpu")]
+    pub(in crate::process) fn external_lock_staging_reuse(&self) -> Result<[u32; 4], HostError> {
+        Ok(self
+            .d3d8
+            .as_ref()
+            .ok_or(HostError::D3D8(D3D8Error32::NotConfigured))?
+            .locks
+            .staging_status())
+    }
+
     #[cfg(feature = "external-cpu")]
     pub(in crate::process) fn set_external_graphics_overlap(
         &mut self,

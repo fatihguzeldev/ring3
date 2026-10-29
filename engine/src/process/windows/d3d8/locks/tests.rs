@@ -105,3 +105,98 @@ fn reclaimed_lock_ranges_are_reused_but_foreign_mappings_are_skipped() {
     memory.read(GuestAddress(0x2000), &mut foreign).unwrap();
     assert_eq!(u32::from_le_bytes(foreign), 0xfeedbeef);
 }
+
+#[test]
+fn idle_staging_foreign_protected_and_oversize_ranges_use_the_original_fallback() {
+    for protect in [false, true] {
+        let mut memory = AddressSpace::new(80).unwrap();
+        memory
+            .map_zeroed(
+                PageRange::new(GuestAddress(0x1000), 1).unwrap(),
+                Permissions::READ_WRITE,
+            )
+            .unwrap();
+        let mut locks =
+            LockRegistry32::new(PageRange::new(GuestAddress(0x2000), 128).unwrap(), 8).unwrap();
+        let mut store = ResourceStore::new(17, GraphicsLimits::default()).unwrap();
+        let id = store
+            .create(ResourceDesc::Buffer(BufferDesc {
+                length: 16,
+                kind: BufferKind::Vertex { fvf: 0 },
+                usage: Usage(0),
+                pool: Pool::SystemMemory,
+            }))
+            .unwrap();
+        locks.configure_staging_reuse(&mut memory, true).unwrap();
+        let info = store.lock_buffer(id, 0, 16, LockFlags(0)).unwrap();
+        locks
+            .publish(&mut memory, id, info, &[7; 16], 0x1000, None)
+            .unwrap();
+        let original = locks.entries[0].range;
+        locks.entries.clear();
+        store.cancel_lock(id, info.token).unwrap();
+        if protect {
+            memory.protect(original, Permissions::READ).unwrap();
+        } else {
+            memory.unmap(original).unwrap();
+            memory
+                .map_zeroed(original, Permissions::READ_WRITE)
+                .unwrap();
+        }
+        let foreign_version = memory
+            .mapping_version_at(GuestAddress((original.first * PAGE_SIZE as usize) as u32))
+            .unwrap();
+        let info = store.lock_buffer(id, 0, 16, LockFlags(0)).unwrap();
+        locks
+            .publish(&mut memory, id, info, &[9; 16], 0x1000, None)
+            .unwrap();
+        let address = GuestAddress((original.first * PAGE_SIZE as usize) as u32);
+        assert_ne!(locks.entries[0].range, original);
+        assert_eq!(memory.mapping_version_at(address).unwrap(), foreign_version);
+        assert_eq!(
+            memory.permissions_at(address).unwrap(),
+            if protect {
+                Permissions::READ
+            } else {
+                Permissions::READ_WRITE
+            }
+        );
+        assert_eq!(locks.staging_status()[2], 0);
+        let cached = locks.entries[0].range;
+        locks.entries.clear();
+        store.cancel_lock(id, info.token).unwrap();
+        let mut exit = Vec::new();
+        locks
+            .append_staging_exit_ranges(&memory, &mut exit)
+            .unwrap();
+        assert_eq!(exit, vec![cached]);
+        locks.configure_staging_reuse(&mut memory, false).unwrap();
+        assert!(
+            memory
+                .permissions_at(GuestAddress((cached.first * PAGE_SIZE as usize) as u32))
+                .is_err()
+        );
+        locks.configure_staging_reuse(&mut memory, true).unwrap();
+        let id = store
+            .create(ResourceDesc::Buffer(BufferDesc {
+                length: 256 * 1024 + 1,
+                kind: BufferKind::Vertex { fvf: 0 },
+                usage: Usage(0),
+                pool: Pool::SystemMemory,
+            }))
+            .unwrap();
+        let info = store.lock_buffer(id, 0, 0, LockFlags(0)).unwrap();
+        locks
+            .publish(
+                &mut memory,
+                id,
+                info,
+                &vec![5; 256 * 1024 + 1],
+                0x1000,
+                None,
+            )
+            .unwrap();
+        assert_eq!(locks.staging_status()[1], 0);
+        assert_eq!(locks.entries[0].range.count, 65);
+    }
+}

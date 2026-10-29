@@ -14,6 +14,8 @@ export_process_calls! {
     component_cpu_gate(key_low: u32, key_high: u32, pc: u32);
     component_cpu_set_gate_mode(key_low: u32, key_high: u32, mode: u32);
     component_cpu_gate_mode(key_low: u32, key_high: u32);
+    component_cpu_set_lock_staging_reuse(key_low: u32, key_high: u32, enabled: u32);
+    component_cpu_lock_staging_reuse(key_low: u32, key_high: u32);
     component_cpu_set_graphics_overlap(key_low: u32, key_high: u32, enabled: u32);
     component_cpu_graphics_overlap(key_low: u32, key_high: u32);
     component_cpu_try_complete_gate(key_low: u32, key_high: u32);

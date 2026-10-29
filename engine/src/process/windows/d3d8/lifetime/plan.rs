@@ -41,6 +41,7 @@ impl D3D8Runtime32 {
                 locks: PreparedLockDisposal32 {
                     ranges: Vec::new(),
                     tokens: Vec::new(),
+                    staging: false,
                 },
             });
         }

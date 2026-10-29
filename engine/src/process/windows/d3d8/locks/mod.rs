@@ -1,5 +1,6 @@
 mod mapping;
 mod publication;
+mod staging;
 
 use super::{DispatchError32, memory::read_bytes};
 use crate::{
@@ -20,16 +21,21 @@ pub(super) struct LockRegistry32 {
     memory_identity: Option<u64>,
     entries: Vec<GuestLock32>,
     limit: usize,
+    staging_reuse: bool,
+    staging: Option<staging::StagingMapping32>,
+    staging_reuses: u64,
 }
 
 pub(super) struct PreparedLockDisposal32 {
     pub ranges: Vec<PageRange>,
     pub tokens: Vec<(ResourceId, u64)>,
+    pub staging: bool,
 }
 
 impl LockRegistry32 {
     pub(super) fn terminate_process(&mut self) {
         self.entries.clear();
+        self.staging = None;
     }
 
     pub(super) fn prepare_disposal(
@@ -59,13 +65,33 @@ impl LockRegistry32 {
             ranges.push(entry.range);
             tokens.push((entry.resource, entry.info.token));
         }
+        let staging = self
+            .staging
+            .as_ref()
+            .is_some_and(|staging| resources.contains(&staging.resource));
+        if staging
+            && let Some(cached) = &self.staging
+            && !self
+                .entries
+                .iter()
+                .any(|entry| entry.range == cached.range())
+        {
+            cached.append_owned_ranges(memory, &mut ranges)?;
+        }
         ranges.sort_unstable_by_key(|range| range.first);
         ranges.dedup();
         tokens.sort_unstable_by_key(|&(resource, token)| lock_identity(resource, token));
-        Ok(PreparedLockDisposal32 { ranges, tokens })
+        Ok(PreparedLockDisposal32 {
+            ranges,
+            tokens,
+            staging,
+        })
     }
 
     pub(super) fn commit_disposal(&mut self, prepared: &PreparedLockDisposal32) {
+        if prepared.staging {
+            self.staging = None;
+        }
         self.entries.retain(|entry| {
             prepared
                 .tokens
@@ -88,6 +114,9 @@ impl LockRegistry32 {
             memory_identity: None,
             entries,
             limit: limit as usize,
+            staging_reuse: false,
+            staging: None,
+            staging_reuses: 0,
         })
     }
 

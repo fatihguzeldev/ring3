@@ -144,7 +144,7 @@ impl D3D8Runtime32 {
         };
         self.device_mut(device)?
             .unlock(surface.resource, info.token, bytes.as_deref())?;
-        if last_mapping_lock {
+        if last_mapping_lock && !self.locks.retain_staging(memory, range) {
             memory.unmap(range)?;
         }
         self.locks.entries.remove(index);

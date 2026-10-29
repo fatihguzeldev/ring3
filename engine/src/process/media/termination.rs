@@ -5,8 +5,13 @@ pub(in crate::process) struct PreparedMediaExit32 {
     epoch: u64,
     bindings: Vec<EventBinding32>,
     handles: Vec<u32>,
+    unmaps: Vec<crate::memory::PageRange>,
 }
 impl PreparedMediaExit32 {
+    pub(in crate::process) fn unmaps(&self) -> &[crate::memory::PageRange] {
+        &self.unmaps
+    }
+
     pub(in crate::process) fn bindings(&self) -> &[EventBinding32] {
         &self.bindings
     }
@@ -33,13 +38,21 @@ impl EngineInstance {
         if let Some(input) = &self.dinput {
             input.append_process_exit_bindings(&mut bindings)?;
         }
+        let mut unmaps = Vec::new();
         if let Some(graphics) = self.d3d8.as_mut() {
+            graphics
+                .append_lock_staging_exit_ranges(
+                    self.memory.as_ref().ok_or(HostError::Closed)?,
+                    &mut unmaps,
+                )
+                .map_err(|_| HostError::Infrastructure)?;
             graphics.prepare_process_exit()?;
         }
         Ok(PreparedMediaExit32 {
             epoch: self.media_epoch,
             bindings,
             handles,
+            unmaps,
         })
     }
     pub(in crate::process) fn commit_media_process_exit(&mut self, prepared: PreparedMediaExit32) {

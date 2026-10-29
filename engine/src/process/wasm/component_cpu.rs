@@ -174,6 +174,32 @@ pub(crate) fn component_cpu_gate_mode(low: u32, high: u32) -> u32 {
     })
 }
 
+pub(crate) fn component_cpu_set_lock_staging_reuse(low: u32, high: u32, enabled: u32) -> u32 {
+    access(low, high, true, |instance| {
+        instance.set_external_lock_staging_reuse(enabled)?;
+        write_lock_staging_reuse(instance)
+    })
+}
+
+pub(crate) fn component_cpu_lock_staging_reuse(low: u32, high: u32) -> u32 {
+    access(low, high, true, write_lock_staging_reuse)
+}
+
+fn write_lock_staging_reuse(instance: &mut EngineInstance) -> Result<(), HostError> {
+    for (index, value) in instance
+        .external_lock_staging_reuse()?
+        .into_iter()
+        .enumerate()
+    {
+        crate::abi::header::write_u32(
+            instance.arena.as_mut().get_mut(),
+            TRANSFER_OFFSET + index * 4,
+            value,
+        );
+    }
+    Ok(())
+}
+
 pub(crate) fn component_cpu_set_graphics_overlap(low: u32, high: u32, enabled: u32) -> u32 {
     access(low, high, true, |instance| {
         instance.set_external_graphics_overlap(enabled)?;

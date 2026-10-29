@@ -275,6 +275,32 @@ impl AddressSpace {
         Ok(self.permissions[page])
     }
 
+    pub(crate) fn staging_page_owner(&self, address: GuestAddress) -> Option<(u32, u64)> {
+        let page = address.0 as usize / PAGE_SIZE as usize;
+        let mapping = self.mappings[page];
+        if mapping == 0 || self.permissions[page] != Permissions::READ_WRITE {
+            return None;
+        }
+        let slot = mapping as usize - 1;
+        (self.references[slot] == 1
+            && self.executable_views[slot] == 0
+            && self
+                .private_slots
+                .as_ref()
+                .is_none_or(|slots| slots[page] == 0))
+        .then_some((mapping, self.mapping_versions[page]))
+    }
+
+    pub(crate) fn staging_page_matches(
+        &self,
+        address: GuestAddress,
+        mapping: u32,
+        incarnation: u64,
+    ) -> bool {
+        let page = address.0 as usize / PAGE_SIZE as usize;
+        self.mappings[page] == mapping && self.mapping_versions[page] == incarnation
+    }
+
     pub(crate) fn mapping_version_at(&self, address: GuestAddress) -> Result<u64, MemoryError> {
         let page = (address.0 / PAGE_SIZE) as usize;
         let mapping = self.mappings[page];
