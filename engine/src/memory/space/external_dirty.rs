@@ -7,6 +7,7 @@ const PRIVATE_PAGE: usize = 0xff000000usize >> 12;
 
 pub(super) struct Collector {
     occupied: Box<[u32]>,
+    occupied_words: [u32; 1024],
     expected: Box<[u32]>,
     directory_counts: [u16; 1024],
     directories: [u32; 32],
@@ -66,6 +67,7 @@ impl Collector {
             .map_err(|_| MemoryError::Allocation)?;
         let mut collector = Self {
             occupied: filled(GUEST_PAGES / 32, 0)?.into_boxed_slice(),
+            occupied_words: [0; 1024],
             expected: filled(GUEST_PAGES, 0)?.into_boxed_slice(),
             directory_counts: [0; 1024],
             directories: [0; 32],
@@ -124,12 +126,17 @@ impl Collector {
             return;
         }
         let directory = page >> 10;
+        let word_bit = 1u32 << ((page / 32) % 32);
         if mapped {
             self.occupied[page / 32] |= bit;
+            self.occupied_words[directory] |= word_bit;
             self.directory_counts[directory] += 1;
             self.directories[directory / 32] |= 1u32 << (directory % 32);
         } else {
             self.occupied[page / 32] &= !bit;
+            if self.occupied[page / 32] == 0 {
+                self.occupied_words[directory] &= !word_bit;
+            }
             self.directory_counts[directory] -= 1;
             if self.directory_counts[directory] == 0 {
                 self.directories[directory / 32] &= !(1u32 << (directory % 32));
@@ -162,7 +169,10 @@ impl Collector {
                     continue;
                 }
                 observation.accessed[group] |= 1u32 << (directory % 32);
-                for index in directory * 32..directory * 32 + 32 {
+                let mut words = self.occupied_words[directory];
+                while words != 0 {
+                    let index = directory * 32 + words.trailing_zeros() as usize;
+                    words &= words - 1;
                     let mut pages = self.occupied[index];
                     while pages != 0 {
                         let within = pages.trailing_zeros() as usize;
@@ -580,6 +590,92 @@ mod tests {
         assert_eq!(word(&bytes, 4) & 32, 0);
         assert_eq!(word(&bytes, pte(PRIVATE_PAGE)), private_before);
         assert_ne!(word(&bytes, (PRIVATE_PAGE >> 10) * 4) & 32, 0);
+    }
+
+    #[test]
+    fn external_dirty_collect_sparse_word_mask_tracks_first_last_and_permissions() {
+        let mut memory = AddressSpace::new(8).unwrap();
+        for page in [1, 2, 32, 1023, 1024] {
+            memory
+                .map_zeroed(range(page * 4096), Permissions::READ_WRITE)
+                .unwrap();
+        }
+        track(&mut memory);
+        let mut bytes = tables(&memory);
+        for page in [1, 2, 32, 1023, 1024] {
+            access(&mut bytes, page, true);
+        }
+        let first = memory
+            .collect_external_dirty(memory.external_mapping_epoch, &mut bytes)
+            .unwrap();
+        assert_eq!(word(&first, 92), 5);
+        assert_eq!(
+            memory.external_dirty.as_ref().unwrap().occupied_words[0],
+            0x80000003
+        );
+        assert_eq!(memory.external_dirty.as_ref().unwrap().occupied_words[1], 1);
+        memory.unmap(range(4096)).unwrap();
+        memory
+            .acknowledge_external_mappings(memory.external_mapping_epoch, 1)
+            .unwrap();
+        assert_eq!(
+            memory.external_dirty.as_ref().unwrap().occupied_words[0],
+            0x80000003,
+            "another page keeps the first word occupied"
+        );
+        memory.unmap(range(8192)).unwrap();
+        memory
+            .acknowledge_external_mappings(memory.external_mapping_epoch, 1)
+            .unwrap();
+        assert_eq!(
+            memory.external_dirty.as_ref().unwrap().occupied_words[0],
+            0x80000002
+        );
+        memory.protect(range(32 * 4096), Permissions::READ).unwrap();
+        memory
+            .acknowledge_external_mappings(memory.external_mapping_epoch, 1)
+            .unwrap();
+        assert_eq!(
+            memory.external_dirty.as_ref().unwrap().occupied_words[0],
+            0x80000002,
+            "permission-only ACK preserves occupancy"
+        );
+        memory
+            .map_zeroed(range(4096), Permissions::READ_WRITE)
+            .unwrap();
+        memory
+            .acknowledge_external_mappings(memory.external_mapping_epoch, 1)
+            .unwrap();
+        assert_eq!(
+            memory.external_dirty.as_ref().unwrap().occupied_words[0],
+            0x80000003
+        );
+        bytes = tables(&memory);
+        for page in [1, 1023, 1024] {
+            access(&mut bytes, page, true);
+        }
+        access(&mut bytes, 32, false);
+        let at = pte(1023);
+        let original = word(&bytes, at);
+        put(&mut bytes, at, original ^ 2);
+        let evidence = bytes.clone();
+        let version = memory.transaction_version();
+        assert_eq!(
+            memory.collect_external_dirty(memory.external_mapping_epoch, &mut bytes),
+            Err(MemoryError::InvalidRange)
+        );
+        assert_eq!(bytes, evidence);
+        assert_eq!(memory.transaction_version(), version);
+        put(&mut bytes, at, original);
+        let retried = memory
+            .collect_external_dirty(memory.external_mapping_epoch, &mut bytes)
+            .unwrap();
+        assert_eq!(word(&retried, 32), 4);
+        assert_eq!(word(&retried, 92), 3);
+        assert_eq!(
+            memory.external_dirty.as_ref().unwrap().dirty_ptes,
+            [pte(1) as u32, pte(1023) as u32, pte(1024) as u32]
+        );
     }
 
     #[test]
