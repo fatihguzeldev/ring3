@@ -4,7 +4,144 @@ use super::super::{
     tests::support::{DATA, read, runtime, texture},
 };
 use super::holds::validate_delta;
-use crate::{graphics::d3d8::api::HResult, memory::GuestAddress};
+use crate::{
+    graphics::d3d8::api::{HResult, InterfaceKind},
+    memory::{GuestAddress, PageRange, Permissions},
+};
+
+fn held(runtime: &super::super::D3D8Runtime32, device: GuestAddress) -> Vec<GuestAddress> {
+    let super::super::objects::ObjectKind32::Device(record) = &runtime.object(device).unwrap().kind
+    else {
+        unreachable!()
+    };
+    record.resource_holds.clone()
+}
+
+fn skips(runtime: &super::super::D3D8Runtime32, device: GuestAddress) -> u64 {
+    let super::super::objects::ObjectKind32::Device(record) = &runtime.object(device).unwrap().kind
+    else {
+        unreachable!()
+    };
+    record.binding_lifetime_skips
+}
+
+#[test]
+fn same_binding_updates_stream_stride_and_index_base_without_replacing_holds() {
+    let (mut runtime, mut memory, device) = runtime();
+    runtime
+        .device_resource_call(&mut memory, device, 23, &[device.0, 64, 0, 2, 1, DATA])
+        .unwrap();
+    let vertex = GuestAddress(read(&memory, DATA));
+    runtime
+        .device_resource_call(
+            &mut memory,
+            device,
+            24,
+            &[device.0, 12, 0, 101, 2, DATA + 4],
+        )
+        .unwrap();
+    let index = GuestAddress(read(&memory, DATA + 4));
+    runtime
+        .binding_call(&mut memory, device, 83, &[device.0, 0, vertex.0, 12])
+        .unwrap();
+    runtime
+        .binding_call(&mut memory, device, 85, &[device.0, index.0, 2])
+        .unwrap();
+    let holds = held(&runtime, device);
+    let references = (
+        runtime.com.state(vertex).unwrap(),
+        runtime.com.state(index).unwrap(),
+    );
+    let revision = runtime.device(device).unwrap().state().revision();
+    runtime
+        .binding_call(&mut memory, device, 83, &[device.0, 0, vertex.0, 20])
+        .unwrap();
+    assert_eq!(
+        held(&runtime, device),
+        holds,
+        "an unchanged lifetime must retain the existing ownership ledger"
+    );
+    runtime
+        .binding_call(&mut memory, device, 85, &[device.0, index.0, 7])
+        .unwrap();
+    let state = runtime.device(device).unwrap().state();
+    assert_eq!(state.snapshot().streams[0].stride, 20);
+    assert_eq!(state.snapshot().base_vertex, 7);
+    assert_eq!(state.revision(), revision + 2);
+    assert_eq!(
+        (
+            runtime.com.state(vertex).unwrap(),
+            runtime.com.state(index).unwrap()
+        ),
+        references
+    );
+    assert_eq!(held(&runtime, device), holds);
+    assert_eq!(skips(&runtime, device), 2);
+}
+
+#[test]
+fn same_binding_canonicalizes_interface_aliases_but_keeps_recording_and_com_checks() {
+    let (mut runtime, mut memory, device) = runtime();
+    let first = texture(&mut runtime, &mut memory, device);
+    let second = texture(&mut runtime, &mut memory, device);
+    runtime
+        .binding_call(&mut memory, device, 61, &[device.0, 0, first.0])
+        .unwrap();
+    runtime
+        .binding_call(&mut memory, device, 61, &[device.0, 1, second.0])
+        .unwrap();
+    memory
+        .write(GuestAddress(DATA + 64), &InterfaceKind::BaseTexture.iid().0)
+        .unwrap();
+    runtime
+        .query_interface(&mut memory, first, DATA + 64, DATA + 80)
+        .unwrap();
+    let alias = GuestAddress(read(&memory, DATA + 80));
+    assert_eq!(
+        alias, first,
+        "D3D8 exposes supported base interfaces through the canonical guest pointer"
+    );
+    let holds = held(&runtime, device);
+    let references = runtime.com.state(first).unwrap();
+    runtime
+        .binding_call(&mut memory, device, 61, &[device.0, 0, alias.0])
+        .unwrap();
+    assert_eq!(held(&runtime, device), holds);
+    assert_eq!(runtime.com.state(first).unwrap(), references);
+    assert_eq!(skips(&runtime, device), 1);
+    assert!(matches!(
+        runtime.binding_call(&mut memory, device, 83, &[device.0, 0, alias.0, 12]),
+        Err(DispatchError32::Api(HResult::INVALID_CALL))
+    ));
+    assert_eq!(held(&runtime, device), holds);
+    runtime
+        .binding_call(&mut memory, device, 52, &[device.0])
+        .unwrap();
+    runtime
+        .binding_call(&mut memory, device, 61, &[device.0, 0, alias.0])
+        .unwrap();
+    assert_eq!(
+        runtime.com.state(first).unwrap().holds,
+        references.holds + 1
+    );
+    runtime
+        .binding_call(&mut memory, device, 53, &[device.0, DATA + 16])
+        .unwrap();
+    assert!(!runtime.device(device).unwrap().state().is_recording());
+    let before = held(&runtime, device);
+    memory
+        .protect(
+            PageRange::new(GuestAddress(first.0 & !4095), 1).unwrap(),
+            Permissions::READ,
+        )
+        .unwrap();
+    assert!(matches!(
+        runtime.binding_call(&mut memory, device, 61, &[device.0, 0, alias.0]),
+        Err(DispatchError32::Api(HResult::INVALID_CALL))
+    ));
+    assert_eq!(held(&runtime, device), before);
+    assert_eq!(skips(&runtime, device), 1);
+}
 
 #[test]
 fn binding_hold_delta_preserves_duplicate_counts_and_rejects_overrelease() {

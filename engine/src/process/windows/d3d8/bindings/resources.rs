@@ -50,14 +50,35 @@ impl D3D8Runtime32 {
                     },
                 };
                 let prepared = self.device(pointer)?.prepare_binding(binding)?;
-                let delta = self.binding_hold_delta(
+                let unchanged = self.binding_lifetime_unchanged(
+                    memory,
                     pointer,
-                    prepared.released_resource().into_iter(),
-                    prepared.retained_resource().into_iter(),
+                    prepared.released_resource(),
+                    prepared.retained_resource(),
                 )?;
-                self.device(pointer)?.can_commit_binding(&prepared)?;
-                self.commit_binding_holds(memory, pointer, delta, &[])?;
+                if unchanged {
+                    self.device(pointer)?.can_commit_binding(&prepared)?;
+                } else {
+                    let delta = self.binding_hold_delta(
+                        pointer,
+                        prepared.released_resource().into_iter(),
+                        prepared.retained_resource().into_iter(),
+                    )?;
+                    self.device(pointer)?.can_commit_binding(&prepared)?;
+                    self.commit_binding_holds(memory, pointer, delta, &[])?;
+                }
                 self.device_mut(pointer)?.commit_binding(prepared).expect("exclusive device binding preparation remains current after COM lifetime commit");
+                if unchanged {
+                    let slot = self
+                        .record_slot(pointer)
+                        .expect("committed binding device remains owned");
+                    let super::super::objects::ObjectKind32::Device(device) =
+                        &mut self.records[slot].as_mut().unwrap().kind
+                    else {
+                        unreachable!()
+                    };
+                    device.binding_lifetime_skips = device.binding_lifetime_skips.saturating_add(1);
+                }
             }
             60 | 84 | 86 => {
                 let state = self.device(pointer)?.state().snapshot();

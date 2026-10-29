@@ -40,6 +40,7 @@ pub(super) struct Device32 {
     pub presentation: PresentationParameters32,
     pub implicit: Vec<GuestAddress>,
     pub resource_holds: Vec<GuestAddress>,
+    pub binding_lifetime_skips: u64,
     pub target_holds: [Option<GuestAddress>; 2],
 }
 

@@ -22,6 +22,7 @@ pub struct D3D8DeviceInfo32 {
     pub generation: u64,
     pub retired: bool,
     pub status: DeviceStatus,
+    pub binding_lifetime_skips: u64,
 }
 
 impl D3D8Runtime32 {
@@ -64,28 +65,30 @@ impl EngineInstance {
             .d3d8
             .as_ref()
             .ok_or(HostError::D3D8(D3D8Error32::NotConfigured))?;
-        let (pointer, device, retired) = if let Some(slot) = runtime.device_slots.get(index) {
+        let (pointer, record, retired) = if let Some(slot) = runtime.device_slots.get(index) {
             let object = runtime.records[*slot]
                 .as_ref()
                 .ok_or(HostError::Infrastructure)?;
             let ObjectKind32::Device(device) = &object.kind else {
                 return Err(HostError::Infrastructure);
             };
-            (object.pointer, &device.backend, false)
+            (object.pointer, &**device, false)
         } else if let Some(retired) = runtime
             .retired_devices
             .get(index.saturating_sub(runtime.device_slots.len()))
         {
-            (retired.pointer, &retired.device.backend, true)
+            (retired.pointer, &*retired.device, true)
         } else {
             return Ok(None);
         };
+        let device = &record.backend;
         Ok(Some(D3D8DeviceInfo32 {
             epoch: device.queue().epoch(),
             pointer,
             generation: device.generation(),
             retired,
             status: device.status(),
+            binding_lifetime_skips: record.binding_lifetime_skips,
         }))
     }
     pub fn d3d8_seal_batch(&mut self, epoch: u64) -> Result<Option<BatchId>, HostError> {

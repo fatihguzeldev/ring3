@@ -10,6 +10,34 @@ pub(in crate::process::windows::d3d8) struct BindingHolds32 {
 }
 
 impl D3D8Runtime32 {
+    pub(super) fn binding_lifetime_unchanged(
+        &self,
+        memory: &AddressSpace,
+        device: GuestAddress,
+        released: Option<u32>,
+        retained: Option<u32>,
+    ) -> Result<bool, HResult> {
+        if released != retained || self.device(device)?.state().is_recording() {
+            return Ok(false);
+        }
+        let Some(handle) = released else {
+            return Ok(true);
+        };
+        self.resource(GuestAddress(handle), device)?;
+        let counter = self.counter_pointer(GuestAddress(handle))?;
+        self.com.preflight(memory, counter)?;
+        if self.com.references(counter)? == 0 {
+            return Ok(false);
+        }
+        let ObjectKind32::Device(device) = &self.object(device)?.kind else {
+            return Err(HResult::INVALID_CALL);
+        };
+        if !device.resource_holds.contains(&counter) {
+            return Err(HResult::INVALID_CALL);
+        }
+        Ok(true)
+    }
+
     pub(in crate::process::windows::d3d8) fn binding_hold_delta(
         &self,
         device: GuestAddress,

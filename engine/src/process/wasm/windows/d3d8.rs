@@ -24,7 +24,7 @@ pub(crate) fn d3d8_device(index: u32) -> u32 {
                     device.generation,
                     u64::from(device.retired),
                     device.status as u64,
-                    0,
+                    device.binding_lifetime_skips,
                 ]
             }),
         );

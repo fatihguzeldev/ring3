@@ -250,6 +250,7 @@ impl D3D8Runtime32 {
                 presentation,
                 implicit,
                 resource_holds,
+                binding_lifetime_skips: 0,
                 target_holds: [None; 2],
             })),
         });

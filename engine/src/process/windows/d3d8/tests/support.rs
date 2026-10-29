@@ -114,6 +114,7 @@ pub(in crate::process::windows::d3d8) fn runtime_in(
             ]),
             implicit: Vec::with_capacity(4),
             resource_holds: Vec::with_capacity(6500),
+            binding_lifetime_skips: 0,
             target_holds: [None; 2],
         })),
     });
