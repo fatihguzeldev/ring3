@@ -448,11 +448,14 @@ function startupFixture() {
 
 test('the fresh v86 backend initializes the measured bridge policy before importing or running guest code',()=>{
   const f=startupFixture(),c=f.cache;c.deferDirty=false;
+  Object.assign(c.tables,{targetedDirtySupported:true,nativeDirty:true,policy:{incrementalSync:true},targetedDirty:false,
+    configureTargetedDirty(enabled,owner){assert.deepEqual(owner,{paused:true,open:false});this.targetedDirty=enabled;f.events.push('targeted:'+enabled);}});
   c.initializeExecutionPolicy();
   assert.equal(c.deferDirty,true);assert.equal(c.portGates,true);assert.equal(c.portGateMode,1);
   assert.equal(c.inlineGates,true);assert.equal(c.directGates,true);assert.equal(c.directBindings,true);
   assert.equal(c.directStateInputs,false);
   assert.equal(c.tables.globalCode,true);assert.equal(c.guestReturns,false);assert.equal(c.graphicsOverlap,false);
+  assert.equal(c.tables.targetedDirty,true);
   assert.equal(c.imported,false);assert.equal(c.runs,0);assert.equal(c.open,false);
   assert.deepEqual(f.events.filter(event=>event.startsWith('mode:')),['mode:1']);
   assert(f.events.indexOf('global:true')>f.events.indexOf('mode:1'));

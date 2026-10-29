@@ -112,6 +112,8 @@ export class V86CodeCache {
         }
       }
       if(this.tables.globalCodeSupported===true)this.tables.configureGlobalCode(true,owner);
+      if(this.tables.targetedDirtySupported===true && this.tables.nativeDirty && this.tables.policy.incrementalSync)
+        this.tables.configureTargetedDirty(true,owner);
       this.executionPolicyInitialized=true;
     } catch(error) {this.inlineFailure=error;throw error;}
   }
