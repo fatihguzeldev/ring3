@@ -289,7 +289,7 @@ export class Session {
     return status === 0;
   }
   requestGraphicsFlush(id,status) {
-    if ((status===0 && (id===0x4020f || id===0x40c03)) ||
+    if ((status===0 && (id===0x4020f || id===0x40c03 || id===0x4024e || id===0x4025a)) ||
         (status===12 && ((id&0xffff0000)===0x40000 || id===0x50001)))
       this.media?.graphicsTransport?.requestFlush?.();
   }

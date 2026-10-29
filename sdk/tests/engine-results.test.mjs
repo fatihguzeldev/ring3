@@ -197,7 +197,7 @@ async function fusedGateCase(fusedStatus, backend = 'v86', observedClock, id = 0
 }
 
 test('successful Present and D3D Busy completions demand a tail flush without widening other APIs',()=>{
-  for(const [id,status,expected] of [[0x4020f,0,1],[0x40c03,0,1],[0x40232,12,1],
+  for(const [id,status,expected] of [[0x4020f,0,1],[0x40c03,0,1],[0x4024e,0,1],[0x4025a,0,1],[0x40232,12,1],
       [0x50001,12,1],[0x40232,0,0],[0x10001,12,0],[0x4020f,7,0]]) {
     let flushes=0;
     const session=Object.assign(Object.create(Session.prototype),{observeClock:()=>0n,settleWindows(){},
