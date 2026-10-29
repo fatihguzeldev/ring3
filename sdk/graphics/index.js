@@ -25,6 +25,7 @@ class DeviceRenderer {
     this.host=host;this.device=host.device;this.epoch=epoch;this.stream=new PacketStream();this.pendingEncoder=null;this.accepting=false;this.resources=new Resources(this.device,()=>this.flush());
     this.shaders=new Map();this.states=new Map();this.pipelines=new Map();this.domains=new Map();this.patches=new Map();this.temporary=[];
     this.pipelineInputs=new Map();this.pipelineInputMemoEnabled=true;this.programIdentities=new WeakMap();this.nextProgramIdentity=0;
+    this.pipelineInputHits=0;this.pipelineInputMisses=0;this.pipelineBuilds=0;
     this.draws=0;this.presents=0;this.removed=false;this.gamma=new Float32Array(3*256);
     for(let c=0;c<3;c++)for(let i=0;i<256;i++)this.gamma[c*256+i]=i/255;
   }
@@ -129,11 +130,13 @@ class DeviceRenderer {
     if(input!==null){
       const key=this.pipelineInputs.get(input);
       if(key!==undefined&&this.pipelines.has(key)){
+        this.pipelineInputHits++;
         const cached=this.pipelines.get(key);this.pipelines.delete(key);this.pipelines.set(key,cached);
         this.rememberPipelineInput(input,key);return cached;
       }
       this.pipelineInputs.delete(input);
     }
+    this.pipelineInputMisses++;this.pipelineBuilds++;
     const code=buildShader(p,vertex,pixel,textureKinds,{patch});
     const key=JSON.stringify([code,kind,colorFormat,depthFormat,rs[7],rs[14],rs[19],rs[20],rs[22],rs[23],rs[27],rs.slice(52,60),rs[168],rs[171],rs[47]]);
     if(this.pipelines.has(key)){const cached=this.pipelines.get(key);this.pipelines.delete(key);this.pipelines.set(key,cached);this.rememberPipelineInput(input,key);return cached;}

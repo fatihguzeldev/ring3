@@ -76,6 +76,10 @@ test('pipeline reuse crosses uniform-only snapshots without walking immutable sh
   next.transforms=[[2,0,0,0,0,2,0,0,0,0,2,0,0,0,0,2]];next.vc[0]=[1,2,3,4];next.pc[0]=[5,6,7,8];next.material.fill(9);
   assert.equal(await run(next),first);
   assert.equal(reads,initialReads,'uniform-only snapshots must not regenerate unchanged WGSL');
+  assert.deepEqual([renderer.pipelineInputHits,renderer.pipelineInputMisses,renderer.pipelineBuilds],[1,1,1]);
+  renderer.pipelineInputMemoEnabled=false;
+  assert.equal(await run(next),first);
+  assert.deepEqual([renderer.pipelineInputHits,renderer.pipelineInputMisses,renderer.pipelineBuilds],[1,2,2]);
 });
 
 test('pipeline input reuse preserves shader replacement, code inputs and descriptor validation',async t=>{
