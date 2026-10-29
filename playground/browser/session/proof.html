@@ -1,0 +1,12 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Ring3 focus and visibility proof</title>
+<style>body{font:18px system-ui;background:#151719;color:#eee;padding:24px}button,input{font:inherit;margin:8px;padding:8px}canvas{display:block;background:#334352;border:2px solid #9ab;width:640px;height:360px}pre{white-space:pre-wrap}</style>
+<h1>Ring3 focus and visibility proof</h1>
+<p>Isolated host check. No game files or game execution.</p>
+<button id="start">start proof</button><button id="pause" disabled>pause</button>
+<input aria-label="outside game" placeholder="outside game">
+<canvas id="surface" width="640" height="360" tabindex="0" aria-label="input surface"></canvas>
+<pre id="result" role="status">not started</pre>
+<pre id="history"></pre>
+<script type="module" src="./proof.js"></script>
