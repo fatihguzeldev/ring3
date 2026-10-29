@@ -1,4 +1,5 @@
 import {X87, SIMD, SEGMENTS, YMM, SEGMENT_BASES} from './layout.js';
+import {validateRelaxedFpuImport,exportRelaxedFpuSlot} from './fpu.js';
 
 const CACHE_OFFSETS = [28,32,36,40,44,56];
 const USER_FLAGS = 0x254fd7;
@@ -38,11 +39,12 @@ export function cpuViews(memory) {
   return views;
 }
 
-export function importState(engine, cpu, traps) {
+export function importState(engine, cpu, traps, relaxed=false) {
   const v = cpuViews(engine.memory), d = v.data, b = engine.base;
   const retained=consumeStateBanks(engine,cpu);
   if (d.getUint32(b+12,true)) throw new Error('v86 does not support a pending SS debug shadow');
   for (let i=16;i<144;i++) if(v.bytes[b+YMM+i]) throw new Error('v86 does not support nonzero YMM upper lanes');
+  if(relaxed)validateRelaxedFpuImport(d,b+X87);
   for (let i=0;i<8;i++) v.regs[i]=d.getUint32(b+16+i*4,true);
   d.setUint32(556,d.getUint32(b+48,true),true);
   d.setUint32(560,d.getUint32(b+48,true),true);
@@ -89,7 +91,7 @@ export function importState(engine, cpu, traps) {
   cpu.update_state_flags();
 }
 
-export function exportState(engine,cpu,trap=null) {
+export function exportState(engine,cpu,trap=null,relaxed=false) {
   const v=cpuViews(engine.memory),d=v.data,b=engine.base;
   for(let i=0;i<8;i++)d.setUint32(b+16+i*4,i===4&&trap?trap.esp:v.regs[i],true);
   d.setUint32(b+48,trap?trap.pc:d.getUint32(556,true),true);
@@ -102,7 +104,12 @@ export function exportState(engine,cpu,trap=null) {
   d.setUint16(fp+20,cpu.wm.exports.fpu_load_tag_word(),true);
   for(const [from,to,size] of [[1044,22,2],[1048,24,4],[1052,32,2],[1056,28,4],[1060,34,2]])
     if(size===2)d.setUint16(fp+to,d.getUint32(from,true)&0xffff,true);else d.setUint32(fp+to,d.getUint32(from,true),true);
-  for(let i=0;i<8;i++)v.bytes.set(v.bytes.subarray(1152+i*16,1162+i*16),fp+40+i*10);
+  for(let i=0;i<8;i++) {
+    const from=1152+i*16,to=fp+40+i*10;
+    v.bytes.set(v.bytes.subarray(from,from+10),to);
+    if(relaxed && !(v.bytes[816]&(1<<i)) && d.getUint16(from+8,true)===0x7ffe)
+      exportRelaxedFpuSlot(d,from,to);
+  }
   d.setUint32(b+SIMD+16,d.getUint32(824,true),true);
   v.bytes.set(v.bytes.subarray(832,960),b+SIMD+32);
   validateSegmentSelectors(engine,cpu,trap);

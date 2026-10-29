@@ -99,3 +99,48 @@ test('retained numeric banks do not bypass unsupported YMM SS-shadow or tag vali
     assert.throws(()=>state.importState(f.engine,f.cpu,f.traps),/does not support|cannot represent/);
   }
 });
+
+test('relaxed exports canonicalize tagged f64 zeros subnormals infinities and NaN payloads without changing the CPU',()=>{
+  const f=fixture(),d=f.data(),v=state.cpuViews(f.engine.memory),fp=f.engine.base+X87;
+  const rows=[
+    [0n,0n,0],[0x8000000000000000n,0n,0x8000],
+    [1n,0x8000000000000000n,0x3bcd],[0xfffffffffffffn,0xfffffffffffff000n,0x3c00],
+    [0x7ff0000000000000n,0x8000000000000000n,0x7fff],[0xfff0000000000000n,0x8000000000000000n,0xffff],
+    [0x7ff0000000000123n,0x8000000000091800n,0x7fff],[0xfff8000000000456n,0xc00000000022b000n,0xffff],
+  ];
+  v.bytes[816]=0;d.setUint16(1036,0x7f,true);
+  for(const [i,[bits]] of rows.entries()){d.setBigUint64(1152+i*16,bits,true);d.setUint16(1160+i*16,0x7ffe,true);}
+  const before=v.bytes.slice(0,4096);state.exportState(f.engine,f.cpu,null,true);
+  assert.deepEqual(v.bytes.slice(0,4096),before);assert.equal(d.getUint16(fp+16,true),0x7f);
+  for(const [i,[,mant,exp]] of rows.entries()){
+    assert.equal(d.getBigUint64(fp+40+i*10,true),mant);assert.equal(d.getUint16(fp+48+i*10,true),exp);
+  }
+});
+
+test('relaxed mixed registers retain canonical empty bytes and an unchanged numeric memo preserves tagged live values',()=>{
+  const f=fixture(),d=f.data(),v=state.cpuViews(f.engine.memory),fp=f.engine.base+X87;
+  v.bytes[816]=0xfa;d.setBigUint64(1152,0x3ff8000000000000n,true);d.setUint16(1160,0x7ffe,true);
+  d.setBigUint64(1168,0xabcdef0123456789n,true);d.setUint16(1176,0x7ffe,true);
+  d.setBigUint64(1184,0x8000000000000000n,true);d.setUint16(1192,0x3fff,true);
+  state.exportState(f.engine,f.cpu,null,true);f.remember();
+  assert.equal(d.getBigUint64(fp+40,true),0xc000000000000000n);assert.equal(d.getUint16(fp+48,true),0x3fff);
+  assert.deepEqual(v.bytes.slice(fp+50,fp+60),v.bytes.slice(1168,1178));
+  assert.deepEqual(v.bytes.slice(fp+60,fp+70),v.bytes.slice(1184,1194));
+  const before=f.counts();state.importState(f.engine,f.cpu,f.traps,true);
+  assert.equal(f.counts().tags,before.tags);assert.equal(d.getUint16(1160,true),0x7ffe);
+  assert.equal(d.getBigUint64(1152,true),0x3ff8000000000000n);
+  d.setUint32(f.engine.base+SIMD+32,0x76543210,true);state.importState(f.engine,f.cpu,f.traps,true);
+  assert.equal(d.getUint16(1160,true),0x3fff);assert.equal(d.getBigUint64(1152,true),0xc000000000000000n);
+});
+
+test('relaxed imports reject nonempty genuine tag-exponent collisions before mutation while strict and empty slots remain raw',()=>{
+  const f=fixture(),d=f.data(),v=state.cpuViews(f.engine.memory),fp=f.engine.base+X87;
+  d.setUint16(fp+20,0xfffc,true);d.setBigUint64(fp+40,0x8000000000000000n,true);d.setUint16(fp+48,0x7ffe,true);
+  const before=v.bytes.slice(0,4096);
+  assert.throws(()=>state.importState(f.engine,f.cpu,f.traps,true),/relaxed.*exponent/);
+  assert.deepEqual(v.bytes.slice(0,4096),before);
+  state.importState(f.engine,f.cpu,f.traps);state.exportState(f.engine,f.cpu);
+  assert.equal(d.getUint16(fp+48,true),0x7ffe);assert.equal(d.getBigUint64(fp+40,true),0x8000000000000000n);
+  d.setUint16(fp+20,0xffff,true);state.importState(f.engine,f.cpu,f.traps,true);
+  state.exportState(f.engine,f.cpu,null,true);assert.equal(d.getUint16(fp+48,true),0x7ffe);
+});
