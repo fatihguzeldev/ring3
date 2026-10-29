@@ -1,0 +1,81 @@
+{
+  "artifact": {
+    "sha256": "2e9a29e9cf0e73e327997161a938d63aab02dfa03671918d053345a966d5f37e",
+    "source": "/Users/fatihguzel/ring3/target/cpu-execution-redesign/owned-C1-dispatch.wasm",
+    "size": 19137076
+  },
+  "hostSources": [
+    {
+      "path": "playground/runtime/engine.js",
+      "url": "/runtime/engine.js",
+      "sha256": "dc417afef70baf26c7b0eb86dbd8b1a70bafc56097973a5b9aabc55f2ad4ebc0"
+    },
+    {
+      "path": "playground/runtime/cache.js",
+      "url": "/runtime/cache.js",
+      "sha256": "589297ed0ddbfec5fa22498c9d2953260d00a4408a9312697b5e5974b25755bd"
+    },
+    {
+      "path": "playground/runtime/configuration.js",
+      "url": "/runtime/configuration.js",
+      "sha256": "9daebcc3e7af191308ef899db295906b700eb3be63a7efae7b4ce7c5d74f2a21"
+    },
+    {
+      "path": "playground/runtime/scheduler/index.js",
+      "url": "/runtime/scheduler/index.js",
+      "sha256": "049b72f9f9c518dd70ac9ae74bee45ccecb02635c4ca0be8a914881fdf9eec41"
+    },
+    {
+      "path": "playground/runtime/cache/diagnostics.js",
+      "url": "/runtime/cache/diagnostics.js",
+      "sha256": "6d17c9d92671557753ca447a999407b968331d18477bdf12e390f49e82a0d4ee"
+    },
+    {
+      "path": "playground/runtime/observability/module-name.js",
+      "url": "/runtime/observability/module-name.js",
+      "sha256": "275e92a504df3db74b98334d838ac5d3106265139066c470d1c2eeef6bee03f9"
+    },
+    {
+      "path": "playground/runtime/engine/module.js",
+      "url": "/runtime/engine/module.js",
+      "sha256": "bcac61492ae986b68b588afa89baffcec77f11d165856041b8488e13e8fa72da"
+    }
+  ],
+  "assets": [
+    {
+      "name": "compare-core.mjs",
+      "sha256": "80a91f6ab663dcf09d96ec03f5be11a4a2900c43222120e0da5bb17b0617483a",
+      "size": 10605
+    },
+    {
+      "name": "compare-programs.mjs",
+      "sha256": "180b2e78345a24ab765f393d98747ab0da67fddbc4fa7b52099d5971add0c1ba",
+      "size": 6788
+    },
+    {
+      "name": "compare-weighted.mjs",
+      "sha256": "fb64f832ffb2fb00aaa77114c1720cca7a121021ab072eb71d193e26e2f39d07",
+      "size": 5033
+    },
+    {
+      "name": "compare-owned-host.mjs",
+      "sha256": "f230fe4d6085d2ac64924be3aaa17fd0609afd7c3fec8c226523c273457a87a7",
+      "size": 2863
+    },
+    {
+      "name": "browser-C1-worker.mjs",
+      "sha256": "219b09498f830f762a978780fdd295a79a8d68d48ce83f901328522d2d8dc67b",
+      "size": 7342
+    },
+    {
+      "name": "browser-C1-main.mjs",
+      "sha256": "675725db90f930c4b96d6c81f1d94431028701752b1c99665486dd920ce9fa73",
+      "size": 6367
+    },
+    {
+      "name": "browser-C1-proof.html",
+      "sha256": "037f559b5870c9cdad8bca91b9a7936b8c1b349e73018615f1109c235a3de27f",
+      "size": 827
+    }
+  ]
+}
