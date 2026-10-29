@@ -28,3 +28,9 @@
 *.tmp
 *.pftrace
 *.pftrace.partial
+
+# local experimental engine builds
+/playground/*.wasm
+/playground/diagnostics/cpu-execution-A2/*.wasm
+/playground/diagnostics/cpu-execution-c1/*.wasm
+/playground/diagnostics/execution-rethink-v1/peer-compute/*.wasm
