@@ -17,6 +17,322 @@ use crate::{
 const PC: u32 = 0x9000;
 const PAYLOAD: u32 = DATA + 4096;
 
+fn sealed_overlap(engine: &mut EngineInstance, device: GuestAddress) -> Vec<u8> {
+    let mut context = engine.d3d8.take().unwrap();
+    texture(&mut context, engine.memory.as_mut().unwrap(), device);
+    context
+        .device_mut(device)
+        .unwrap()
+        .seal_batch()
+        .unwrap()
+        .unwrap();
+    let bytes = context
+        .device(device)
+        .unwrap()
+        .queue()
+        .peek()
+        .unwrap()
+        .1
+        .to_vec();
+    engine.d3d8 = Some(context);
+    bytes
+}
+
+#[test]
+fn external_graphics_overlap_generic_retries_only_after_enable_and_preserves_packet() {
+    for slot in [37, 40, 41, 42, 46, 50, 63, 61, 83, 85] {
+        let (mut engine, device) = setup();
+        engine
+            .configure_user32(
+                Default::default(),
+                PageRange::new(GuestAddress(0x3000_0000), 16).unwrap(),
+            )
+            .unwrap();
+        let id = if matches!(slot, 61 | 83 | 85) {
+            let resource = binding_resource(&mut engine, device, slot);
+            prepare_binding(&mut engine, device, slot, resource).0
+        } else {
+            prepare(&mut engine, device, slot)
+        };
+        let mut args = crate::windows::CallFrame32::capture(
+            engine.memory().unwrap(),
+            crate::abi::x86::decode_state(&engine.arena()[..STATE_SIZE]).unwrap(),
+            crate::windows::CallingConvention32::Stdcall,
+            u32::from(MethodGate::from_id(id).unwrap().method().stack_words),
+        )
+        .unwrap()
+        .arguments()
+        .to_vec();
+        if slot == 37 {
+            args[1] = 2;
+        }
+        if matches!(slot, 40 | 41) {
+            args = vec![device.0, PAYLOAD];
+        }
+        if slot == 40 {
+            for (index, value) in [0u32, 0, 8, 8, 0, 1f32.to_bits()].into_iter().enumerate() {
+                engine
+                    .memory
+                    .as_mut()
+                    .unwrap()
+                    .write(
+                        GuestAddress(PAYLOAD + index as u32 * 4),
+                        &value.to_le_bytes(),
+                    )
+                    .unwrap();
+            }
+        }
+        let packet = sealed_overlap(&mut engine, device);
+        let (generation, token) =
+            super::transport::capture_gate(&mut engine, MethodGate::from_id(id).unwrap(), &args);
+        assert_eq!(engine.external_graphics_overlap(), [0, 0, 0, 0]);
+        assert_eq!(
+            engine.complete_windows_call(91, generation, token),
+            Err(HostError::Call(CallError::Busy)),
+            "slot {slot}"
+        );
+        let arena = engine.arena().to_vec();
+        engine.set_external_graphics_overlap(1).unwrap();
+        assert_eq!(
+            engine.arena(),
+            arena,
+            "enable must retain the pending Retry"
+        );
+        assert!(engine.pending_call.is_some());
+        engine.complete_windows_call(91, generation, token).unwrap();
+        assert!(engine.pending_call.is_none());
+        assert_eq!(
+            crate::abi::x86::decode_state(&engine.arena()[..STATE_SIZE])
+                .unwrap()
+                .registers[0],
+            0,
+            "slot {slot}"
+        );
+        assert_eq!(engine.external_graphics_overlap(), [1, 0, 1, 0]);
+        let backend = engine.d3d8.as_ref().unwrap().device(device).unwrap();
+        assert_eq!(backend.queue().peek().unwrap().1, packet);
+        if slot == 40 {
+            assert_eq!(backend.state().snapshot().viewport.width, 8);
+        }
+        if slot == 41 {
+            assert_eq!(read(engine.memory().unwrap(), PAYLOAD + 8), 16);
+        }
+        engine.set_external_graphics_overlap(0).unwrap();
+        assert_eq!(engine.external_graphics_overlap(), [0, 0, 1, 0]);
+    }
+}
+
+#[test]
+fn external_graphics_overlap_direct_counts_only_completion_and_keeps_draw_barrier() {
+    for slot in [37, 42, 46, 50, 63, 61, 83, 85] {
+        let (mut engine, device) = setup();
+        engine
+            .configure_user32(
+                Default::default(),
+                PageRange::new(GuestAddress(0x3000_0000), 16).unwrap(),
+            )
+            .unwrap();
+        let id = if matches!(slot, 61 | 83 | 85) {
+            let resource = binding_resource(&mut engine, device, slot);
+            prepare_binding(&mut engine, device, slot, resource).0
+        } else {
+            prepare(&mut engine, device, slot)
+        };
+        if slot == 37 {
+            engine
+                .memory
+                .as_mut()
+                .unwrap()
+                .write(GuestAddress(DATA + 8), &2u32.to_le_bytes())
+                .unwrap();
+        }
+        let packet = sealed_overlap(&mut engine, device);
+        assert!(!engine.external_cpu_can_defer_gate(PC, id));
+        engine.set_external_graphics_overlap(1).unwrap();
+        assert!(engine.external_cpu_can_defer_gate(PC, id), "slot {slot}");
+        assert!(engine.external_cpu_can_defer_gate(PC, id));
+        assert_eq!(engine.external_graphics_overlap()[2], 0);
+        let frame = crate::windows::CallFrame32::capture(
+            engine.memory().unwrap(),
+            crate::abi::x86::decode_state(&engine.arena()[..STATE_SIZE]).unwrap(),
+            crate::windows::CallingConvention32::Stdcall,
+            u32::from(MethodGate::from_id(id).unwrap().method().stack_words),
+        )
+        .unwrap();
+        assert_eq!(
+            engine
+                .execute_external_direct_windows_gate(id, frame)
+                .unwrap(),
+            0
+        );
+        assert_eq!(engine.external_graphics_overlap(), [1, 0, 1, 0]);
+        assert_eq!(
+            engine
+                .d3d8
+                .as_ref()
+                .unwrap()
+                .device(device)
+                .unwrap()
+                .queue()
+                .peek()
+                .unwrap()
+                .1,
+            packet
+        );
+        let draw = prepare(&mut engine, device, 70);
+        assert!(!engine.external_cpu_can_defer_gate(PC, draw));
+    }
+}
+
+#[test]
+fn external_graphics_overlap_keeps_unaudited_and_guarded_output_busy() {
+    for slot in [15, 41, 70] {
+        let (mut engine, device) = setup();
+        engine
+            .configure_user32(
+                Default::default(),
+                PageRange::new(GuestAddress(0x3000_0000), 16).unwrap(),
+            )
+            .unwrap();
+        let packet = sealed_overlap(&mut engine, device);
+        let args = if slot == 41 {
+            vec![device.0, PAYLOAD]
+        } else {
+            vec![
+                device.0;
+                usize::from(
+                    MethodGate {
+                        interface: InterfaceKind::Device,
+                        slot
+                    }
+                    .method()
+                    .stack_words
+                )
+            ]
+        };
+        let (generation, token) = super::transport::capture_gate(
+            &mut engine,
+            MethodGate {
+                interface: InterfaceKind::Device,
+                slot,
+            },
+            &args,
+        );
+        if slot == 41 {
+            engine
+                .memory
+                .as_mut()
+                .unwrap()
+                .protect(
+                    PageRange::new(GuestAddress(PAYLOAD), 1).unwrap(),
+                    Permissions::READ_WRITE.with_guard(),
+                )
+                .unwrap();
+        }
+        engine.set_external_graphics_overlap(1).unwrap();
+        let version = engine.memory().unwrap().transaction_version();
+        assert_eq!(
+            engine.complete_windows_call(91, generation, token),
+            Err(HostError::Call(CallError::Busy))
+        );
+        assert_eq!(engine.memory().unwrap().transaction_version(), version);
+        assert_eq!(engine.external_graphics_overlap()[2], 0);
+        assert_eq!(
+            engine
+                .d3d8
+                .as_ref()
+                .unwrap()
+                .device(device)
+                .unwrap()
+                .queue()
+                .peek()
+                .unwrap()
+                .1,
+            packet
+        );
+    }
+}
+
+#[test]
+fn external_graphics_overlap_new_transform_reaches_only_the_next_draw() {
+    use crate::graphics::d3d8::{
+        commands::{Command, PipelineId},
+        state::Matrix,
+    };
+    let (mut engine, device, _) = prepare_draw(70, false);
+    engine
+        .configure_user32(
+            Default::default(),
+            PageRange::new(GuestAddress(0x3000_0000), 16).unwrap(),
+        )
+        .unwrap();
+    let mut context = engine.d3d8.take().unwrap();
+    let args = [device.0, 4, 0, 1];
+    context
+        .draw_call(engine.memory.as_mut().unwrap(), device, 70, &args)
+        .unwrap();
+    let backend = context.device_mut(device).unwrap();
+    assert_eq!(backend.state().transform(2).unwrap(), Matrix::IDENTITY);
+    let packet = backend.seal_batch().unwrap().unwrap();
+    let old_bytes = backend.queue().peek().unwrap().1.to_vec();
+    assert!(
+        crate::abi::graphics::d3d8::packet(&old_bytes)
+            .unwrap()
+            .1
+            .any(|fragment| fragment.opcode == 6)
+    );
+    engine.d3d8 = Some(context);
+    let mut changed = Matrix::IDENTITY;
+    changed.0[0] = 2f32.to_bits();
+    for (index, value) in changed.0.into_iter().enumerate() {
+        engine
+            .memory
+            .as_mut()
+            .unwrap()
+            .write(
+                GuestAddress(PAYLOAD + index as u32 * 4),
+                &value.to_le_bytes(),
+            )
+            .unwrap();
+    }
+    let gate = MethodGate {
+        interface: InterfaceKind::Device,
+        slot: 37,
+    };
+    let (generation, token) =
+        super::transport::capture_gate(&mut engine, gate, &[device.0, 2, PAYLOAD]);
+    engine.set_external_graphics_overlap(1).unwrap();
+    engine.complete_windows_call(91, generation, token).unwrap();
+    let mut context = engine.d3d8.take().unwrap();
+    let backend = context.device_mut(device).unwrap();
+    assert_eq!(backend.state().transform(2).unwrap(), changed);
+    assert_eq!(backend.queue().peek().unwrap().1, old_bytes);
+    backend.acknowledge_batch(packet).unwrap();
+    context
+        .draw_call(engine.memory.as_mut().unwrap(), device, 70, &args)
+        .unwrap();
+    let backend = context.device_mut(device).unwrap();
+    backend.seal_batch().unwrap().unwrap();
+    let next = crate::abi::graphics::d3d8::packet(backend.queue().peek().unwrap().1)
+        .unwrap()
+        .1
+        .find(|fragment| fragment.opcode == 6)
+        .unwrap();
+    assert_eq!(next.offset, 0);
+    assert_eq!(next.bytes.len(), next.total as usize);
+    let mut expected = Vec::new();
+    crate::abi::graphics::d3d8::append_payload(
+        &Command::Pipeline {
+            id: PipelineId(u64::from_le_bytes(next.bytes[..8].try_into().unwrap())),
+            state: backend.state().snapshot(),
+        },
+        &mut expected,
+    )
+    .unwrap();
+    assert_eq!(next.bytes, expected);
+    assert_eq!(engine.external_graphics_overlap(), [1, 0, 1, 0]);
+}
+
 fn setup() -> (EngineInstance, GuestAddress) {
     let (context, mut memory, device) = runtime();
     memory

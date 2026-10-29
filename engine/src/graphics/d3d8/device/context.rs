@@ -251,6 +251,14 @@ impl Device {
     pub fn queue(&self) -> &CommandQueue {
         &self.queue
     }
+    #[cfg(feature = "external-cpu")]
+    pub(crate) fn sealed_state_overlap_ready(&self) -> bool {
+        self.status == DeviceStatus::Operational
+            && self.queue.is_sealed()
+            && !self.queue.is_draining()
+            && self.readbacks.is_empty()
+            && self.retired_shaders.is_empty()
+    }
     pub fn back_buffer(&self, index: u32) -> Result<SurfaceRef, DeviceError> {
         self.back_buffers
             .get(index as usize)

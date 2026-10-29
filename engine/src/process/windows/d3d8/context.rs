@@ -31,6 +31,16 @@ impl D3D8Runtime32 {
         memory: &crate::memory::AddressSpace,
         pointer: GuestAddress,
     ) -> bool {
+        self.external_cpu_device_gate_safe(memory, pointer, false)
+    }
+
+    #[cfg(feature = "external-cpu")]
+    fn external_cpu_device_gate_safe(
+        &self,
+        memory: &crate::memory::AddressSpace,
+        pointer: GuestAddress,
+        sealed: bool,
+    ) -> bool {
         if !self.deferred_private_releases.is_empty()
             || !self.private_callbacks.is_empty()
             || !self.garbage.is_empty()
@@ -40,8 +50,13 @@ impl D3D8Runtime32 {
         {
             return false;
         }
-        self.device(pointer)
-            .is_ok_and(|device| !device.queue().is_draining() && !device.queue().is_sealed())
+        self.device(pointer).is_ok_and(|device| {
+            if sealed {
+                device.sealed_state_overlap_ready()
+            } else {
+                !device.queue().is_draining() && !device.queue().is_sealed()
+            }
+        })
     }
 
     #[cfg(feature = "external-cpu")]
@@ -52,8 +67,62 @@ impl D3D8Runtime32 {
         slot: u8,
         args: &[u32],
     ) -> bool {
+        self.external_cpu_binding_gate_safe_with_queue(memory, pointer, slot, args, false)
+    }
+
+    #[cfg(feature = "external-cpu")]
+    pub(in crate::process) fn external_cpu_overlap_gate_safe(
+        &self,
+        memory: &crate::memory::AddressSpace,
+        gate: MethodGate,
+        args: &[u32],
+    ) -> bool {
+        use crate::memory::Access;
+        if gate.interface != InterfaceKind::Device
+            || !matches!(gate.slot, 37 | 40 | 41 | 42 | 46 | 50 | 61 | 63 | 83 | 85)
+            || args.len() != usize::from(gate.method().stack_words)
+        {
+            return false;
+        }
+        let pointer = GuestAddress(args[0]);
+        if matches!(gate.slot, 61 | 83 | 85) {
+            return self
+                .external_cpu_binding_gate_safe_with_queue(memory, pointer, gate.slot, args, true);
+        }
+        if !self.external_cpu_device_gate_safe(memory, pointer, true) {
+            return false;
+        }
+        let input = match gate.slot {
+            37 => Some((args[2], 64)),
+            40 => Some((args[1], 24)),
+            42 => Some((args[1], 68)),
+            _ => None,
+        };
+        if input.is_some_and(|(address, length)| {
+            address == 0
+                || memory
+                    .check_span(GuestAddress(address), length, Access::Read)
+                    .is_err()
+        }) {
+            return false;
+        }
+        gate.slot != 41
+            || (args[1] != 0
+                && memory.external_write_is_stable(GuestAddress(args[1]), 24)
+                && memory.ensure_transaction_versions(1).is_ok())
+    }
+
+    #[cfg(feature = "external-cpu")]
+    fn external_cpu_binding_gate_safe_with_queue(
+        &self,
+        memory: &crate::memory::AddressSpace,
+        pointer: GuestAddress,
+        slot: u8,
+        args: &[u32],
+        sealed: bool,
+    ) -> bool {
         use crate::graphics::d3d8::device::Binding;
-        if !self.external_cpu_scalar_gate_safe(memory, pointer)
+        if !self.external_cpu_device_gate_safe(memory, pointer, sealed)
             || args.len()
                 != match slot {
                     61 | 85 => 3,

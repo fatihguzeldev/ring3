@@ -79,6 +79,54 @@ impl D3D8Reply32 {
 
 impl EngineInstance {
     #[cfg(feature = "external-cpu")]
+    pub(in crate::process) fn set_external_graphics_overlap(
+        &mut self,
+        enabled: u32,
+    ) -> Result<(), HostError> {
+        if enabled > 1 || !self.external_cpu_memory_pinned {
+            return Err(HostError::InvalidRequest);
+        }
+        self.guard_core_owner(self.core_owner.ok_or(HostError::InvalidArtifact)?)?;
+        self.guard_owned_host_mutation()?;
+        self.external_graphics_overlap_enabled = enabled != 0;
+        Ok(())
+    }
+
+    #[cfg(feature = "external-cpu")]
+    pub(in crate::process) fn external_graphics_overlap(&self) -> [u32; 4] {
+        [
+            u32::from(self.external_graphics_overlap_enabled),
+            0,
+            self.external_graphics_overlap_completed_calls as u32,
+            (self.external_graphics_overlap_completed_calls >> 32) as u32,
+        ]
+    }
+
+    #[cfg(feature = "external-cpu")]
+    pub(in crate::process) fn external_graphics_overlap_gate_safe(
+        &self,
+        gate: MethodGate,
+        args: &[u32],
+    ) -> bool {
+        self.external_graphics_overlap_enabled
+            && self.external_cpu_memory_pinned
+            && self.external_graphics_overlap_completed_calls != u64::MAX
+            && self.callback.is_none()
+            && !self.has_active_module_operation()
+            && self.image_input.is_none()
+            && self.execution_frame.is_none()
+            && !self.exceptions.has_deliveries()
+            && self.pending_windows_thread_schedule().is_none()
+            && self.windows_replies.is_empty()
+            && self.module_windows_reply.is_none()
+            && self.d3d8.as_ref().is_some_and(|runtime| {
+                self.memory.as_ref().is_some_and(|memory| {
+                    runtime.external_cpu_overlap_gate_safe(memory, gate, args)
+                })
+            })
+    }
+
+    #[cfg(feature = "external-cpu")]
     pub(in crate::process) fn execute_external_direct_d3d8_gate(
         &mut self,
         id: u32,
@@ -90,6 +138,7 @@ impl EngineInstance {
         }) else {
             return Err(HostError::Call(CallError::InvalidRequest));
         };
+        let overlap = self.external_graphics_overlap_gate_safe(gate, frame.arguments());
         let windows = self
             .user32
             .as_ref()
@@ -104,13 +153,17 @@ impl EngineInstance {
         if setup != FpuSetup32::NotReached {
             return Err(HostError::Infrastructure);
         }
-        match result {
+        let completed = match result {
             Ok(value) => Ok(value),
             Err(error @ (DispatchError32::Api(_) | DispatchError32::Device(_))) => {
                 Ok(dispatch_hresult(error).0)
             }
             Err(_) => Err(HostError::Infrastructure),
+        }?;
+        if overlap {
+            self.external_graphics_overlap_completed_calls += 1;
         }
+        Ok(completed)
     }
 
     pub(in crate::process) fn d3d8_provider_owns_token(&self, token: u32) -> bool {
@@ -199,6 +252,11 @@ impl EngineInstance {
         } else {
             0
         };
+        #[cfg(feature = "external-cpu")]
+        let overlap = gate
+            .is_some_and(|gate| self.external_graphics_overlap_gate_safe(gate, frame.arguments()));
+        #[cfg(not(feature = "external-cpu"))]
+        let overlap = false;
         let runtime = self
             .d3d8
             .as_mut()
@@ -225,9 +283,9 @@ impl EngineInstance {
                 _ => None,
             });
         if device_epoch.is_some_and(|epoch| {
-            runtime
-                .device_by_epoch(epoch)
-                .is_ok_and(|device| device.queue().is_draining() || device.queue().is_sealed())
+            runtime.device_by_epoch(epoch).is_ok_and(|device| {
+                device.queue().is_draining() || (device.queue().is_sealed() && !overlap)
+            })
         }) {
             self.d3d8_reply = Some(D3D8Reply32 {
                 owner,
@@ -373,6 +431,10 @@ impl EngineInstance {
                     }
                 }
             }
+        }
+        #[cfg(feature = "external-cpu")]
+        if overlap && self.pending_call.is_none() {
+            self.external_graphics_overlap_completed_calls += 1;
         }
         Ok(true)
     }

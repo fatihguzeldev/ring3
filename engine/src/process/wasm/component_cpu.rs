@@ -174,6 +174,31 @@ pub(crate) fn component_cpu_gate_mode(low: u32, high: u32) -> u32 {
     })
 }
 
+pub(crate) fn component_cpu_set_graphics_overlap(low: u32, high: u32, enabled: u32) -> u32 {
+    access(low, high, true, |instance| {
+        instance.set_external_graphics_overlap(enabled)?;
+        write_graphics_overlap(instance);
+        Ok(())
+    })
+}
+
+pub(crate) fn component_cpu_graphics_overlap(low: u32, high: u32) -> u32 {
+    access(low, high, true, |instance| {
+        write_graphics_overlap(instance);
+        Ok(())
+    })
+}
+
+fn write_graphics_overlap(instance: &mut EngineInstance) {
+    for (index, value) in instance.external_graphics_overlap().into_iter().enumerate() {
+        crate::abi::header::write_u32(
+            instance.arena.as_mut().get_mut(),
+            TRANSFER_OFFSET + index * 4,
+            value,
+        );
+    }
+}
+
 pub(crate) fn component_cpu_try_complete_gate(low: u32, high: u32) -> u32 {
     let mut completed = false;
     let mut captured = false;
@@ -312,6 +337,7 @@ pub(crate) fn component_cpu_release(low: u32, high: u32) -> u32 {
             .release_external_backing()
             .map_err(HostError::Memory)?;
         instance.external_cpu_memory_pinned = false;
+        instance.external_graphics_overlap_enabled = false;
         Ok(())
     })
 }

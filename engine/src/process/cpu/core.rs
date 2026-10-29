@@ -264,6 +264,9 @@ impl EngineInstance {
         self.d3d8
             .as_ref()
             .is_some_and(|runtime| {
+                if self.external_graphics_overlap_gate_safe(gate, args) {
+                    return true;
+                }
                 if matches!(gate.slot, 61 | 83 | 85) {
                     runtime.external_cpu_binding_gate_safe(
                         memory,
