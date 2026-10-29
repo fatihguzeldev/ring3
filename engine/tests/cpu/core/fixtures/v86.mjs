@@ -3,6 +3,7 @@ import {createHash} from 'node:crypto';
 import {readFileSync, writeFileSync} from 'node:fs';
 import {readEngine} from '../../../support/wasm/engine.mjs';
 import {Engine, KEY, view} from '../../../../../sdk/runtime/engine.js';
+import {Files} from '../../../../../sdk/runtime/files.js';
 import {prepareV86} from '../../../../../sdk/runtime/v86/index.js';
 import {DIRECTORY} from '../../../../../sdk/runtime/v86/layout.js';
 import {cpuViews, exportState} from '../../../../../sdk/runtime/v86/state.js';
@@ -10,7 +11,7 @@ import {image as moduleImage} from '../../../loader/modules/wasm/fixtures/runtim
 
 const [enginePath, reportPath, permissionText = '1', portText = ''] = process.argv.slice(2);
 assert(enginePath && reportPath, 'usage: v86.mjs imported-engine.wasm fresh-report.json');
-assert(['', 'port', 'inline', 'direct', 'direct-bindings', 'simd'].includes(portText));
+assert(['', 'port', 'inline', 'direct', 'direct-bindings', 'global', 'simd'].includes(portText));
 const deniedPermission = Number(permissionText);
 assert([0,1].includes(deniedPermission));
 const hash = bytes => createHash('sha256').update(bytes).digest('hex');
@@ -240,6 +241,86 @@ try {
     assert.equal(read(dataAddress),3,'same-VA remap executes new canonical bytes');
     report.hostCodeInvalidation={clears,finalizedModules:cache.stats().v86.finalizedModules};
   } finally {cache.cpu.jit_clear_cache=clear;}
+  if(portText==='global') {
+    stage='global RX code with non-global dirty evidence';
+    upload(0x600380,[0xb8,...u32(gate),0xff,0xe0]);
+    upload(0x600340,[0xc7,0x05,...u32(dataAddress),...u32(0x24681357),0xb8,...u32(gate),0xff,0xe0]);
+    engine.ok('protect',0x600000,1,5);cache.tables.refresh();
+    assert.equal(cache.tables.globalCode,false);assert.equal(cache.tables.globalCodeSupported,true);
+    const owner={paused:true,open:cache.open},cr4=new DataView(memory.buffer).getUint32(596,true),
+      full=cache.cpu.full_clear_tlb,partial=cache.cpu.clear_tlb,flushes=[];
+    cache.cpu.full_clear_tlb=function(...args){flushes.push('full');return full.apply(this,args);};
+    cache.cpu.clear_tlb=function(...args){flushes.push('non-global');return partial.apply(this,args);};
+    const pte=page=>new DataView(memory.buffer).getUint32(cache.tables.pte(page>>>12),true),
+      directory=()=>new DataView(memory.buffer).getUint32(cache.tables.ram+DIRECTORY+(dataAddress>>>22)*4,true),
+      version=()=>{engine.ok('component_cpu_view',...KEY);const d=engine.resultView(128),v=new DataView(memory.buffer),
+        slot=v.getUint32(d.getUint32(24,true)+(dataAddress>>>12)*4,true)-1;return v.getBigUint64(d.getUint32(48,true)+slot*16+8,true);};
+    try {
+      cache.tables.configureGlobalCode(true,owner);
+      assert.equal(new DataView(memory.buffer).getUint32(596,true),cr4|128);
+      assert(pte(0x600000)&256);assert.equal(pte(dataAddress)&256,0);assert.equal(pte(0x601000)&256,0);
+      report.globalCode={beforeCr4:cr4,enabledCr4:cr4|128,codePte:pte(0x600000),dataPte:pte(dataAddress),runs:[],
+        scope:'actual global-only code accesses followed by a non-global writable-data store; alias/COW eligibility is covered by native and SDK controls'};
+      flushes.length=0;const beforeVersion=version();
+      for(const pc of [0x600380,0x600380,0x600340]) {
+        new DataView(memory.buffer).setUint32(engine.base+48,pc,true);cache.import();
+        const run=cache.execute(cache.select());assert.equal(run.reason,8);
+        const accessedBefore=!!(directory()&32),dirtyBefore=!!(pte(dataAddress)&64),start=flushes.length;
+        cache.publish();
+        report.globalCode.runs.push({pc,accessedBefore,dirtyBefore,accessedAfter:!!(directory()&32),
+          dirtyAfter:!!(pte(dataAddress)&64),contentVersion:version(),flushes:flushes.slice(start)});
+      }
+      const [first,second,write]=report.globalCode.runs;
+      assert.equal(first.accessedAfter,false);assert.equal(second.accessedBefore,false,'retained global code does not repopulate PDE.A');
+      assert.equal(second.contentVersion,beforeVersion);assert.equal(write.accessedBefore,true);assert.equal(write.dirtyBefore,true);
+      assert.equal(write.accessedAfter,false);assert.equal(write.dirtyAfter,false);assert(write.contentVersion>beforeVersion);
+      assert.deepEqual(write.flushes,['non-global']);assert.equal(read(dataAddress),0x24681357);
+      stage='real mapped RW alias modifies cached global RX code';
+      new Files(engine,{files:[]},'').configure();
+      const gates=new Map();
+      for(let start=0,total=1;start<total;) {
+        engine.ok('module_gates_page',start,128);const d=engine.resultView(4096);
+        total=d.getUint32(16,true);const count=d.getUint32(24,true);assert(count>0);
+        for(let i=0;i<count;i++)gates.set(d.getUint32(36+i*8,true),d.getUint32(32+i*8,true));
+        start+=count;
+      }
+      const nativeCall=(id,args)=>{
+        assert(gates.has(id));put(0x601800,0x600380);args.forEach((value,i)=>put(0x601804+i*4,value));
+        const d=new DataView(memory.buffer);d.setUint32(engine.base+32,0x601800,true);d.setUint32(engine.base+48,gates.get(id),true);
+        cache.import();const run=cache.execute(cache.select());cache.publish();assert.equal(run.detail,id);
+        engine.ok('core_capture_windows_call');const token=engine.resultView(112).getUint32(16,true);
+        engine.ok('core_complete_windows_call',token);return engine.get(16);
+      };
+      const section=nativeCall(0xa0081,[0xffffffff,0,0x40,0,4096,0]);assert(section);
+      const writer=nativeCall(0xa0084,[section,2,0,0,4096]),code=nativeCall(0xa0084,[section,0x24,0,0,4096]);
+      assert(writer&&code&&writer!==code);
+      const aliasHot=value=>[0xb8,...u32(value),0xa3,...u32(dataAddress+8),0xe9,...u32(-15)];
+      upload(writer,aliasHot(11));cache.tables.refresh();
+      assert.equal(pte(writer)&256,0);assert.equal(pte(code)&256,256);
+      assert.equal(pte(writer)&~4095,pte(code)&~4095,'real Win32 views share physical backing');
+      const runAt=pc=>{new DataView(memory.buffer).setUint32(engine.base+48,pc,true);cache.import();const result=cache.execute(cache.select());cache.publish();return result;};
+      const finalized=runtime.counters().finalizedModules;
+      for(let i=0;i<24;i++){runAt(code);await new Promise(resolve=>setTimeout(resolve,2));}
+      assert(runtime.counters().finalizedModules>finalized);assert.equal(read(dataAddress+8),11);
+      flushes.length=0;upload(writer+1,u32(22));runAt(code);
+      assert(flushes.includes('full'),'host alias code write removes global translation before JIT invalidation');
+      assert.equal(read(dataAddress+8),22);
+      engine.ok('protect',0x600000,1,7);
+      upload(0x6003c0,[0xc7,0x05,...u32(writer+1),...u32(33),0xb8,...u32(code),0xff,0xe0]);
+      engine.ok('protect',0x600000,1,5);cache.tables.refresh();flushes.length=0;
+      runAt(0x6003c0);assert.equal(read(dataAddress+8),33,'guest RW alias SMC cannot reuse stale global RX code');
+      assert.equal(pte(code)&256,256);assert(!flushes.includes('full'),'guest SMC is handled by v86 without a host full flush');
+      engine.ok('protect',code,1,1);cache.tables.refresh();assert.equal(pte(code)&256,0);
+      engine.ok('protect',code,1,5);cache.tables.refresh();assert.equal(pte(code)&256,256);runAt(code);assert.equal(read(dataAddress+8),33);
+      assert.equal(nativeCall(0xa0086,[code]),1);cache.tables.refresh();assert.equal(pte(code),0);
+      const rebound=nativeCall(0xa0085,[section,0x24,0,0,4096,code]);assert.equal(rebound,code);
+      runAt(rebound);assert.equal(read(dataAddress+8),33);assert.equal(pte(rebound)&256,256);
+      report.globalCode.alias={section,writer,code,rebound,hostWrite:22,guestSmc:33,finalizedModules:runtime.counters().finalizedModules};
+      cache.tables.configureGlobalCode(false,owner);assert.equal(new DataView(memory.buffer).getUint32(596,true),cr4);
+      assert.equal(pte(0x600000)&256,0);report.globalCode.restored=true;save();
+    } finally {cache.cpu.full_clear_tlb=full;cache.cpu.clear_tlb=partial;}
+    engine.ok('protect',0x600000,1,7);cache.tables.refresh();
+  }
   if(portText==='simd') {
     stage='dense read-only PTE validation';
     const dense=0x6c0000,pc=0x600d00,code=[];
