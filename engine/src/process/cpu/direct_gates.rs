@@ -8,22 +8,37 @@ use crate::{
 };
 
 impl EngineInstance {
-    pub(in crate::process) fn try_direct_external_cpu_gate(
+    pub(in crate::process) fn try_direct_external_cpu_gate_mask(
         &mut self,
         pc: u32,
         esp: u32,
         eax: u32,
+        accepted_mask: u32,
     ) -> Result<bool, HostError> {
+        if accepted_mask == 0 || accepted_mask & !0x7ff != 0 {
+            return Ok(false);
+        }
         if self.exceptions.has_deliveries() || self.guard_owned_host_mutation().is_err() {
             return Ok(false);
         }
         let Some((id, true)) = self.external_cpu_gate_match(pc) else {
             return Ok(false);
         };
-        if !matches!(
-            id,
-            0x10001 | 0x10002 | 0xf000b | 0x40225 | 0x4022a | 0x4022e | 0x40232 | 0x4023f
-        ) {
+        let bit = match id {
+            0x10001 => 1,
+            0x10002 => 1 << 1,
+            0xf000b => 1 << 2,
+            0x40225 => 1 << 3,
+            0x4022a => 1 << 4,
+            0x4022e => 1 << 5,
+            0x40232 => 1 << 6,
+            0x4023f => 1 << 7,
+            0x4023d => 1 << 8,
+            0x40253 => 1 << 9,
+            0x40255 => 1 << 10,
+            _ => 0,
+        };
+        if accepted_mask & bit == 0 {
             return Ok(false);
         }
         let Ok(mut state) = decode_state(&self.arena()[STATE_OFFSET..STATE_OFFSET + STATE_SIZE])
@@ -57,5 +72,14 @@ impl EngineInstance {
         self.arena.as_mut().get_mut()[TRANSFER_OFFSET..TRANSFER_OFFSET + packet.len()]
             .copy_from_slice(&packet);
         Ok(true)
+    }
+
+    pub(in crate::process) fn try_direct_external_cpu_gate(
+        &mut self,
+        pc: u32,
+        esp: u32,
+        eax: u32,
+    ) -> Result<bool, HostError> {
+        self.try_direct_external_cpu_gate_mask(pc, esp, eax, 0xff)
     }
 }

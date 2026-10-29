@@ -201,9 +201,20 @@ pub(crate) fn component_cpu_try_direct_gate(
     esp: u32,
     eax: u32,
 ) -> u32 {
+    component_cpu_try_direct_gate_mask(low, high, pc, esp, eax, 0xff)
+}
+
+pub(crate) fn component_cpu_try_direct_gate_mask(
+    low: u32,
+    high: u32,
+    pc: u32,
+    esp: u32,
+    eax: u32,
+    accepted_mask: u32,
+) -> u32 {
     let mut completed = false;
     let result = access(low, high, true, |instance| {
-        completed = instance.try_direct_external_cpu_gate(pc, esp, eax)?;
+        completed = instance.try_direct_external_cpu_gate_mask(pc, esp, eax, accepted_mask)?;
         Ok(())
     });
     if result == 0 && !completed {

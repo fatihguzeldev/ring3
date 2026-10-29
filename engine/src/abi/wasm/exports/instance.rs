@@ -16,6 +16,7 @@ export_process_calls! {
     component_cpu_try_complete_gate(key_low: u32, key_high: u32);
     component_cpu_try_inline_gate(key_low: u32, key_high: u32, pc: u32);
     component_cpu_try_direct_gate(key_low: u32, key_high: u32, pc: u32, esp: u32, eax: u32);
+    component_cpu_try_direct_gate_mask(key_low: u32, key_high: u32, pc: u32, esp: u32, eax: u32, accepted_mask: u32);
     component_cpu_publish(key_low: u32, key_high: u32, stop: u32, detail: u32, auxiliary: u32, vector: u32, retired: u32, work: u32);
     component_cpu_write_fault(key_low: u32, key_high: u32, address: u32);
     component_cpu_release(key_low: u32, key_high: u32);

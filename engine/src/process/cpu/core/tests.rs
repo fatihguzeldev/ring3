@@ -299,6 +299,47 @@ fn direct_result(engine: &EngineInstance) -> [u32; 4] {
 
 #[cfg(feature = "external-cpu")]
 #[test]
+fn external_direct_gate_mask_admits_only_requested_known_ids_without_decline_mutation() {
+    let mut engine = fixture();
+    call(&mut engine, WindowsApi32::SetLastError, &[0xf1234567]);
+    prepare_external_fast_gate(&mut engine, WindowsApi32::GetLastError.id());
+    engine.set_external_cpu_gate_mode(1).unwrap();
+    let pc = state(&engine).eip;
+    let esp = state(&engine).registers[4];
+    let before = engine.arena().to_vec();
+    let epoch = engine.core_epoch;
+    let token = engine.call_token;
+    let version = engine.memory().unwrap().transaction_version();
+    for mask in [0, 2, 0x100, 0x800, 0x801, u32::MAX] {
+        assert!(
+            !engine
+                .try_direct_external_cpu_gate_mask(pc, esp, 0xabcdef01, mask)
+                .unwrap()
+        );
+        assert_eq!(engine.arena(), before, "decline mask {mask:x}");
+        assert_eq!(engine.core_epoch, epoch);
+        assert_eq!(engine.call_token, token);
+        assert_eq!(engine.memory().unwrap().transaction_version(), version);
+        assert!(engine.pending_call.is_none());
+    }
+    assert!(
+        engine
+            .try_direct_external_cpu_gate_mask(pc, esp, 0xabcdef01, 1)
+            .unwrap()
+    );
+    assert_eq!(
+        direct_result(&engine),
+        [
+            WindowsApi32::GetLastError.id(),
+            0xf1234567,
+            0x401000,
+            esp + 4
+        ]
+    );
+}
+
+#[cfg(feature = "external-cpu")]
+#[test]
 fn external_direct_gate_getter_uses_scalar_frame_without_publishing_cpu_state() {
     let mut engine = fixture();
     call(&mut engine, WindowsApi32::SetLastError, &[0xf1234567]);

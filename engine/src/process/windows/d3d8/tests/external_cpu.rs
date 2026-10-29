@@ -73,7 +73,7 @@ fn prepare(engine: &mut EngineInstance, device: GuestAddress, slot: u8) -> u32 {
 
 #[test]
 fn external_direct_gate_d3d8_facade_matches_original_scalar_dispatch() {
-    for slot in [37, 42, 46, 50, 63] {
+    for slot in [37, 42, 46, 50, 63, 61, 83, 85] {
         let (mut direct, device) = setup();
         let (mut original, original_device) = setup();
         assert_eq!(device, original_device);
@@ -85,7 +85,16 @@ fn external_direct_gate_d3d8_facade_matches_original_scalar_dispatch() {
                 )
                 .unwrap();
         }
-        let id = prepare(&mut direct, device, slot);
+        let id = if matches!(slot, 61 | 83 | 85) {
+            let resource = binding_resource(&mut direct, device, slot);
+            assert_eq!(
+                resource,
+                binding_resource(&mut original, original_device, slot)
+            );
+            prepare_binding(&mut direct, device, slot, resource).0
+        } else {
+            prepare(&mut direct, device, slot)
+        };
         if slot == 37 {
             direct
                 .memory
@@ -417,6 +426,126 @@ fn prepare_binding(
             .unwrap();
     }
     (id, args)
+}
+
+#[test]
+fn external_direct_gate_mask_binding_keeps_legacy_and_unrequested_calls_neutral() {
+    for (slot, bit) in [(61, 8), (83, 9), (85, 10)] {
+        let mut engine = EngineInstance::new(1024, 91).unwrap();
+        engine.register_kernel32_module(0x70000000).unwrap();
+        engine.register_d3d8_module(0x72000000).unwrap();
+        engine
+            .register_guest_module(
+                "direct.exe",
+                include_bytes!(concat!(
+                    env!("CARGO_MANIFEST_DIR"),
+                    "/tests/process/images/startup/imports/fixtures/p2-c-imports/program.exe"
+                )),
+            )
+            .unwrap();
+        engine
+            .start_module_process(
+                "direct.exe",
+                None,
+                crate::process::ModuleRuntimeConfig32 {
+                    stack_base: 0x7e100000,
+                    stack_pages: 8,
+                    runtime_base: 0x7d000000,
+                },
+            )
+            .unwrap();
+        engine.load_library_module("d3d8.dll", None).unwrap();
+        let (context, mut memory, device) =
+            super::support::runtime_in(engine.memory.take().unwrap());
+        memory
+            .map_zeroed(
+                PageRange::new(GuestAddress(PAYLOAD), 1).unwrap(),
+                Permissions::READ_WRITE,
+            )
+            .unwrap();
+        engine.memory = Some(memory);
+        engine.d3d8 = Some(context);
+        engine
+            .configure_user32(
+                Default::default(),
+                PageRange::new(GuestAddress(0x3000_0000), 16).unwrap(),
+            )
+            .unwrap();
+        engine.enable_core_execution().unwrap();
+        engine.external_cpu_memory_pinned = true;
+        engine.set_external_cpu_gate_mode(1).unwrap();
+        let resource = binding_resource(&mut engine, device, slot);
+        for bound in [resource, resource, GuestAddress(0)] {
+            let (id, _) = prepare_binding(&mut engine, device, slot, bound);
+            let pc = engine
+                .module_gates()
+                .unwrap()
+                .into_iter()
+                .find(|gate| gate.id == id)
+                .unwrap()
+                .entry
+                .0;
+            let arena = engine.arena().to_vec();
+            let version = engine.memory().unwrap().transaction_version();
+            let mapped = engine.memory().unwrap().mapped_pages();
+            let references = engine.d3d8.as_ref().unwrap().com.state(resource).unwrap();
+            assert_eq!(engine.external_cpu_gate_match(pc), Some((id, true)));
+            assert!(
+                !engine
+                    .try_direct_external_cpu_gate(pc, DATA, 0xabcdef01)
+                    .unwrap()
+            );
+            assert_eq!(
+                engine.arena(),
+                arena,
+                "legacy8 must decline the owned binding"
+            );
+            for mask in [0xff, 0x7ff ^ (1 << bit), 0x800 | (1 << bit)] {
+                assert!(
+                    !engine
+                        .try_direct_external_cpu_gate_mask(pc, DATA, 0xabcdef01, mask)
+                        .unwrap()
+                );
+                assert_eq!(engine.arena(), arena);
+                assert_eq!(
+                    engine.d3d8.as_ref().unwrap().com.state(resource).unwrap(),
+                    references
+                );
+                assert_eq!(engine.memory().unwrap().transaction_version(), version);
+                assert_eq!(engine.memory().unwrap().mapped_pages(), mapped);
+            }
+            assert!(
+                engine
+                    .try_direct_external_cpu_gate_mask(pc, DATA, 0xabcdef01, 1 << bit)
+                    .unwrap()
+            );
+            let packet = &engine.arena()
+                [crate::abi::arena::TRANSFER_OFFSET..crate::abi::arena::TRANSFER_OFFSET + 32];
+            crate::abi::header::validate(packet, *b"R3IF", 32).unwrap();
+            assert_eq!(crate::abi::header::read_u32(packet, 16), id);
+            assert_eq!(crate::abi::header::read_u32(packet, 20), 0);
+            assert_eq!(crate::abi::header::read_u32(packet, 24), 0x9002);
+            assert_eq!(
+                crate::abi::header::read_u32(packet, 28),
+                DATA + 4 + u32::from(MethodGate::from_id(id).unwrap().method().stack_words) * 4
+            );
+            assert_eq!(&engine.arena()[..140], &arena[..140]);
+            assert_eq!(&engine.arena()[172..], &arena[172..]);
+            assert_eq!(engine.memory().unwrap().transaction_version(), version);
+            assert_eq!(engine.memory().unwrap().mapped_pages(), mapped);
+            assert_eq!(
+                engine
+                    .d3d8
+                    .as_ref()
+                    .unwrap()
+                    .com
+                    .state(resource)
+                    .unwrap()
+                    .holds,
+                u32::from(bound.0 != 0)
+            );
+        }
+    }
 }
 
 #[test]

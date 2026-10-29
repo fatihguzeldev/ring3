@@ -17,6 +17,12 @@ use crate::{
 pub(in crate::process::windows::d3d8) const DATA: u32 = 0x2000;
 
 pub(in crate::process::windows::d3d8) fn runtime() -> (D3D8Runtime32, AddressSpace, GuestAddress) {
+    runtime_in(AddressSpace::new(256).unwrap())
+}
+
+pub(in crate::process::windows::d3d8) fn runtime_in(
+    mut memory: AddressSpace,
+) -> (D3D8Runtime32, AddressSpace, GuestAddress) {
     let mode = DisplayMode32 {
         width: 16,
         height: 16,
@@ -37,7 +43,6 @@ pub(in crate::process::windows::d3d8) fn runtime() -> (D3D8Runtime32, AddressSpa
         .into_iter()
         .map(|interface| vec![GuestAddress(0x9000); interface.methods().len()])
         .collect();
-    let mut memory = AddressSpace::new(256).unwrap();
     memory
         .map_zeroed(
             PageRange::new(GuestAddress(DATA), 1).unwrap(),
