@@ -87,7 +87,7 @@ export class V86CodeCache {
     this.engine=engine;this.memory=engine.memory;this.cpu=cpu;this.runtime=runtime;
     const budget=execution.budget??50000;
     if(!Number.isInteger(budget) || budget<1 || budget>0xffffffff)throw new Error('invalid v86 execution budget');
-    this.budget=Math.min(budget,100002);
+    this.budget=Math.min(budget,500003);
     this.tables=new PageTables(engine,cpu);
     try {this.traps=new Traps(cpu,address=>this.readCodeByte(address));}catch(error){this.tables.rollback(error);throw error;}
     this.imported=false;this.closed=false;this.open=false;

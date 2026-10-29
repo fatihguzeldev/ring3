@@ -11,7 +11,7 @@ import {image as moduleImage} from '../../../loader/modules/wasm/fixtures/runtim
 
 const [enginePath, reportPath, permissionText = '1', portText = ''] = process.argv.slice(2);
 assert(enginePath && reportPath, 'usage: v86.mjs imported-engine.wasm fresh-report.json');
-assert(['', 'port', 'inline', 'direct', 'direct-bindings', 'direct-state-inputs', 'wasm-ports', 'guest-ret', 'global', 'overlap', 'simd', 'targeted-dirty', 'targeted-mappings', 'budget-dirty', 'relaxed-fpu', 'relaxed-fpu-boot'].includes(portText));
+assert(['', 'port', 'inline', 'direct', 'direct-bindings', 'direct-state-inputs', 'wasm-ports', 'guest-ret', 'global', 'overlap', 'simd', 'targeted-dirty', 'targeted-mappings', 'budget-dirty', 'work-budget', 'relaxed-fpu', 'relaxed-fpu-boot'].includes(portText));
 const relaxedBoot=portText==='relaxed-fpu-boot';
 const wasmRelaxed=portText==='wasm-ports';
 const targetedMode=portText==='targeted-dirty';
@@ -30,7 +30,7 @@ const save = () => writeFileSync(reportPath, JSON.stringify(report, (_key, value
   typeof value === 'bigint' ? String(value) : value, 2) + '\n');
 let runtime, engine, cache, stage = 'prepare';
 try {
-  runtime = await prepareV86({wasmUrl: 'data:application/wasm;base64,' + cpuBytes.toString('base64'), sha256: hash(cpuBytes),wasmPorts:wasmRelaxed,relaxedFpu:relaxedBoot||wasmRelaxed||portText==='budget-dirty'});
+  runtime = await prepareV86({wasmUrl: 'data:application/wasm;base64,' + cpuBytes.toString('base64'), sha256: hash(cpuBytes),wasmPorts:wasmRelaxed,relaxedFpu:relaxedBoot||wasmRelaxed||portText==='budget-dirty'||portText==='work-budget'});
   report.wasmPortBridgeInstalled=!!runtime.portBridge;
   assert.equal(report.wasmPortBridgeInstalled,portText==='wasm-ports','the Wasm IO import shim requires explicit boot opt-in');
   if(portText!=='wasm-ports')assert.equal(runtime.portBridgeFallback,undefined);
@@ -84,7 +84,8 @@ try {
   assert.equal(initializer.getUint32(16, true), 1, 'a real guest DLL initializer is pending at attach');
   const init = {token: initializer.getBigUint64(24, true), returnPc: initializer.getUint32(44, true), id: initializer.getUint32(48, true)};
   stage = 'attach while DLL initializer is pending';
-  cache = await runtime.attach(engine, {budget: 1000});
+  cache = await runtime.attach(engine, {budget: portText==='work-budget'?500003:1000});
+  if(portText==='work-budget')assert.equal(cache.budget,500003,'explicit experimental budget reaches the reference500003 limit');
   if(wasmRelaxed) {
     assert.equal(runtime.relaxedFpu,true);assert.equal(cache.relaxedFpu,true);assert.equal(cache.cpu.wm.exports.get_relaxed_fpu(),1);
     report.wasmPortFpu={bootMode:1,initialControl:new DataView(memory.buffer).getUint16(engine.base+4252,true)};
@@ -521,14 +522,15 @@ try {
         readOnlyStore:{address,vector:14,publicationSuppressed:true,bytesPreserved:true},copySplit:true,fullLiveStatePreserved:true};
       assert.equal(cache.configureTargetedMappings(false,owner),false);report.targetedMappings.restored=true;save();
     } finally {cache.cpu.full_clear_tlb=full;}
-  } else if(portText==='budget-dirty') {
+  } else if(portText==='budget-dirty'||portText==='work-budget') {
     stage='pure Budget dirty evidence stays pending until the outer boundary';
     const addresses=[0x6d0000,0xad0000],pc=0x600f00,owner={paused:true,open:false},t=cache.tables;
     for(const address of addresses){engine.ok('map',address,1,3);put(address,0);}
     upload(pc,[0xff,0x05,...u32(addresses[0]),0xff,0x05,...u32(addresses[1]),0xeb,0xf2]);
-    cache.tables.refresh();cache.budget=600;let uninterrupted=true;
+    cache.tables.refresh();const initialBudget=cache.budget;cache.budget=600;let uninterrupted=true;
     cache.inlineOwner={canContinue:()=>true,canBridge:()=>uninterrupted};
-    assert.equal(cache.budgetDirtyDeferral,false);assert.equal(cache.configureBudgetDirtyDeferral(true,owner),true);
+    assert.equal(cache.budgetDirtyDeferral,false);
+    if(portText==='budget-dirty')assert.equal(cache.configureBudgetDirtyDeferral(true,owner),true);
     const d=()=>new DataView(memory.buffer),slots=addresses.map(address=>d().getUint32(t.maps+(address>>>12)*4,true)-1);
     const versions=()=>slots.map(slot=>d().getBigUint64(t.physicalVersions+slot*16+8,true));
     const values=()=>slots.map(slot=>d().getUint32(t.ram+0x1000000+slot*4096,true));
@@ -537,6 +539,29 @@ try {
     const live=()=>{const v=cpuViews(memory);return {registers:Array.from(v.regs),pc:v.data.getUint32(556,true),
       flags:cache.cpu.wm.exports.get_eflags()>>>0,counter:v.data.getUint32(664,true),numeric:Buffer.from(v.bytes.slice(816,1280))};};
     const initialVersions=versions(),initialBanks=banks();d().setUint32(engine.base+48,pc,true);
+    if(portText==='work-budget') {
+      stage='explicit work budgets across the native preemption threshold';
+      const main=cache.cpu.main_loop,publish=t.publishDirty,collections=[];let nativeElapsedMs,nativeReturn;
+      cache.cpu.main_loop=function(...args){const start=performance.now();try{return nativeReturn=main.apply(this,args);}finally{nativeElapsedMs=performance.now()-start;}};
+      t.publishDirty=function(){const before=evidence(),versionBefore=versions(),count=publish.call(this);
+        collections.push({before,after:evidence(),versionBefore,versionAfter:versions(),count});return count;};
+      report.workBudgets={mode:cache.cpu.wm.exports.get_relaxed_fpu(),constructorBudget:initialBudget,runs:[],
+        scope:'one actual call per requested budget; kernel accounting/yield evidence only, no warmed comparative performance claim'};
+      try {
+        for(const budget of [50000,100002,500003]) {
+          cache.budget=budget;d().setUint32(engine.base+48,pc,true);cache.import();const before=cpuViews(memory).data.getUint32(664,true),start=performance.now();
+          const run=cache.execute(cache.select()),elapsedMs=performance.now()-start,delta=(cpuViews(memory).data.getUint32(664,true)-before)>>>0;
+          assert.equal(run.coreReason,2);assert.equal(run.work,delta);assert.equal(run.retired,delta);assert(delta>=budget);
+          assert.equal(engine.get(4604),delta);assert.equal(cache.dirtyPending,false);assert.deepEqual(banks(),initialBanks);
+          assert.deepEqual(Array.from(cpuViews(memory).regs),Array.from({length:8},(_,i)=>engine.get(16+i*4)));
+          const collection=collections.at(-1);assert.equal(collections.length,report.workBudgets.runs.length+1);
+          assert(collection.before.every(row=>row.dirty&&row.accessed));assert(collection.after.every(row=>!row.dirty&&!row.accessed));
+          assert(collection.versionAfter.every((value,i)=>value>collection.versionBefore[i]));
+          report.workBudgets.runs.push({budget,elapsedMs,nativeElapsedMs,nativeReturn,run,counterDelta:delta,values:values(),collection});
+        }
+        assert.equal(cache.budgetDirtyDeferrals,0);report.workBudgets.fullBanksPreserved=true;save();
+      } finally {cache.cpu.main_loop=main;t.publishDirty=publish;cache.budget=initialBudget;}
+    } else {
     report.budgetDirty={addresses,mode:cache.cpu.wm.exports.get_relaxed_fpu(),initialVersions,runs:[]};
     for(let n=0;n<3;n++) {
       cache.import();const run=cache.execute(cache.select(true));assert.equal(run.coreReason,2);assert(run.work>0);
@@ -557,6 +582,8 @@ try {
     assert.equal(d().getUint32(t.pte(addresses[1]>>>12),true)&66,0,'a host mapping boundary follows publication, never pending evidence');
     assert.equal(cache.configureBudgetDirtyDeferral(false,owner),false);
     report.budgetDirty.boundary={run:boundary,mappingChanged:true,dirtyPending:false,restored:true};save();
+    cache.budget=initialBudget;
+    }
   } else if(portText==='simd') {
     stage='dense read-only PTE validation';
     const dense=0x6c0000,pc=0x600d00,code=[];
