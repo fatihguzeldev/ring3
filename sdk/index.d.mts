@@ -2,6 +2,8 @@ export interface SessionStatus {
   readonly state: string;
   readonly backend: 'core'|'v86';
   readonly cpuHash?: string;
+  readonly fastPreset?: boolean;
+  readonly fastPresetApplied?: boolean;
   readonly message?: string;
   readonly pc?: number;
   readonly stats?: Readonly<Record<string,unknown>>;
