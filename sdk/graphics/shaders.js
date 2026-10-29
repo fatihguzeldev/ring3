@@ -197,11 +197,16 @@ export function buildShader(p,vertex,pixel,textureKinds,options={}) {
   return `${declarations}\n@vertex fn vs(@builtin(vertex_index) vertex:u32)->Output{${vertexBody}}\n@fragment fn fs(in:Output)->@location(0) vec4<f32>{${fragment}}`;
 }
 
+const identityState=new Float32Array(1173*4);
+for(let i=0;i<266;i++)for(let lane=0;lane<4;lane++)identityState[(104+i*4+lane)*4+lane]=1;
+
 export function stateBytes(p,vertex,pixel){
-  const out=new Float32Array(1173*4);p.vc.forEach((v,i)=>out.set(v,i*4));p.pc.forEach((v,i)=>out.set(v,(96+i)*4));
+  const mask=p.transformMask,out=mask?new Float32Array(identityState):new Float32Array(1173*4);p.vc.forEach((v,i)=>out.set(v,i*4));p.pc.forEach((v,i)=>out.set(v,(96+i)*4));
   for(const [i,c] of vertex?.declaration?.constants??[])out.set(c,i*4);
   for(const [i,c] of vertex?.program?.constants??[])out.set(c,i*4);
   for(const [i,c] of pixel?.program?.constants??[])out.set(c,(96+i)*4);
-  p.transforms.forEach((m,i)=>out.set(m,(104+i*4)*4));out.set(p.material,1168*4);
+  if(mask){for(let i=0;i<266;i++)if(mask[i>>5]&(1<<(i&31)))out.set(p.transforms[i],(104+i*4)*4);}
+  else p.transforms.forEach((m,i)=>out.set(m,(104+i*4)*4));
+  out.set(p.material,1168*4);
   return new Uint8Array(out.buffer);
 }
