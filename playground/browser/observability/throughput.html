@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="en">
+  <meta charset="utf-8" />
+  <title>Ring3 authored observability throughput proof</title>
+  <style>
+    body {
+      max-width: 1100px;
+      margin: 24px auto;
+      padding: 0 18px;
+      background: #151719;
+      color: #ddd;
+      font: 15px system-ui;
+    }
+    label {
+      margin-right: 18px;
+    }
+    button,
+    input,
+    select {
+      padding: 8px;
+      margin: 6px;
+    }
+    pre {
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+      background: #202326;
+      padding: 18px;
+    }
+  </style>
+  <h1>Authored observability throughput proof</h1>
+  <p>
+    512 authored NOP/RET entries, 128 retained units, 8 MiB cache byte budget, 6 ms work batches. No
+    game or guest instructions execute. The production worker/main capture and HTTP sink record
+    bounded cache compilation and eviction work.
+  </p>
+  <label
+    >Level
+    <select id="level">
+      <option>off</option>
+      <option>basic</option>
+      <option selected>detailed</option>
+    </select></label
+  >
+  <label>Duration <input id="seconds" type="number" value="60" min="3" max="90" /> seconds</label>
+  <button id="start">Start proof</button
+  ><button id="ping" disabled>Ping worker</button
+  ><button id="stop" disabled>Stop proof</button>
+  <pre id="result">ready</pre>
+  <script type="module" src="./throughput.js"></script>
+</html>
