@@ -32,12 +32,34 @@ class DeviceRenderer {
     this.pipelineInputs=new Map();this.pipelineInputMemoEnabled=false;this.programIdentities=new WeakMap();this.nextProgramIdentity=0;
     this.pipelineInputHits=0;this.pipelineInputMisses=0;this.pipelineBuilds=0;
     this.retainedIndicesEnabled=false;this.retainedIndexUses=0;
+    this.stateUploadBatchEnabled=false;this.stateUploadPages=[];
+    this.stateUploadBatchUses=0;this.stateUploadBatchUploads=0;this.stateUploadBatchPages=0;this.stateUploadBatchBytes=0;
     this.draws=0;this.presents=0;this.removed=false;this.gamma=new Float32Array(3*256);
     for(let c=0;c<3;c++)for(let i=0;i<256;i++)this.gamma[c*256+i]=i/255;
   }
   scratch(bytes,usage){const b=this.resources.buffer(bytes,usage);this.temporary.push(b);return b;}
+  configureStateUploadBatch(enabled){
+    require(typeof enabled==='boolean'&&!this.closed&&!this.accepting&&!this.pendingEncoder&&!this.stateUploadPages.length,'state upload changes require an idle renderer');
+    this.stateUploadBatchEnabled=enabled;return enabled;
+  }
+  stateBinding(bytes){
+    if(!this.stateUploadBatchEnabled)return {buffer:this.scratch(bytes,GPUBufferUsage.STORAGE)};
+    const alignment=this.device.limits.minStorageBufferOffsetAlignment,capacity=Math.min(1024*1024,this.device.limits.maxStorageBufferBindingSize);
+    require(bytes.byteLength<=capacity,'state upload exceeds storage page');
+    let page=this.stateUploadPages.at(-1),offset=page?align(page.used,alignment):0;
+    if(!page||offset+bytes.byteLength>capacity){
+      const data=new Uint8Array(capacity),buffer=this.device.createBuffer({size:capacity,usage:GPUBufferUsage.STORAGE|GPUBufferUsage.COPY_DST});
+      page={bytes:data,buffer,used:0};this.stateUploadPages.push(page);this.temporary.push(buffer);this.stateUploadBatchPages++;offset=0;
+    }
+    page.bytes.set(bytes,offset);page.used=offset+bytes.byteLength;this.stateUploadBatchUses++;
+    return {buffer:page.buffer,offset,size:bytes.byteLength};
+  }
   encoder(){return this.pendingEncoder??=this.device.createCommandEncoder();}
-  flush(){const encoder=this.pendingEncoder;if(encoder){this.pendingEncoder=null;this.device.queue.submit([encoder.finish()]);}}
+  flush(){const encoder=this.pendingEncoder;if(encoder){
+    const pages=this.stateUploadPages;this.pendingEncoder=null;this.stateUploadPages=[];
+    for(const page of pages){this.device.queue.writeBuffer(page.buffer,0,page.bytes,0,page.used);this.stateUploadBatchUploads++;this.stateUploadBatchBytes+=page.used;}
+    this.device.queue.submit([encoder.finish()]);
+  }}
   async accept(packet,frameProbe) {
     require(!this.accepting,'graphics packet already active');this.accepting=true;
     try {
@@ -52,7 +74,7 @@ class DeviceRenderer {
       for(const b of this.temporary)b.destroy();this.temporary.length=0;
       return {epoch:decoded.epoch,sequence:decoded.sequence,readbacks,...(frameProbe?{presentCommands}:{})};
     } finally {
-      this.pendingEncoder=null;this.accepting=false;
+      this.pendingEncoder=null;this.stateUploadPages.length=0;this.accepting=false;
     }
   }
   async execute(command,frameProbe) {
@@ -191,8 +213,8 @@ class DeviceRenderer {
     const p=this.state(id),output=this.renderTargets(targets),textures=this.textureBindings(p,b),gpu=await this.gpuPipeline(p,topology[primitive],output,textures.kinds);
     const packed=this.resources.packStreams(b,data.bytes?{bytes:data.bytes,stride:data.stride}:null),raw=packed.buffer;if(packed.temporary)this.temporary.push(raw);
     if(retainedIndex && this.resources.packedStreams.get(retainedIndex.key)!==retainedIndex){retainedIndex=null;indexBytes=indexWords(indexSource,indexAt,elements,indexStep);}
-    const programs=this.program(p),state=this.scratch(stateBytes(p,programs.vertex,programs.pixel),GPUBufferUsage.STORAGE);
-    const entries=[{binding:0,resource:{buffer:state}},{binding:1,resource:{buffer:raw}},...textures.entries];
+    const programs=this.program(p),state=this.stateBinding(stateBytes(p,programs.vertex,programs.pixel));
+    const entries=[{binding:0,resource:state},{binding:1,resource:{buffer:raw}},...textures.entries];
     const encoder=this.encoder(),pass=encoder.beginRenderPass(this.passDescriptor(output));
     pass.setPipeline(gpu);pass.setBindGroup(0,this.device.createBindGroup({layout:gpu.getBindGroupLayout(0),entries}));this.dynamic(pass,p,output);
     if(retainedIndex){pass.setIndexBuffer(retainedIndex.buffer,retainedIndex.indexFormat);pass.drawIndexed(elements,1,data.start,baseVertex,0);this.retainedIndexUses++;if(retainedIndex.cacheHit)this.resources.retainedIndexHits++;}
@@ -267,11 +289,11 @@ class DeviceRenderer {
     const vertices=this.device.createBuffer({size:d.count*17*16,usage:GPUBufferUsage.STORAGE});this.temporary.push(vertices);if(mode!==0)this.temporary.push(patch.controls);
     const e=this.encoder(),compute=e.beginComputePass();compute.setPipeline(this.patchEvaluate);compute.setBindGroup(0,this.device.createBindGroup({layout:this.patchEvaluate.getBindGroupLayout(0),entries:[{binding:0,resource:{buffer:stateBuffer}},{binding:2,resource:{buffer:patch.controls}},{binding:3,resource:{buffer:d.vertices}},{binding:4,resource:{buffer:vertices}}]}));compute.dispatchWorkgroups(Math.ceil(d.count/64));compute.end();
     const p=this.state(id),output=this.renderTargets(targets),textures=this.textureBindings(p,b),gpu=await this.gpuPipeline(p,'triangle-list',output,textures.kinds,true),program=this.program(p);
-    const state=this.scratch(stateBytes(p,program.vertex,program.pixel),GPUBufferUsage.STORAGE),raw=this.scratch(new Uint8Array(128),GPUBufferUsage.STORAGE);
-    const entries=[{binding:0,resource:{buffer:state}},{binding:1,resource:{buffer:raw}},{binding:18,resource:{buffer:vertices}},...textures.entries];
+    const state=this.stateBinding(stateBytes(p,program.vertex,program.pixel)),raw=this.scratch(new Uint8Array(128),GPUBufferUsage.STORAGE);
+    const entries=[{binding:0,resource:state},{binding:1,resource:{buffer:raw}},{binding:18,resource:{buffer:vertices}},...textures.entries];
     const encoder=this.encoder(),pass=encoder.beginRenderPass(this.passDescriptor(output));pass.setPipeline(gpu);pass.setBindGroup(0,this.device.createBindGroup({layout:gpu.getBindGroupLayout(0),entries}));this.dynamic(pass,p,output);pass.setIndexBuffer(d.indices,'uint32');pass.drawIndexed(d.indexCount);pass.end();this.draws++;
   }
-  close(){if(this.closed)return;this.closed=true;this.pendingEncoder=null;this.resources.close();for(const p of this.patches.values())p.controls.destroy();for(const d of this.domains.values()){d.vertices.destroy();d.indices.destroy();}for(const b of this.temporary)b.destroy();this.temporary.length=0;this.patches.clear();this.domains.clear();this.states.clear();this.shaders.clear();this.pipelines.clear();this.pipelineInputs.clear();}
+  close(){if(this.closed)return;this.closed=true;this.pendingEncoder=null;this.stateUploadPages.length=0;this.resources.close();for(const p of this.patches.values())p.controls.destroy();for(const d of this.domains.values()){d.vertices.destroy();d.indices.destroy();}for(const b of this.temporary)b.destroy();this.temporary.length=0;this.patches.clear();this.domains.clear();this.states.clear();this.shaders.clear();this.pipelines.clear();this.pipelineInputs.clear();}
 }
 
 export async function createGraphicsHost(canvas,{onDiagnostic=()=>{}}={}) {

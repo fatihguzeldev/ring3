@@ -37,7 +37,7 @@ async function graphicsFixture(t) {
     submit(){events.push('submit');},writeTexture(){events.push('write-texture');},writeBuffer(){events.push('write-buffer');},
     onSubmittedWorkDone(){events.push('fence');return fence.promise;},
   };
-  const device={queue,features:[],limits:{maxTextureDimension2D:4096,maxStorageBufferBindingSize:1024*1024},lost:new Promise(()=>{}),
+  const device={queue,features:[],limits:{maxTextureDimension2D:4096,maxStorageBufferBindingSize:1024*1024,minStorageBufferOffsetAlignment:256},lost:new Promise(()=>{}),
     addEventListener(){},pushErrorScope(){},async popErrorScope(){return null;},destroy(){events.push('device-destroy');},
     createTexture(){return {createView(){return {};},destroy(){events.push('texture-destroy');}};},
     createBuffer({size}){const buffer={destroyed:false,async mapAsync(){events.push('map');await mapping.promise;},getMappedRange(){return new ArrayBuffer(size);},unmap(){events.push('unmap');},destroy(){this.destroyed=true;events.push('buffer-destroy');}};buffers.push(buffer);return buffer;},
@@ -67,6 +67,55 @@ async function pipelineFixture(t) {
   renderer.pipelineInputMemoEnabled=true;
   return {...f,renderer,targets,run:(state,kind='triangle-list',kinds=Array(8).fill(null),patch=false,output=targets)=>renderer.gpuPipeline(state,kind,output,kinds,patch)};
 }
+
+test('batched state uploads preserve aligned draw ranges and upload each encoder before submission',async t=>{
+  const {host,events}=await graphicsFixture(t);await host.consume(packet([[1,definition]]));
+  const renderer=host.sessions.get(1n),device=host.device,writes=[],entries=[],state=pipelineState();
+  device.limits.maxStorageBufferBindingSize=37888;
+  device.queue.writeBuffer=(buffer,offset,bytes,dataOffset=0,size=bytes.byteLength)=>{events.push('state-upload');writes.push({buffer,offset,bytes:bytes.slice(dataOffset,dataOffset+size)});};
+  device.createBindGroup=descriptor=>{entries.push(descriptor.entries[0].resource);return {};};
+  renderer.state=()=>state;renderer.renderTargets=()=>({color:{view:{}}});
+  renderer.textureBindings=()=>({kinds:[],entries:[]});renderer.gpuPipeline=async()=>({getBindGroupLayout:()=>({})});
+  renderer.resources.packStreams=()=>({buffer:{},temporary:false});renderer.program=()=>({});renderer.dynamic=()=>{};
+  const draw=async value=>{
+    state.vc[0][0]=value;state.material[0]=-value;
+    const values=[4,1,...Array(25).fill(0),0,0];
+    await renderer.draw({u64:()=>1n,targets:()=>({}),u32:()=>values.shift()});assert.equal(values.length,0);
+  };
+  assert.equal(renderer.stateUploadBatchEnabled,false);
+  renderer.configureStateUploadBatch(true);
+  await draw(1);await draw(2);await draw(3);
+  assert.equal(writes.length,0,'draw staging must not upload until the shared encoder flushes');
+  assert.throws(()=>renderer.configureStateUploadBatch(false),/idle renderer/);
+  state.vc[0][0]=99;renderer.flush();
+  assert.equal(writes.length,2);assert.deepEqual(entries.map(row=>[row.offset,row.size]),[[0,18768],[18944,18768],[0,18768]]);
+  assert.equal(entries[0].buffer,entries[1].buffer);assert.notEqual(entries[0].buffer,entries[2].buffer);
+  for(const [i,entry] of entries.entries()){
+    const write=writes.find(row=>row.buffer===entry.buffer),view=new DataView(write.bytes.buffer);
+    assert.equal(view.getFloat32(entry.offset,true),i+1);
+    assert.equal(view.getFloat32(entry.offset+1168*16,true),-(i+1));
+    assert.equal(entry.offset%device.limits.minStorageBufferOffsetAlignment,0);
+  }
+  assert.deepEqual(events.filter(value=>value==='state-upload'||value==='submit'),['state-upload','state-upload','submit']);
+  await draw(4);renderer.flush();
+  assert.notEqual(entries[3].buffer,entries[0].buffer,'a later encoder cannot overwrite previously submitted state pages');
+  assert.deepEqual([renderer.stateUploadBatchUses,renderer.stateUploadBatchUploads,renderer.stateUploadBatchPages],[4,3,3]);
+  renderer.configureStateUploadBatch(false);host.close();
+  assert.equal(writes.every(row=>row.buffer.destroyed),true);
+});
+
+test('failed packets discard unsubmitted state staging and close releases its temporary GPU pages',async t=>{
+  const {host,events}=await graphicsFixture(t);await host.consume(packet([[1,definition]]));
+  const renderer=host.sessions.get(1n);renderer.configureStateUploadBatch(true);
+  renderer.execute=async()=>{renderer.stateBinding(new Uint8Array(18768));renderer.encoder();throw Error('staged command failure');};
+  const next=packet([[1,definition]]),view=new DataView(next);
+  for(const at of [24,32,40,72])view.setBigUint64(at,2n,true);
+  await assert.rejects(host.consume(next),/staged command failure/);
+  assert.equal(renderer.pendingEncoder,null);assert.equal(renderer.stateUploadPages.length,0);
+  assert.equal(events.includes('submit'),false);assert.equal(events.includes('write-buffer'),false);
+  const pages=renderer.temporary.slice();assert.equal(pages.length,1);
+  host.close();assert.equal(pages[0].destroyed,true);
+});
 
 test('retained ordinary list indices preserve draw subsets and base vertices while other paths stay transient',async t=>{
   const {host,events}=await graphicsFixture(t);await host.consume(packet([[1,definition]]));
