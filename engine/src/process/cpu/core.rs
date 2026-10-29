@@ -79,7 +79,7 @@ impl EngineInstance {
             && !tls_getter
             && !gate.is_some_and(|gate| {
                 gate.interface == InterfaceKind::Device
-                    && matches!(gate.slot, 37 | 42 | 46 | 50 | 63)
+                    && matches!(gate.slot, 37 | 42 | 46 | 50 | 61 | 63 | 83 | 85)
             })
         {
             return false;
@@ -180,7 +180,16 @@ impl EngineInstance {
             return false;
         }
         self.d3d8.as_ref().is_some_and(|runtime| {
-            runtime.external_cpu_scalar_gate_safe(memory, GuestAddress(args[0]))
+            if matches!(gate.slot, 61 | 83 | 85) {
+                runtime.external_cpu_binding_gate_safe(
+                    memory,
+                    GuestAddress(args[0]),
+                    gate.slot,
+                    args,
+                )
+            } else {
+                runtime.external_cpu_scalar_gate_safe(memory, GuestAddress(args[0]))
+            }
         })
     }
 

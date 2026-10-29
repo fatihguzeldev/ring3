@@ -1,4 +1,4 @@
-use super::support::{DATA, runtime, texture};
+use super::support::{DATA, read, runtime, texture};
 use crate::{
     abi::{
         arena::STATE_OFFSET,
@@ -65,6 +65,182 @@ fn prepare(engine: &mut EngineInstance, device: GuestAddress, slot: u8) -> u32 {
     .id()
 }
 
+fn binding_resource(engine: &mut EngineInstance, device: GuestAddress, slot: u8) -> GuestAddress {
+    let mut context = engine.d3d8.take().unwrap();
+    let memory = engine.memory.as_mut().unwrap();
+    let resource = if slot == 61 {
+        texture(&mut context, memory, device)
+    } else {
+        let (creation, format) = if slot == 83 { (23, 2) } else { (24, 101) };
+        context
+            .device_resource_call(
+                memory,
+                device,
+                creation,
+                &[device.0, 64, 0, format, 1, DATA],
+            )
+            .unwrap();
+        GuestAddress(read(memory, DATA))
+    };
+    engine.d3d8 = Some(context);
+    resource
+}
+
+fn prepare_binding(
+    engine: &mut EngineInstance,
+    device: GuestAddress,
+    slot: u8,
+    resource: GuestAddress,
+) -> (u32, Vec<u32>) {
+    let id = prepare(engine, device, slot);
+    let args = match slot {
+        61 => vec![device.0, 0, resource.0],
+        83 => vec![device.0, 0, resource.0, 12],
+        85 => vec![device.0, resource.0, 0],
+        _ => unreachable!(),
+    };
+    for (index, value) in args.iter().enumerate() {
+        engine
+            .memory
+            .as_mut()
+            .unwrap()
+            .write(
+                GuestAddress(DATA + (index as u32 + 1) * 4),
+                &value.to_le_bytes(),
+            )
+            .unwrap();
+    }
+    (id, args)
+}
+
+#[test]
+fn external_cpu_dirty_policy_resource_binding_keeps_live_resources_and_ram_stable() {
+    for slot in [61, 83, 85] {
+        let (mut engine, device) = setup();
+        let resource = binding_resource(&mut engine, device, slot);
+        for bound in [resource, resource, GuestAddress(0)] {
+            let (id, args) = prepare_binding(&mut engine, device, slot, bound);
+            let before = engine.d3d8.as_ref().unwrap().com.state(resource).unwrap();
+            let version = engine.memory().unwrap().transaction_version();
+            let mapped = engine.memory().unwrap().mapped_pages();
+            assert!(
+                engine.external_cpu_can_defer_gate(PC, id),
+                "binding slot {slot}"
+            );
+            assert_eq!(
+                engine.d3d8.as_ref().unwrap().com.state(resource).unwrap(),
+                before
+            );
+            let mut context = engine.d3d8.take().unwrap();
+            context
+                .binding_call(engine.memory.as_mut().unwrap(), device, slot, &args)
+                .unwrap();
+            let after = context.com.state(resource).unwrap();
+            assert_eq!(after.references, before.references);
+            assert_eq!(after.holds, u32::from(bound.0 != 0));
+            engine.d3d8 = Some(context);
+            assert_eq!(engine.memory().unwrap().transaction_version(), version);
+            assert_eq!(engine.memory().unwrap().mapped_pages(), mapped);
+        }
+    }
+}
+
+#[test]
+fn external_cpu_dirty_policy_resource_binding_rejects_last_hold_disposal() {
+    for slot in [61, 83, 85] {
+        let (mut engine, device) = setup();
+        let resource = binding_resource(&mut engine, device, slot);
+        let (_, args) = prepare_binding(&mut engine, device, slot, resource);
+        let mut context = engine.d3d8.take().unwrap();
+        context
+            .binding_call(engine.memory.as_mut().unwrap(), device, slot, &args)
+            .unwrap();
+        assert_eq!(
+            context
+                .release(engine.memory.as_mut().unwrap(), resource)
+                .unwrap(),
+            0
+        );
+        assert_eq!(context.com.state(resource).unwrap().holds, 1);
+        engine.d3d8 = Some(context);
+        let (id, args) = prepare_binding(&mut engine, device, slot, GuestAddress(0));
+        let version = engine.memory().unwrap().transaction_version();
+        let mapped = engine.memory().unwrap().mapped_pages();
+        assert!(!engine.external_cpu_can_defer_gate(PC, id));
+        assert_eq!(engine.memory().unwrap().transaction_version(), version);
+        assert_eq!(engine.memory().unwrap().mapped_pages(), mapped);
+        let mut context = engine.d3d8.take().unwrap();
+        context
+            .binding_call(engine.memory.as_mut().unwrap(), device, slot, &args)
+            .unwrap();
+        assert!(context.com.lookup(resource).is_err());
+        assert!(
+            engine.memory().unwrap().mapped_pages() < mapped,
+            "excluded real unbind retires COM mapping"
+        );
+    }
+}
+
+#[test]
+fn external_cpu_dirty_policy_resource_binding_rejects_guarded_cow_or_missing_com_neutrally() {
+    for change in [0, 1, 2] {
+        let (mut engine, device) = setup();
+        let resource = binding_resource(&mut engine, device, 61);
+        let (id, _) = prepare_binding(&mut engine, device, 61, resource);
+        let page = PageRange::new(GuestAddress(resource.0 & !4095), 1).unwrap();
+        let memory = engine.memory.as_mut().unwrap();
+        if change == 0 {
+            memory
+                .protect(page, Permissions::READ_WRITE.with_guard())
+                .unwrap();
+        } else if change == 1 {
+            let mut bytes = [0; 4096];
+            memory
+                .read(GuestAddress(resource.0 & !4095), &mut bytes)
+                .unwrap();
+            let shared = memory.allocate_shared_pages(1, &bytes).unwrap();
+            memory.unmap(page).unwrap();
+            memory
+                .map_shared_pages(page, &shared, 0, Permissions::READ_WRITE, true)
+                .unwrap();
+        } else {
+            memory.unmap(page).unwrap();
+        }
+        let version = memory.transaction_version();
+        let mapped = memory.mapped_pages();
+        memory.begin_guard_service().unwrap();
+        assert!(!engine.external_cpu_can_defer_gate(PC, id));
+        let memory = engine.memory().unwrap();
+        assert_eq!(memory.transaction_version(), version);
+        assert_eq!(memory.mapped_pages(), mapped);
+        assert!(memory.end_guard_service().is_none());
+    }
+    let (mut engine, device) = setup();
+    let resource = binding_resource(&mut engine, device, 61);
+    let (_, args) = prepare_binding(&mut engine, device, 61, resource);
+    let mut context = engine.d3d8.take().unwrap();
+    context
+        .binding_call(engine.memory.as_mut().unwrap(), device, 61, &args)
+        .unwrap();
+    engine.d3d8 = Some(context);
+    let (id, _) = prepare_binding(&mut engine, device, 61, GuestAddress(0));
+    let memory = engine.memory.as_mut().unwrap();
+    memory
+        .protect(
+            PageRange::new(GuestAddress(resource.0 & !4095), 1).unwrap(),
+            Permissions::READ_WRITE.with_guard(),
+        )
+        .unwrap();
+    let version = memory.transaction_version();
+    memory.begin_guard_service().unwrap();
+    assert!(
+        !engine.external_cpu_can_defer_gate(PC, id),
+        "unbind preflights the released resource even with a null new pointer"
+    );
+    assert_eq!(engine.memory().unwrap().transaction_version(), version);
+    assert!(engine.memory().unwrap().end_guard_service().is_none());
+}
+
 #[test]
 fn external_cpu_dirty_policy_allows_only_audited_scalar_setters() {
     let (mut engine, device) = setup();
@@ -78,7 +254,7 @@ fn external_cpu_dirty_policy_allows_only_audited_scalar_setters() {
         assert_eq!(engine.memory().unwrap().transaction_version(), version);
         assert!(!engine.external_cpu_can_defer_gate(PC + 1, id));
     }
-    for slot in [38, 51, 61, 62, 71, 83, 85] {
+    for slot in [38, 51, 61, 62, 71, 83] {
         let id = prepare(&mut engine, device, slot);
         assert!(
             !engine.external_cpu_can_defer_gate(PC, id),

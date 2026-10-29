@@ -44,6 +44,78 @@ impl D3D8Runtime32 {
             .is_ok_and(|device| !device.queue().is_draining() && !device.queue().is_sealed())
     }
 
+    #[cfg(feature = "external-cpu")]
+    pub(in crate::process) fn external_cpu_binding_gate_safe(
+        &self,
+        memory: &crate::memory::AddressSpace,
+        pointer: GuestAddress,
+        slot: u8,
+        args: &[u32],
+    ) -> bool {
+        use crate::graphics::d3d8::device::Binding;
+        if !self.external_cpu_scalar_gate_safe(memory, pointer)
+            || args.len()
+                != match slot {
+                    61 | 85 => 3,
+                    83 => 4,
+                    _ => return false,
+                }
+        {
+            return false;
+        }
+        let preflight = || -> Result<(), HResult> {
+            let (raw, expected) = match slot {
+                61 => (args[2], InterfaceKind::BaseTexture),
+                83 => (args[2], InterfaceKind::VertexBuffer),
+                _ => (args[1], InterfaceKind::IndexBuffer),
+            };
+            let handle = if raw == 0 {
+                0
+            } else {
+                let object = self.object(GuestAddress(raw))?;
+                if !object.interface.supports(expected) {
+                    return Err(HResult::INVALID_CALL);
+                }
+                self.resource(GuestAddress(raw), pointer)?;
+                self.com.preflight(memory, GuestAddress(raw))?;
+                let counter = self.counter_pointer(object.pointer)?;
+                self.com.preflight(memory, counter)?;
+                object.pointer.0
+            };
+            let binding = match slot {
+                61 => Binding::Texture {
+                    stage: args[1],
+                    handle,
+                },
+                83 => Binding::Stream {
+                    stream: args[1],
+                    handle,
+                    stride: args[3],
+                },
+                _ => Binding::Indices {
+                    handle,
+                    base_vertex: args[2],
+                },
+            };
+            let device = self.device(pointer)?;
+            let prepared = device.prepare_binding(binding).map_err(HResult::from)?;
+            device
+                .can_commit_binding(&prepared)
+                .map_err(HResult::from)?;
+            if let Some(released) = prepared.released_resource() {
+                self.resource(GuestAddress(released), pointer)?;
+                self.com.preflight(memory, GuestAddress(released))?;
+                let counter = self.counter_pointer(GuestAddress(released))?;
+                self.com.preflight(memory, counter)?;
+                if self.com.references(counter)? == 0 {
+                    return Err(HResult::INVALID_CALL);
+                }
+            }
+            Ok(())
+        };
+        preflight().is_ok()
+    }
+
     pub(in crate::process) fn new(config: D3D8Config32) -> Result<Self, D3D8Error32> {
         config
             .adapter
