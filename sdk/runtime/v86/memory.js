@@ -1,14 +1,16 @@
-import {KEY} from '../engine.js';
+import {Engine,KEY} from '../engine.js';
 import {PAGE,BACKING_BASE,DIRECTORY,TABLES,GDT,PRIVATE_VA} from './layout.js';
 import {CodeValidity} from './code-validity.js';
 import {DirtyPages,createDirtyRearm} from './dirty-pages.js';
+
+const resultView=Engine.prototype.resultView;
 
 export class PageTables {
   constructor(engine,cpu,options={}) {
     this.engine=engine;this.cpu=cpu;this.ram=cpu.mem8.byteOffset;this.pages=[];
     this.ownsPin=false;
     this.mappingEpoch=null;this.codeVersion=null;this.identity=null;
-    this.descriptorReuse=false;this.descriptorReuseHits=0;this.descriptorReuseMisses=0;this.descriptorCache=null;
+    this.descriptorReuse=true;this.descriptorReuseHits=0;this.descriptorReuseMisses=0;this.descriptorCache=null;
     this.policy={selectiveCode:options.selectiveCode??true,incrementalSync:options.incrementalSync??true};
     this.codeValidity=new CodeValidity(engine.memory);
     this.globalCode=false;
@@ -132,11 +134,12 @@ export class PageTables {
   }
   descriptor(reuse=false) {
     const h=this.engine;h.ok('component_cpu_view',...KEY);
-    const d=h.resultView(128);
-    let source=null;
+    let d,source=null;
     if(reuse) {
       const cached=this.descriptorCache;
-      if(cached?.buffer===d.buffer && cached.base===d.byteOffset) {
+      const direct=cached?.source && cached.buffer===h.memory.buffer && cached.base===h.base+140 && h.resultView===resultView;
+      if(!direct)d=h.resultView(128);
+      if(cached && (direct || cached.buffer===d.buffer && cached.base===d.byteOffset)) {
         source=cached.source;let same=true;
         for(let index=0;index<32;index++)if(cached.words[index]!==
             (source?source[index]:d.getUint32(index*4,true))){same=false;break;}
@@ -144,6 +147,7 @@ export class PageTables {
       }
       this.descriptorReuseMisses++;
     }
+    d??=h.resultView(128);
     if(d.getUint32(0,true)!==0x56433352 || d.getUint32(8,true)!==128)
       throw new Error('invalid external CPU memory descriptor');
     const values={backing:d.getUint32(16,true),length:d.getUint32(20,true),maps:d.getUint32(24,true),
@@ -164,7 +168,7 @@ export class PageTables {
     return values;
   }
   refresh() {
-    const info=this.descriptor(this.descriptorReuse),d=new DataView(this.engine.memory.buffer);
+    const info=this.descriptor(this.descriptorReuse);
     this.lastMappingScanCount=0;this.lastMappingFullRebuild=false;
     if(this.identity!==null && this.identity!==info.identity)throw new Error('v86 backing identity changed');
     this.identity=info.identity;
@@ -179,6 +183,7 @@ export class PageTables {
     const incremental=this.policy.incrementalSync && this.mappingEpoch!==null && (info.mappingChangeFlags&1)!==0;
     if((info.mappingChangeFlags&1) && (info.mappingChangeCapacity!==info.guestPages ||
         info.mappingChangeCount>info.mappingChangeCapacity))throw new Error('invalid v86 mapping change journal');
+    const d=new DataView(this.engine.memory.buffer);
     if(!incremental) {
       for(const row of this.pages)d.setUint32(row.pte,0,true);
       this.pages=[];this.rowsByPage.clear();this.dirty.reset([]);this.lastMappingFullRebuild=true;

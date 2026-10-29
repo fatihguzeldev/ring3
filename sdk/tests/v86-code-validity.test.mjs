@@ -3,6 +3,7 @@ import test from 'node:test';
 import {PageTables} from '../runtime/v86/memory.js';
 import {CodeValidity} from '../runtime/v86/code-validity.js';
 import {BACKING_BASE,DIRECTORY,TABLES,PRIVATE_VA} from '../runtime/v86/layout.js';
+import {Engine} from '../runtime/engine.js';
 
 const PAGE=4096, CODE=0x100, DATA=0x200;
 
@@ -137,7 +138,9 @@ function world({journal=false,nativeDirty=false,nativeDirtyEpoch=false,dirtyGate
 
 test('descriptor reuse compares the whole fresh record and retains journal, malformed and grow barriers',()=>{
   const f=world({journal:true}),tables=new PageTables(f.engine,f.cpu),owner={paused:true,open:false};
-  assert.equal(tables.descriptorReuse,false);
+  assert.equal(tables.descriptorReuse,true);
+  tables.configureDescriptorReuse(false,owner);
+  const initialMisses=tables.descriptorReuseMisses,initialHits=tables.descriptorReuseHits;
   for(const invalid of [undefined,{paused:false,open:false},{paused:true,open:true}])
     assert.throws(()=>tables.configureDescriptorReuse(true,invalid),/paused/);
   assert.equal(tables.configureDescriptorReuse(true,owner),true);
@@ -146,11 +149,12 @@ test('descriptor reuse compares the whole fresh record and retains journal, malf
     if(operation==='component_cpu_view'){views++;mutate?.(this.resultView(128));}return result;};
   tables.refresh();tables.refresh();
   assert.equal(views,2,'cache hits still request the native descriptor');
-  assert.equal(tables.descriptorReuseMisses,1);assert.equal(tables.descriptorReuseHits,1);
+  assert.equal(tables.descriptorReuseMisses,initialMisses+1);assert.equal(tables.descriptorReuseHits,initialHits+1);
   assert.notEqual(tables.descriptor(),tables.descriptor(),'public descriptor reads remain fresh owned objects');
-  assert.equal(tables.descriptorReuseHits,1);
+  assert.equal(tables.descriptorReuseHits,initialHits+1);
+  f.engine.resultView=Engine.prototype.resultView;
   mutate=view=>view.setUint32(60,1,true);tables.refresh();
-  assert.equal(tables.descriptorReuseMisses,2,'even an otherwise unused word must prevent reuse');
+  assert.equal(tables.descriptorReuseMisses,initialMisses+2,'even an otherwise unused word must prevent reuse');
   mutate=view=>view.setUint32(0,0,true);
   assert.throws(()=>tables.refresh(),/descriptor/);
   mutate=null;
@@ -171,8 +175,8 @@ test('descriptor reuse adopts only validated native publication stamps and still
   const dirty=page=>{f.data.setUint32(tables.pte(page),f.data.getUint32(tables.pte(page),true)|64,true);
     f.data.setUint32(DIRECTORY,f.data.getUint32(DIRECTORY,true)|32,true);};
   dirty(DATA);assert.equal(tables.publishDirty(),1);
-  const misses=tables.descriptorReuseMisses;tables.refresh();
-  assert.equal(tables.descriptorReuseMisses,misses);assert.equal(tables.descriptorReuseHits,1);
+  const misses=tables.descriptorReuseMisses,hits=tables.descriptorReuseHits;tables.refresh();
+  assert.equal(tables.descriptorReuseMisses,misses);assert.equal(tables.descriptorReuseHits,hits+1);
   assert.equal(tables.descriptor().transaction,f.info.transaction);
   const generated={id:'descriptor-guest-code'};f.compiled.set(CODE,generated);
   dirty(CODE);assert.equal(tables.publishDirty(),1);tables.refresh();
