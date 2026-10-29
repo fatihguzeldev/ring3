@@ -119,6 +119,14 @@ impl EngineInstance {
         Ok(batch)
     }
     pub fn d3d8_batch_info(&self, epoch: u64) -> Result<Option<(BatchId, usize)>, HostError> {
+        Ok(self
+            .d3d8_batch_bytes(epoch)?
+            .map(|(id, bytes)| (id, bytes.len())))
+    }
+    pub(in crate::process) fn d3d8_batch_bytes(
+        &self,
+        epoch: u64,
+    ) -> Result<Option<(BatchId, &[u8])>, HostError> {
         self.check_media_output_session()?;
         Ok(self
             .d3d8
@@ -127,8 +135,7 @@ impl EngineInstance {
             .device_by_epoch(epoch)
             .map_err(HostError::D3D8)?
             .queue()
-            .peek()
-            .map(|(id, bytes)| (id, bytes.len())))
+            .peek())
     }
     pub fn d3d8_copy_batch(
         &self,

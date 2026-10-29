@@ -35,46 +35,34 @@ pub(crate) fn d3d8_seal_batch(low: u32, high: u32) -> u32 {
     mutate(|instance| {
         let epoch = wide(low, high);
         let batch = instance.d3d8_seal_batch(epoch)?;
-        let bytes = if batch.is_some() {
-            instance
-                .d3d8_batch_info(epoch)?
-                .map_or(0, |(_, bytes)| bytes)
+        let values = if batch.is_some() {
+            batch_values(instance, epoch)?
         } else {
-            0
+            [0; 5]
         };
-        record(
-            instance,
-            MediaRecordKind::D3D8Batch,
-            epoch,
-            [
-                batch.map_or(0, |batch| batch.sequence),
-                bytes as u64,
-                0,
-                0,
-                0,
-            ],
-        );
+        record(instance, MediaRecordKind::D3D8Batch, epoch, values);
         Ok(())
     })
 }
 pub(crate) fn d3d8_batch_info(low: u32, high: u32) -> u32 {
     mutate(|instance| {
         let epoch = wide(low, high);
-        let batch = instance.d3d8_batch_info(epoch)?;
-        record(
-            instance,
-            MediaRecordKind::D3D8Batch,
-            epoch,
-            [
-                batch.map_or(0, |(batch, _)| batch.sequence),
-                batch.map_or(0, |(_, bytes)| bytes as u64),
-                0,
-                0,
-                0,
-            ],
-        );
+        let values = batch_values(instance, epoch)?;
+        record(instance, MediaRecordKind::D3D8Batch, epoch, values);
         Ok(())
     })
+}
+fn batch_values(instance: &EngineInstance, epoch: u64) -> Result<[u64; 5], HostError> {
+    Ok(instance
+        .d3d8_batch_bytes(epoch)?
+        .map_or([0; 5], |(id, bytes)| {
+            // the sealed bytes are borrowed until the next engine call or acknowledgement.
+            #[cfg(target_arch = "wasm32")]
+            let borrowed = [u64::from(bytes.as_ptr() as u32), 1];
+            #[cfg(not(target_arch = "wasm32"))]
+            let borrowed = [0, 0];
+            [id.sequence, bytes.len() as u64, borrowed[0], borrowed[1], 0]
+        }))
 }
 pub(crate) fn d3d8_read_batch(
     low: u32,

@@ -15,6 +15,8 @@ pub enum MediaRecordKind {
     InputState = 9,
     InputRelative = 11,
     D3D8Device = 12,
+    // values: sequence, length, wasm32 sealed-byte pointer, borrow capability (1), zero.
+    // capability 0 uses chunk reads; copy borrowed bytes before the next engine call/ACK.
     D3D8Batch = 13,
     WindowsWait = 14,
     WindowsGate = 15,

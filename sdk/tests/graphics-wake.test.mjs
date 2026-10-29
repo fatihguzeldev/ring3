@@ -52,10 +52,74 @@ function nativeQueueFixture(specifications) {
     take(length) {assert.equal(copied.length,length);return copied;},
   };
   const transport=new GraphicsTransport(engine,message=>messages.push(message));
-  return {transport,controller,calls,messages,devices,packet,
+  return {engine,transport,controller,calls,messages,devices,packet,
     acknowledge(){assert.ok(transport.pending);return transport.complete({...transport.pending});},
     fail(error){failure=error;}};
 }
+
+function borrowedBatchFixture({sealed=true,grow=false,pointer=8192n,capability=1n}={}) {
+  const f=nativeQueueFixture([{epoch:7,packets:[[3,sealed]]}]);
+  const bytes=Uint8Array.from({length:9001},(_,index)=>(index*17)&255);
+  f.devices[0].packets[0].bytes=bytes;
+  f.engine.memory=new WebAssembly.Memory({initial:1});
+  const previousBuffer=f.engine.memory.buffer,media=f.engine.media;
+  f.engine.media=function(operation,...args) {
+    const result=media(operation,...args);
+    if(operation!=='d3d8_device'&&result.values[0]) {
+      if(grow&&this.memory.buffer===previousBuffer)this.memory.grow(1);
+      if(pointer>0n&&pointer+BigInt(bytes.length)<=BigInt(this.memory.buffer.byteLength))
+        new Uint8Array(this.memory.buffer,Number(pointer),bytes.length).set(bytes);
+      result.values.push(pointer,capability);
+    }
+    return result;
+  };
+  return {...f,bytes,previousBuffer};
+}
+
+test('legacy sealed batches retain chunked byte parity without borrowed capability',async()=>{
+  const f=borrowedBatchFixture({capability:0n});
+  await f.transport.output();
+  assert.deepEqual(new Uint8Array(f.messages[0].packet),f.bytes);
+  assert.equal(f.calls.filter(([operation])=>operation==='d3d8_read_batch').length,3);
+});
+
+test('borrowed batch info and seal replies copy once into an owned transferable packet',async()=>{
+  for(const sealed of [true,false]) {
+    const f=borrowedBatchFixture({sealed}),t=f.transport;
+    if(!sealed)t.requestFlush();
+    await t.output();
+    const packet=new Uint8Array(f.messages[0].packet);
+    assert.deepEqual(packet,f.bytes);assert.notEqual(packet.buffer,f.engine.memory.buffer);
+    assert.equal(f.calls.some(([operation])=>operation==='d3d8_read_batch'),false);
+    assert.equal(t.status().borrowedBatchCopies,1);assert.equal(t.status().chunkedBatchReads,0);
+    new Uint8Array(f.engine.memory.buffer,8192,f.bytes.length).fill(0);
+    assert.deepEqual(packet,f.bytes,'retained packet must not alias the native queue');
+    assert.throws(()=>t.configureBorrowedBatches(false,{paused:true,open:false}),/drained|owner/);
+    assert.equal(f.acknowledge(),true);await t.output();
+    assert.equal(t.configureBorrowedBatches(false,{paused:true,open:false}),false);
+    f.devices[0].packets.push({...f.packet(4,true),bytes:f.bytes});
+    await t.output();
+    assert.equal(t.status().borrowedBatchCopies,1);assert.equal(t.status().chunkedBatchReads,3);
+    assert.equal(t.status().borrowedBatches,false);
+  }
+});
+
+test('known borrowed capability rejects invalid native spans without a chunk fallback',async()=>{
+  for(const pointer of [0n,65000n,0x100000000n]) {
+    const f=borrowedBatchFixture({pointer});
+    await assert.rejects(f.transport.output(),/borrowed|span|pointer/i);
+    assert.equal(f.messages.length,0);assert.equal(f.transport.pending,null);
+    assert.equal(f.calls.some(([operation])=>operation==='d3d8_read_batch'),false);
+  }
+});
+
+test('borrowed batches acquire the current memory buffer after native growth',async()=>{
+  const f=borrowedBatchFixture({grow:true,pointer:66000n});
+  await f.transport.output();
+  assert.equal(f.previousBuffer.byteLength,0);
+  assert.deepEqual(new Uint8Array(f.messages[0].packet),f.bytes);
+  assert.equal(f.calls.some(([operation])=>operation==='d3d8_read_batch'),false);
+});
 
 test('deferred sealing holds normal partial packets but always forwards native sealed fragments',async()=>{
   const f=nativeQueueFixture([{epoch:7,packets:[[1,false]]}]),t=f.transport;

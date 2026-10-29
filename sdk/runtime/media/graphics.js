@@ -15,6 +15,9 @@ export class GraphicsTransport {
     this.inventory = [];
     this.batches = new Map();
     this.deferredSealing = true;
+    this.borrowedBatches = true;
+    this.borrowedBatchCopies = 0;
+    this.chunkedBatchReads = 0;
     this.forceDemand = false;
     this.draining = null;
     this.failure = null;
@@ -29,6 +32,15 @@ export class GraphicsTransport {
     this.engine.signal?.throwIfAborted();
     if (this.failure) throw this.failure;
     this.deferredSealing = enabled;
+    return enabled;
+  }
+  configureBorrowedBatches(enabled, owner) {
+    if (typeof enabled !== "boolean" || owner?.paused !== true || owner?.open !== false ||
+        this.pending || this.draining || this.forceDemand)
+      throw new Error("borrowed batch changes require a drained closed paused owner");
+    this.engine.signal?.throwIfAborted();
+    if (this.failure) throw this.failure;
+    this.borrowedBatches = enabled;
     return enabled;
   }
   requestFlush() {
@@ -107,11 +119,23 @@ export class GraphicsTransport {
         if (!Number.isSafeInteger(size) || size < 64 || size > MAX_BATCH_BYTES)
           throw new Error("D3D batch exceeds playground transport budget");
         const bytes = new Uint8Array(size);
-        for (let at = 0; at < size; at += 4096) {
-          if (h.signal?.aborted) return;
-          const length = Math.min(4096, size - at);
-          h.ok("d3d8_read_batch", ...pair(device.epoch), ...pair(sequence), at, length);
-          bytes.set(h.take(length), at);
+        const borrowed = batch.values[3] ?? 0n;
+        if (this.borrowedBatches && borrowed !== 0n) {
+          const pointer = Number(batch.values[2]), buffer = h.memory?.buffer;
+          if (borrowed !== 1n || !Number.isSafeInteger(pointer) || pointer <= 0 ||
+              pointer > 0xffffffff || !buffer || pointer + size > buffer.byteLength)
+            throw new Error("invalid borrowed D3D batch span");
+          // copy the borrowed bytes before any engine call or await can invalidate them.
+          bytes.set(new Uint8Array(buffer, pointer, size));
+          this.borrowedBatchCopies++;
+        } else {
+          for (let at = 0; at < size; at += 4096) {
+            if (h.signal?.aborted) return;
+            const length = Math.min(4096, size - at);
+            h.ok("d3d8_read_batch", ...pair(device.epoch), ...pair(sequence), at, length);
+            this.chunkedBatchReads++;
+            bytes.set(h.take(length), at);
+          }
         }
         if (h.signal?.aborted) return;
         const requestId = this.nextRequest++;
@@ -191,6 +215,9 @@ export class GraphicsTransport {
   status() {
     return {
       deferredSealing: this.deferredSealing,
+      borrowedBatches: this.borrowedBatches,
+      borrowedBatchCopies: this.borrowedBatchCopies,
+      chunkedBatchReads: this.chunkedBatchReads,
       forceDemand: this.forceDemand,
       draining: !!this.draining,
       sealing: { ...this.sealing,
