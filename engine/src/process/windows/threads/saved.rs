@@ -51,6 +51,23 @@ pub(super) struct SavedThread32 {
     detection: Option<Box<[crate::process::cpu::events::detection::DetectionSlot32; 1]>>,
 }
 impl SavedThread32 {
+    #[cfg(feature = "external-cpu")]
+    pub(super) fn resumes_in(&self, start: u32, end: u32) -> bool {
+        let contains = |pc| start <= pc && pc < end;
+        self.callback.is_some()
+            || self.module_state.has_continuation()
+            || crate::abi::x86::decode_state(&self.arena[..crate::abi::x86::STATE_SIZE])
+                .map_or(true, |state| contains(state.eip))
+            || self
+                .pending
+                .as_ref()
+                .is_some_and(|pending| contains(pending.frame.state().eip))
+            || self
+                .event
+                .as_ref()
+                .is_some_and(|event| contains(event.state.eip))
+    }
+
     pub(super) fn d3d8_readback_owner(
         &self,
         id: crate::graphics::d3d8::commands::ReadbackId,

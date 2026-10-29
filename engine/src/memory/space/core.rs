@@ -494,7 +494,7 @@ mod external_tests {
         assert_eq!(word(96), pointer as usize as u32);
         assert_eq!(word(100), 2);
         assert_eq!(word(104), GUEST_PAGES as u32);
-        assert_eq!(word(108), 63);
+        assert_eq!(word(108), 127);
         assert_eq!(memory.permissions[2], Permissions::READ);
         assert_ne!(memory.mappings[1], 0);
         let epoch = memory.external_mapping_epoch;

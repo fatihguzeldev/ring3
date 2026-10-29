@@ -160,6 +160,20 @@ pub(crate) fn component_cpu_set_gate_mode(low: u32, high: u32, mode: u32) -> u32
     })
 }
 
+pub(crate) fn component_cpu_gate_mode(low: u32, high: u32) -> u32 {
+    access(low, high, true, |instance| {
+        let values = instance.external_cpu_gate_mode()?;
+        for (index, value) in values.into_iter().enumerate() {
+            crate::abi::header::write_u32(
+                instance.arena.as_mut().get_mut(),
+                TRANSFER_OFFSET + index * 4,
+                value,
+            );
+        }
+        Ok(())
+    })
+}
+
 pub(crate) fn component_cpu_try_complete_gate(low: u32, high: u32) -> u32 {
     let mut completed = false;
     let mut captured = false;

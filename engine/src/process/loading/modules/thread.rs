@@ -7,6 +7,11 @@ pub(in crate::process) struct ModuleThreadState32 {
     source: Option<super::source::PendingModuleLoad32>,
 }
 impl ModuleThreadState32 {
+    #[cfg(feature = "external-cpu")]
+    pub(in crate::process) fn has_continuation(&self) -> bool {
+        !self.operations.is_empty() || self.waiting_request.is_some() || self.source.is_some()
+    }
+
     pub(in crate::process) fn execution_pins(&self) -> impl Iterator<Item = u64> + '_ {
         super::callback::operation_execution_pins(&self.operations)
     }

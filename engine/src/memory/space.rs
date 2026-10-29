@@ -18,7 +18,7 @@ mod windows;
 pub(crate) use aliases::SharedPages;
 pub(crate) use core::{CoreMemoryView32, CoreWriteOutcome};
 #[cfg(feature = "external-cpu")]
-pub(crate) use external::ExternalCodePatch;
+pub(crate) use external::{ExternalCodePatch, ExternalCodeWrite};
 pub(crate) use guard::GuardPage32;
 pub(crate) use mapping::PageInitialization;
 pub(crate) use windows::PrivatePageChange32;

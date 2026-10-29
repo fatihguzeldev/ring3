@@ -9,6 +9,14 @@ pub(crate) struct ExternalCodePatch {
     pub(crate) content: u64,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct ExternalCodeWrite {
+    pub(crate) patch: ExternalCodePatch,
+    pub(crate) before: [u8; 5],
+    pub(crate) after: [u8; 5],
+    pub(crate) length: usize,
+}
+
 pub(super) struct MappingChanges {
     pub(super) pages: Vec<u32>,
     bits: Box<[u64]>,
@@ -43,15 +51,18 @@ impl MappingChanges {
 }
 
 impl AddressSpace {
-    pub(crate) fn external_code_patch(
+    pub(crate) fn external_code_patch<const N: usize>(
         &self,
         address: GuestAddress,
-        expected: [u8; 2],
+        expected: [u8; N],
     ) -> Result<ExternalCodePatch, MemoryError> {
+        if !matches!(N, 2 | 5) {
+            return Err(MemoryError::InvalidRange);
+        }
         let page = address.0 as usize / PAGE_SIZE as usize;
         let within = address.0 as usize % PAGE_SIZE as usize;
         let mapping = self.mappings[page];
-        if within > PAGE_SIZE as usize - 2
+        if within > PAGE_SIZE as usize - N
             || mapping == 0
             || !self.permissions[page].allows(Access::Execute)
             || self
@@ -63,7 +74,7 @@ impl AddressSpace {
         }
         let slot = mapping as usize - 1;
         let offset = slot * PAGE_SIZE as usize + within;
-        if self.references[slot] != 1 || self.backing[offset..offset + 2] != expected {
+        if self.references[slot] != 1 || self.backing[offset..offset + N] != expected {
             return Err(MemoryError::InvalidRange);
         }
         Ok(ExternalCodePatch {
@@ -74,10 +85,10 @@ impl AddressSpace {
         })
     }
 
-    pub(crate) fn external_code_patch_matches(
+    pub(crate) fn external_code_patch_matches<const N: usize>(
         &self,
         patch: &ExternalCodePatch,
-        expected: [u8; 2],
+        expected: [u8; N],
     ) -> bool {
         self.external_code_patch(patch.address, expected).as_ref() == Ok(patch)
     }
@@ -106,6 +117,40 @@ impl AddressSpace {
                 + patch.address.0 as usize % PAGE_SIZE as usize;
             self.backing[offset..offset + 2].copy_from_slice(&replacement);
             self.versions[patch.slot as usize].content = version;
+        }
+        self.code_validation_version = version;
+        self.code_source_version = version;
+        self.external_executable_epoch = version;
+        Ok(version)
+    }
+
+    pub(crate) fn external_patch_code_writes(
+        &mut self,
+        writes: &[ExternalCodeWrite],
+    ) -> Result<u64, MemoryError> {
+        let mut end = 0u64;
+        for write in writes {
+            let matches = match write.length {
+                2 => self
+                    .external_code_patch_matches(&write.patch, [write.before[0], write.before[1]]),
+                5 => self.external_code_patch_matches(&write.patch, write.before),
+                _ => false,
+            };
+            if u64::from(write.patch.address.0) < end || !matches {
+                return Err(MemoryError::InvalidRange);
+            }
+            end = u64::from(write.patch.address.0) + write.length as u64;
+        }
+        if writes.is_empty() {
+            return Ok(self.version);
+        }
+        let version = self.advance_version()?;
+        for write in writes {
+            let offset = write.patch.slot as usize * PAGE_SIZE as usize
+                + write.patch.address.0 as usize % PAGE_SIZE as usize;
+            self.backing[offset..offset + write.length]
+                .copy_from_slice(&write.after[..write.length]);
+            self.versions[write.patch.slot as usize].content = version;
         }
         self.code_validation_version = version;
         self.code_source_version = version;
@@ -222,14 +267,14 @@ impl AddressSpace {
         ] {
             bytes[offset..offset + 8].copy_from_slice(&value.to_le_bytes());
         }
-        // collector, epochs, gate flags and optional global RX PTEs are available before attach.
-        bytes[108..112].copy_from_slice(&62u32.to_le_bytes());
+        // collector, epochs, gate flags, global RX PTEs and guest RET support precede attach.
+        bytes[108..112].copy_from_slice(&126u32.to_le_bytes());
         if let Some(changes) = self.external_mapping_changes.as_ref() {
             for (offset, value) in [
                 (96, changes.pages.as_ptr() as u32),
                 (100, changes.pages.len() as u32),
                 (104, GUEST_PAGES as u32),
-                (108, 63),
+                (108, 127),
             ] {
                 bytes[offset..offset + 4].copy_from_slice(&value.to_le_bytes());
             }

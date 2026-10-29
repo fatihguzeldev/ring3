@@ -14,6 +14,29 @@ pub(super) struct ThreadContextOverride32 {
     state: ContextState32,
     depth: usize,
 }
+
+#[cfg(feature = "external-cpu")]
+impl ThreadRuntime32 {
+    pub(in crate::process) fn resumes_in(&self, start: u32, end: u32) -> bool {
+        self.threads
+            .iter()
+            .filter(|thread| thread.state != ThreadState32::Terminated)
+            .any(|thread| {
+                (thread.id != self.current
+                    && thread
+                        .saved
+                        .as_ref()
+                        .is_some_and(|saved| saved.resumes_in(start, end)))
+                    || thread
+                        .active_invocations
+                        .iter()
+                        .any(|invocation| invocation.saved.resumes_in(start, end))
+                    || thread.context_override.is_some_and(|context| {
+                        start <= context.state.state.eip && context.state.state.eip < end
+                    })
+            })
+    }
+}
 fn invalid() -> HostError {
     HostError::Thread(ThreadError32::InvalidParameter)
 }

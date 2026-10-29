@@ -13,6 +13,7 @@ export_process_calls! {
     component_cpu_dirty(key_low: u32, key_high: u32, count: u32);
     component_cpu_gate(key_low: u32, key_high: u32, pc: u32);
     component_cpu_set_gate_mode(key_low: u32, key_high: u32, mode: u32);
+    component_cpu_gate_mode(key_low: u32, key_high: u32);
     component_cpu_try_complete_gate(key_low: u32, key_high: u32);
     component_cpu_try_inline_gate(key_low: u32, key_high: u32, pc: u32);
     component_cpu_try_direct_gate(key_low: u32, key_high: u32, pc: u32, esp: u32, eax: u32);
