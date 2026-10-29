@@ -14,7 +14,7 @@ export class GraphicsTransport {
     this.selectedBatch = null;
     this.inventory = [];
     this.batches = new Map();
-    this.deferredSealing = false;
+    this.deferredSealing = true;
     this.forceDemand = false;
     this.draining = null;
     this.failure = null;

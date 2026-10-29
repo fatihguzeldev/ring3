@@ -59,10 +59,10 @@ function nativeQueueFixture(specifications) {
 
 test('deferred sealing holds normal partial packets but always forwards native sealed fragments',async()=>{
   const f=nativeQueueFixture([{epoch:7,packets:[[1,false]]}]),t=f.transport;
-  const initial=t.deferredSealing;t.deferredSealing=true;
+  const initial=t.deferredSealing;
   await t.output();assert.equal(f.messages.length,0);
   assert.equal(f.calls.some(([operation])=>operation==='d3d8_seal_batch'),false);
-  assert.equal(initial,false);
+  assert.equal(initial,true);
   f.devices[0].packets[0].sealed=true;await t.output();
   assert.equal(f.messages.length,1);assert.equal(t.pending.epoch,7n);
   assert.deepEqual([...new Uint8Array(f.messages[0].packet)],Array(64).fill(1));
@@ -79,7 +79,7 @@ test('deferred sealing holds normal partial packets but always forwards native s
 test('sticky flush visits multiple devices fairly and retires queues without losing later demand',async()=>{
   const f=nativeQueueFixture([{epoch:7,packets:[[1,false]]},{epoch:8,packets:[[1,false]]},
     {epoch:9,retired:true,packets:[[1,false]]}]),t=f.transport;
-  t.deferredSealing=true;await t.output();assert.equal(t.pending.epoch,9n);
+  await t.output();assert.equal(t.pending.epoch,9n);
   assert.deepEqual(f.calls.filter(([operation])=>operation==='d3d8_seal_batch').map(([,low])=>low),[9]);
   t.requestFlush();f.acknowledge();
   for(const epoch of [7n,8n]) {
@@ -95,7 +95,7 @@ test('sticky flush visits multiple devices fairly and retires queues without los
 
 test('forced native drain advances an ACK chain while guest execution stays paused', {timeout:1000},async()=>{
   const f=nativeQueueFixture([{epoch:7,packets:[[1,false],[2,true]]},{epoch:8,packets:[[1,false]]}]),t=f.transport;
-  t.deferredSealing=true;let drained=false;
+  let drained=false;
   const boundary=t.drain(),draining=boundary.then(()=>{drained=true;});
   assert.equal(t.drain(),boundary,'pause and healthy stop share one native tail boundary');
   assert.throws(()=>t.configureDeferredSealing(false,{paused:true,open:false}),/drained|owner/);
@@ -111,13 +111,13 @@ test('forced native drain advances an ACK chain while guest execution stays paus
 
 test('native drain rejects abort and output failure without publishing a false clean boundary', {timeout:1000},async testContext=>{
   const f=nativeQueueFixture([{epoch:7,packets:[[1,false]]}]),t=f.transport;
-  t.deferredSealing=true;const stopped=new Error('owner stopped');
+  const stopped=new Error('owner stopped');
   const draining=t.drain(),rejected=assert.rejects(draining,error=>error===stopped);
   await new Promise(resolve=>setImmediate(resolve));assert.ok(t.pending);
   const pending={...t.pending};f.controller.abort(stopped);await rejected;
   assert.deepEqual(t.pending,pending);assert.equal(f.calls.some(([operation])=>operation==='d3d8_acknowledge_batch'),false);
   const broken=nativeQueueFixture([{epoch:7,packets:[[1,false]]}]),failure=new Error('native inventory failed');
-  broken.transport.deferredSealing=true;broken.fail(failure);
+  broken.fail(failure);
   await assert.rejects(broken.transport.drain(),error=>error===failure);
   assert.equal(broken.messages.length,0);assert.equal(broken.devices[0].packets[0].sealed,false);
   const wrong=nativeQueueFixture([{epoch:7,packets:[[1,false]]}]),bad=wrong.transport.drain();
