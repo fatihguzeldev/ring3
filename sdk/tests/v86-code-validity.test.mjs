@@ -7,7 +7,7 @@ import {Engine} from '../runtime/engine.js';
 
 const PAGE=4096, CODE=0x100, DATA=0x200;
 
-function world({journal=false,nativeDirty=false,nativeDirtyEpoch=false,dirtyGateFlags=false,preciseExecutable=false,globalCode=false,dirtyVirtualPages=false}={}) {
+function world({journal=false,nativeDirty=false,nativeDirtyEpoch=false,dirtyGateFlags=false,preciseExecutable=false,globalCode=false,dirtyVirtualPages=false,trustedExport=false}={}) {
   const memory=new WebAssembly.Memory({initial:512}),data=new DataView(memory.buffer);
   const capabilities=(nativeDirty?2:0)|(nativeDirtyEpoch?4:0)|(dirtyGateFlags?8:0)|(preciseExecutable?16:0)|(globalCode?32:0)|(dirtyVirtualPages?128:0);
   const info={backing:16*1024*1024,length:16*PAGE,maps:8*1024*1024,permissions:12*1024*1024,
@@ -50,7 +50,7 @@ function world({journal=false,nativeDirty=false,nativeDirtyEpoch=false,dirtyGate
     clear_tlb(){flushes.push('non-global');this.nonGlobalClears++;}};
   cpu.cpl=new Uint8Array(memory.buffer,612,1);cpu.cpl[0]=3;cpu.invalidatedPages=[];
   cpu.wm={exports:{instr16_0F01_7_mem(address){assert.equal(cpu.cpl[0],0);cpu.invalidatedPages.push(address>>>0);if(cpu.invalidateFailure)throw cpu.invalidateFailure;}}};
-  const engine={memory,base:0,
+  const engine={memory,base:0,api:trustedExport?{component_cpu_collect_dirty_trusted(){}}:{},
     ok(operation,...args) {
       if(operation==='component_cpu_attach') {tracking=journal;info.mappingChangeFlags=(journal?1:0)|capabilities;return;}
       if(operation==='component_cpu_release') {tracking=false;info.mappingChangeFlags=capabilities;pending.clear();info.mappingChangeCount=0;return;}
@@ -71,7 +71,7 @@ function world({journal=false,nativeDirty=false,nativeDirtyEpoch=false,dirtyGate
         }
         return;
       }
-      if(operation==='component_cpu_collect_dirty') {
+      if(operation==='component_cpu_collect_dirty' || operation==='component_cpu_collect_dirty_trusted') {
         const epoch=BigInt(args[2]>>>0)|(BigInt(args[3]>>>0)<<32n),directory=args[4];
         if(epoch!==info.mapping || pending.size || directory!==DIRECTORY)throw new Error('invalid native dirty source');
         const groups=new Map(),slots=new Set(),accessed=[],dirtyPtes=[];
@@ -113,7 +113,7 @@ function world({journal=false,nativeDirty=false,nativeDirtyEpoch=false,dirtyGate
           data.setBigUint64(at+offset,value,true);
         if(nativeDirtyEpoch)data.setBigUint64(at+80,beforeCode,true);
         if(dirtyVirtualPages){const pointer=slotsPtr+PAGE;new Uint32Array(memory.buffer,pointer,dirtyPtes.length).set(dirtyPtes.map(([at])=>at-DIRECTORY));data.setUint32(at+88,pointer,true);data.setUint32(at+92,dirtyPtes.length,true);}
-        nativeCollections.push({epoch,directory,slots:values});hooks.collectResult?.(data,at);
+        nativeCollections.push({epoch,directory,slots:values,operation});hooks.collectResult?.(data,at);
         return;
       }
       if(operation!=='component_cpu_view')return;
@@ -674,4 +674,31 @@ test('changed precise executable epoch still validates executable identity and p
   f.content(0,f.info.transaction+1n);f.info.executableEpoch++;
   assert.equal(watch.refresh(f.info,f.rows.values()).reason,'host-code-write',
     'a precise epoch change cannot be skipped even when broad markers are unchanged');
+});
+
+test('trusted clean PTE collection is explicit and retains native read/write rearming',()=>{
+  const f=world({journal:true,nativeDirty:true,nativeDirtyEpoch:true,dirtyVirtualPages:true,trustedExport:true}),t=new PageTables(f.engine,f.cpu),owner={paused:true,open:false};
+  assert.equal(t.trustedCleanPtes,false);assert.equal(t.trustedCleanPtesSupported,true);
+  for(const invalid of [undefined,{paused:false,open:false},{paused:true,open:true}])assert.throws(()=>t.configureTrustedCleanPtes(true,invalid),/paused/);
+  t.configureTrustedCleanPtes(true,owner);assert.equal(f.nativeCollections.at(-1).operation,'component_cpu_collect_dirty');
+  for(const dirty of [false,true,false,true]) {
+    f.data.setUint32(DIRECTORY,f.data.getUint32(DIRECTORY,true)|32,true);
+    if(dirty)f.data.setUint32(t.pte(DATA),f.data.getUint32(t.pte(DATA),true)|64,true);
+    const before=f.info.transaction,clears=f.cpu.tlbClears;
+    assert.equal(t.publishDirty(),Number(dirty));assert.equal(f.nativeCollections.at(-1).operation,'component_cpu_collect_dirty_trusted');
+    assert.equal(f.cpu.tlbClears,clears+1);assert.equal(f.info.transaction>before,dirty);
+  }
+  assert.throws(()=>t.configureDirty(false,owner),/requires/);
+  t.configureTrustedCleanPtes(false,owner);assert.equal(f.nativeCollections.at(-1).operation,'component_cpu_collect_dirty_trusted');
+  t.publishDirty();assert.equal(f.nativeCollections.at(-1).operation,'component_cpu_collect_dirty');
+});
+
+test('trusted clean PTE capability rejects old hosts and malformed output retains safety flush',()=>{
+  const owner={paused:true,open:false},old=world({journal:true,nativeDirty:true}),legacy=new PageTables(old.engine,old.cpu);
+  assert.throws(()=>legacy.configureTrustedCleanPtes(true,owner),/unsupported/);assert.equal(old.nativeCollections.length,0);
+  const f=world({journal:true,nativeDirty:true,nativeDirtyEpoch:true,dirtyVirtualPages:true,trustedExport:true}),t=new PageTables(f.engine,f.cpu);
+  t.configureTrustedCleanPtes(true,owner);f.data.setUint32(DIRECTORY,f.data.getUint32(DIRECTORY,true)|32,true);
+  f.hooks.collectResult=(d,at)=>d.setUint32(at,0,true);const clears=f.cpu.tlbClears;
+  assert.throws(()=>t.publishDirty(),/invalid.*header/);assert.equal(f.cpu.tlbClears,clears+1);
+  assert.equal(f.nativeCollections.at(-1).operation,'component_cpu_collect_dirty_trusted');
 });

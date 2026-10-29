@@ -11,10 +11,11 @@ import {image as moduleImage} from '../../../loader/modules/wasm/fixtures/runtim
 
 const [enginePath, reportPath, permissionText = '1', portText = ''] = process.argv.slice(2);
 assert(enginePath && reportPath, 'usage: v86.mjs imported-engine.wasm fresh-report.json');
-assert(['', 'port', 'inline', 'direct', 'direct-bindings', 'direct-state-inputs', 'wasm-ports', 'guest-ret', 'global', 'overlap', 'simd', 'targeted-dirty', 'targeted-mappings', 'budget-dirty', 'work-budget', 'relaxed-fpu', 'relaxed-fpu-boot'].includes(portText));
+assert(['', 'port', 'inline', 'direct', 'direct-bindings', 'direct-state-inputs', 'wasm-ports', 'guest-ret', 'global', 'overlap', 'simd', 'targeted-dirty', 'trusted-clean-ptes', 'targeted-mappings', 'budget-dirty', 'work-budget', 'relaxed-fpu', 'relaxed-fpu-boot'].includes(portText));
 const relaxedBoot=portText==='relaxed-fpu-boot';
 const wasmRelaxed=portText==='wasm-ports';
-const targetedMode=portText==='targeted-dirty';
+const trustedMode=portText==='trusted-clean-ptes';
+const targetedMode=portText==='targeted-dirty'||trustedMode;
 const deniedPermission = Number(permissionText);
 assert([0,1].includes(deniedPermission));
 const hash = bytes => createHash('sha256').update(bytes).digest('hex');
@@ -97,6 +98,11 @@ try {
   if(targetedMode) {
     assert.equal(cache.tables.targetedDirtySupported,true);
     cache.tables.configureTargetedDirty(true,{paused:true,open:cache.open});
+  }
+  if(trustedMode) {
+    assert.equal(typeof engine.api.component_cpu_collect_dirty_trusted,'function');
+    assert.equal(cache.configureTrustedCleanPtes(true,{paused:true,open:cache.open}),true);
+    report.trustedCleanPtes={scope:'trusted host maintains private page-table identity; guest A/D, dirty aliases and TLB rearm remain exact',aliasCollections:0};
   }
   let initRun;
   for (let count = 0; count < 100; count++) {
@@ -250,9 +256,11 @@ try {
   for(const [selectiveCode,incrementalSync,nativeDirty] of [[false,false,false],[true,false,false],
       [false,true,false],[true,true,false],[false,true,true],[true,true,true]]) {
     assert.equal(cache.imported,false,'the preceding actual CPU batch already published its writes');
+    if(trustedMode)cache.configureTrustedCleanPtes(false,{paused:true,open:cache.open});
     cache.tables.refresh();
     cache.tables.configure({selectiveCode,incrementalSync});
     cache.tables.configureDirty(nativeDirty,{paused:true,open:cache.open});
+    if(trustedMode)cache.configureTrustedCleanPtes(incrementalSync&&nativeDirty,{paused:true,open:cache.open});
     const observations=[],original=cache.tables.publishDirty;
     const order=[],clear=cache.cpu.full_clear_tlb,main=cache.cpu.main_loop;
     cache.cpu.full_clear_tlb=function(...args){order.push('flush');return clear.apply(this,args);};
@@ -292,6 +300,7 @@ try {
       }
       assert.equal(read(dataAddress),0x76543210);
       report.memoryPolicies.push({selectiveCode,incrementalSync,nativeDirty,observations,order});
+      if(trustedMode)report.memoryPolicies.at(-1).trustedCleanPtes=cache.tables.trustedCleanPtes;
     } finally {cache.tables.publishDirty=original;cache.cpu.full_clear_tlb=clear;cache.cpu.main_loop=main;}
   }
   stage='host code write invalidates actual finalized v86 code';
@@ -346,8 +355,9 @@ try {
       fp:Buffer.concat([Buffer.from(v.bytes.subarray(816,1128)),Buffer.from(v.bytes.subarray(1152,1280))])};};
     const beforePages=cache.tables.targetedDirtyPages,original=engine.ok,receipts=[];
     engine.ok=function(operation,...args){const value=original.call(this,operation,...args);
-      if(operation==='component_cpu_collect_dirty') {
+      if(operation==='component_cpu_collect_dirty'||operation==='component_cpu_collect_dirty_trusted') {
         const d=this.resultView(96);assert.equal(d.getUint32(8,true),96);
+        if(trustedMode){assert.equal(operation,'component_cpu_collect_dirty_trusted');report.trustedCleanPtes.aliasCollections++;}
         receipts.push({physicalSlots:d.getUint32(20,true),resetAccess:d.getUint32(24,true),
           pages:Array.from(new Uint32Array(memory.buffer,d.getUint32(88,true),d.getUint32(92,true)),offset=>(offset-4096)/4)});
       }return value;};
@@ -368,6 +378,11 @@ try {
       assert.equal(cache.tables.targetedDirtyPages-beforePages,6);assert.equal(read(a),0x22222222);assert.equal(read(b),0x22222222);
       report.targetedDirty.pages=cache.tables.targetedDirtyPages-beforePages;report.targetedDirty.complete=true;save();
     } finally {engine.ok=original;cache.configurePortGates(false,{paused:true,open:cache.open});}
+  }
+  if(trustedMode) {
+    assert.equal(report.trustedCleanPtes.aliasCollections,5);
+    assert.equal(cache.configureTrustedCleanPtes(false,{paused:true,open:cache.open}),false);
+    report.trustedCleanPtes.restored=true;
   }
   if(portText==='overlap') {
     stage='graphics overlap ABI mode handoff';cache.tables.refresh();

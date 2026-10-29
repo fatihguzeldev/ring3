@@ -119,6 +119,7 @@ pub(crate) fn component_cpu_collect_dirty(
     epoch_low: u32,
     epoch_high: u32,
     mut tables: ExternalMemory,
+    trusted_clean: bool,
 ) -> u32 {
     access(low, high, true, |instance| {
         let epoch = u64::from(epoch_low) | u64::from(epoch_high) << 32;
@@ -126,7 +127,7 @@ pub(crate) fn component_cpu_collect_dirty(
             .memory
             .as_mut()
             .unwrap()
-            .collect_external_dirty_tables(epoch, &mut tables)
+            .collect_external_dirty_tables(epoch, &mut tables, trusted_clean)
             .map_err(HostError::Memory)?;
         instance.arena.as_mut().get_mut()[TRANSFER_OFFSET..TRANSFER_OFFSET + bytes.len()]
             .copy_from_slice(&bytes);

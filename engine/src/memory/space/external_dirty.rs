@@ -144,7 +144,10 @@ impl Collector {
         }
     }
 
-    fn observe(&mut self, tables: &[u8]) -> Result<Observation, MemoryError> {
+    fn observe<const TRUSTED_CLEAN: bool>(
+        &mut self,
+        tables: &[u8],
+    ) -> Result<Observation, MemoryError> {
         for &slot in &self.slots {
             self.seen_slots[slot as usize / 32] &= !(1u32 << (slot % 32));
         }
@@ -178,7 +181,10 @@ impl Collector {
                         let within = pages.trailing_zeros() as usize;
                         let page = index * 32 + within;
                         #[cfg(all(target_arch = "wasm32", target_feature = "simd128"))]
-                        if within % 4 == 0 && pages & (15u32 << within) == 15u32 << within {
+                        if !TRUSTED_CLEAN
+                            && within % 4 == 0
+                            && pages & (15u32 << within) == 15u32 << within
+                        {
                             if page < PRIVATE_PAGE + 8 && page + 4 > PRIVATE_PAGE {
                                 return Err(MemoryError::InvalidRange);
                             }
@@ -208,9 +214,12 @@ impl Collector {
                         if (PRIVATE_PAGE..PRIVATE_PAGE + 8).contains(&page) {
                             return Err(MemoryError::InvalidRange);
                         }
-                        let expected = self.expected[page];
                         let offset = 4096 + page * 4;
                         let pte = word(tables, offset);
+                        if TRUSTED_CLEAN && pte & 64 == 0 {
+                            continue;
+                        }
+                        let expected = self.expected[page];
                         if pte & !(96 | (expected & 256)) != expected & !256 {
                             return Err(MemoryError::InvalidRange);
                         }
@@ -259,17 +268,28 @@ impl AddressSpace {
         &mut self,
         epoch: u64,
         tables: &mut crate::abi::external_memory::ExternalMemory,
+        trusted_clean: bool,
     ) -> Result<[u8; 96], MemoryError> {
         if !tables.is_cpu_page_tables_for(self.backing.as_ptr() as usize) {
             return Err(MemoryError::InvalidRange);
         }
-        self.collect_external_dirty(epoch, tables)
+        self.collect_external_dirty_mode(epoch, tables, trusted_clean)
     }
 
+    #[cfg(test)]
     pub(crate) fn collect_external_dirty(
         &mut self,
         epoch: u64,
         tables: &mut [u8],
+    ) -> Result<[u8; 96], MemoryError> {
+        self.collect_external_dirty_mode(epoch, tables, false)
+    }
+
+    fn collect_external_dirty_mode(
+        &mut self,
+        epoch: u64,
+        tables: &mut [u8],
+        trusted_clean: bool,
     ) -> Result<[u8; 96], MemoryError> {
         if tables.len() != TABLE_BYTES
             || epoch != self.external_mapping_epoch
@@ -285,7 +305,11 @@ impl AddressSpace {
             None => Collector::new(self)?,
         };
         let result = (|| {
-            let observation = collector.observe(tables)?;
+            let observation = if trusted_clean {
+                collector.observe::<true>(tables)?
+            } else {
+                collector.observe::<false>(tables)?
+            };
             let prepublication_code = self.code_validation_version;
             // publication validates every physical slot and the next version before
             // consuming any hardware dirty/accessed evidence.
@@ -745,6 +769,77 @@ mod tests {
             "legacy blanket-flush contract is unchanged"
         );
         assert_eq!(word(&readonly, 20), 0);
+    }
+
+    #[test]
+    fn external_dirty_collect_trusted_clean_retains_read_and_write_rearming() {
+        let mut memory = AddressSpace::new(2).unwrap();
+        memory
+            .map_zeroed(range(0x1000), Permissions::READ_WRITE)
+            .unwrap();
+        memory.map_zeroed(range(0x2000), Permissions::READ).unwrap();
+        track(&mut memory);
+        let mut bytes = tables(&memory);
+        for dirty in [false, true, false, true] {
+            access(&mut bytes, 1, dirty);
+            access(&mut bytes, 2, false);
+            let before = memory.transaction_version();
+            let result = memory
+                .collect_external_dirty_mode(memory.external_mapping_epoch, &mut bytes, true)
+                .unwrap();
+            assert_eq!(word(&result, 20), u32::from(dirty));
+            assert_eq!(word(&result, 24), 1);
+            assert_eq!(word(&result, 28), 1);
+            assert_eq!(word(&result, 32), 2);
+            assert_eq!(word(&result, 36), 1);
+            assert_eq!(word(&bytes, 0) & 32, 0);
+            assert_eq!(word(&bytes, pte(1)) & 64, 0);
+            assert_eq!(memory.transaction_version() > before, dirty);
+        }
+        access(&mut bytes, 2, false);
+        put(&mut bytes, pte(2), word(&tables(&memory), pte(2)) ^ 2);
+        assert_eq!(
+            memory.collect_external_dirty(memory.external_mapping_epoch, &mut bytes),
+            Err(MemoryError::InvalidRange)
+        );
+        let result = memory
+            .collect_external_dirty_mode(memory.external_mapping_epoch, &mut bytes, true)
+            .unwrap();
+        assert_eq!(word(&result, 20), 0);
+        assert_eq!(word(&result, 28), 1);
+    }
+
+    #[test]
+    fn external_dirty_collect_trusted_dirty_corruption_is_atomic_and_retryable() {
+        let mut memory = AddressSpace::new(2).unwrap();
+        for page in [1, 2] {
+            memory
+                .map_zeroed(range(page * 4096), Permissions::READ_WRITE)
+                .unwrap();
+        }
+        track(&mut memory);
+        let mut bytes = tables(&memory);
+        access(&mut bytes, 1, true);
+        access(&mut bytes, 2, true);
+        let original = word(&bytes, pte(2));
+        put(&mut bytes, pte(2), original ^ 4096);
+        let evidence = bytes.clone();
+        let version = memory.transaction_version();
+        assert_eq!(
+            memory.collect_external_dirty_mode(memory.external_mapping_epoch, &mut bytes, true),
+            Err(MemoryError::InvalidRange)
+        );
+        assert_eq!(bytes, evidence);
+        assert_eq!(memory.transaction_version(), version);
+        put(&mut bytes, pte(2), original);
+        let result = memory
+            .collect_external_dirty_mode(memory.external_mapping_epoch, &mut bytes, true)
+            .unwrap();
+        assert_eq!(word(&result, 20), 2);
+        assert_eq!(word(&result, 92), 2);
+        for page in [1, 2] {
+            assert_eq!(word(&bytes, pte(page)) & 64, 0);
+        }
     }
 
     #[test]

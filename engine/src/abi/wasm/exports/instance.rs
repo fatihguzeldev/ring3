@@ -52,11 +52,41 @@ pub extern "C" fn component_cpu_collect_dirty(
     epoch_high: u32,
     directory: u32,
 ) -> u32 {
+    collect_cpu_dirty(key_low, key_high, epoch_low, epoch_high, directory, false)
+}
+
+#[cfg(feature = "external-cpu")]
+#[allow(unsafe_code)]
+#[unsafe(export_name = "ring3_abi_v1_component_cpu_collect_dirty_trusted")]
+pub extern "C" fn component_cpu_collect_dirty_trusted(
+    key_low: u32,
+    key_high: u32,
+    epoch_low: u32,
+    epoch_high: u32,
+    directory: u32,
+) -> u32 {
+    collect_cpu_dirty(key_low, key_high, epoch_low, epoch_high, directory, true)
+}
+
+#[cfg(feature = "external-cpu")]
+fn collect_cpu_dirty(
+    key_low: u32,
+    key_high: u32,
+    epoch_low: u32,
+    epoch_high: u32,
+    directory: u32,
+    trusted_clean: bool,
+) -> u32 {
     let Some(tables) = crate::abi::external_memory::ExternalMemory::admit(directory, 4096 * 1025)
     else {
         return 7;
     };
     crate::process::wasm::component_cpu_collect_dirty(
-        key_low, key_high, epoch_low, epoch_high, tables,
+        key_low,
+        key_high,
+        epoch_low,
+        epoch_high,
+        tables,
+        trusted_clean,
     )
 }

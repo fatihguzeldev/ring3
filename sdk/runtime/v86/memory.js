@@ -30,6 +30,7 @@ export class PageTables {
     this.invalidateDirtyPage=cpu.wm?.exports?.instr16_0F01_7_mem;
     this.targetedDirtySupported=this.nativeDirtyVirtualSupported && this.nativeDirtyEpochSupported && typeof this.invalidateDirtyPage==='function' &&
       cpu.cpl?.length===1 && cpu.cpl.byteOffset===612 && cpu.cpl.buffer===engine.memory.buffer;
+    this.trustedCleanPtes=false;this.trustedCleanPtesSupported=this.nativeDirtyVirtualSupported && typeof engine.api?.component_cpu_collect_dirty_trusted==='function';
     this.nativeDirty=options.nativeDirty??this.nativeDirtySupported;
     if(typeof this.nativeDirty!=='boolean' || (this.nativeDirty && !this.nativeDirtySupported))
       throw new Error('unsupported v86 native dirty collector');
@@ -129,9 +130,18 @@ export class PageTables {
     d.setUint32(596,(d.getUint32(596,true)&~128)|(enabled?128:0),true);
     this.globalCode=enabled;this.cpu.full_clear_tlb();return enabled;
   }
+  configureTrustedCleanPtes(enabled,owner) {
+    if(owner?.paused!==true || owner?.open!==false || !this.ownsPin || typeof enabled!=='boolean')
+      throw new Error('v86 trusted PTE changes require a closed paused owner');
+    if(enabled && (!this.trustedCleanPtesSupported || !this.nativeDirty || !this.policy.incrementalSync))
+      throw new Error('native v86 trusted clean PTE collection is unsupported');
+    if(enabled===this.trustedCleanPtes)return enabled;
+    this.publishDirty();this.trustedCleanPtes=enabled;return enabled;
+  }
   configureDirty(nativeDirty,owner) {
     if(owner?.paused!==true || owner?.open!==false)
       throw new Error('v86 dirty collector changes require a closed paused owner');
+    if(this.trustedCleanPtes && !nativeDirty)throw new Error('trusted clean PTE collection requires the native collector');
     if(typeof nativeDirty!=='boolean' || (nativeDirty && !this.nativeDirtySupported))
       throw new Error('unsupported v86 native dirty collector');
     if(this.nativeDirty===nativeDirty)return nativeDirty;
@@ -139,6 +149,7 @@ export class PageTables {
     return nativeDirty;
   }
   configure(policy) {
+    if(this.trustedCleanPtes && !policy?.incrementalSync)throw new Error('trusted clean PTE collection requires incremental synchronization');
     if(typeof policy?.selectiveCode!=='boolean' || typeof policy?.incrementalSync!=='boolean')
       throw new Error('v86 memory policy requires two boolean switches');
     if(this.policy.selectiveCode===policy.selectiveCode && this.policy.incrementalSync===policy.incrementalSync)
@@ -297,7 +308,7 @@ export class PageTables {
   }
   publishDirtyNative() {
     const h=this.engine,epoch=this.mappingEpoch;
-    h.ok('component_cpu_collect_dirty',...KEY,Number(epoch&0xffffffffn),Number(epoch>>32n),this.ram+DIRECTORY);
+    h.ok(this.trustedCleanPtes?'component_cpu_collect_dirty_trusted':'component_cpu_collect_dirty',...KEY,Number(epoch&0xffffffffn),Number(epoch>>32n),this.ram+DIRECTORY);
     let flushed=false;
     try {
       const size=this.nativeDirtyVirtualSupported?96:this.nativeDirtyEpochSupported?88:80,d=h.resultView(size),buffer=h.memory.buffer;
