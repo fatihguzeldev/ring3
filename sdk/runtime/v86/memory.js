@@ -8,6 +8,7 @@ export class PageTables {
     this.engine=engine;this.cpu=cpu;this.ram=cpu.mem8.byteOffset;this.pages=[];
     this.ownsPin=false;
     this.mappingEpoch=null;this.codeVersion=null;this.identity=null;
+    this.descriptorReuse=false;this.descriptorReuseHits=0;this.descriptorReuseMisses=0;this.descriptorCache=null;
     this.policy={selectiveCode:options.selectiveCode??true,incrementalSync:options.incrementalSync??true};
     this.codeValidity=new CodeValidity(engine.memory);
     this.globalCode=false;
@@ -57,6 +58,12 @@ export class PageTables {
   pte(page) {return this.ram+TABLES+page*4;}
   flushDirtyTlb() {
     if(this.globalCode)this.cpu.clear_tlb();else this.cpu.full_clear_tlb();
+  }
+  configureDescriptorReuse(enabled,owner) {
+    if(owner?.paused!==true || owner?.open!==false || !this.ownsPin || typeof enabled!=='boolean')
+      throw new Error('v86 descriptor reuse changes require a closed paused owner');
+    if(enabled!==this.descriptorReuse)this.descriptorCache=null;
+    this.descriptorReuse=enabled;return enabled;
   }
   configureTargetedDirty(enabled,owner) {
     if(owner?.paused!==true || owner?.open!==false || !this.ownsPin || typeof enabled!=='boolean')
@@ -123,9 +130,20 @@ export class PageTables {
     this.codeValidity=new CodeValidity(this.engine.memory);this.refresh();
     return {...this.policy};
   }
-  descriptor() {
+  descriptor(reuse=false) {
     const h=this.engine;h.ok('component_cpu_view',...KEY);
     const d=h.resultView(128);
+    let source=null;
+    if(reuse) {
+      const cached=this.descriptorCache;
+      if(cached?.buffer===d.buffer && cached.base===d.byteOffset) {
+        source=cached.source;let same=true;
+        for(let index=0;index<32;index++)if(cached.words[index]!==
+            (source?source[index]:d.getUint32(index*4,true))){same=false;break;}
+        if(same){this.descriptorReuseHits++;this.capacity=cached.values.capacity;return cached.values;}
+      }
+      this.descriptorReuseMisses++;
+    }
     if(d.getUint32(0,true)!==0x56433352 || d.getUint32(8,true)!==128)
       throw new Error('invalid external CPU memory descriptor');
     const values={backing:d.getUint32(16,true),length:d.getUint32(20,true),maps:d.getUint32(24,true),
@@ -137,10 +155,16 @@ export class PageTables {
       mappingChangeCapacity:d.getUint32(104,true),mappingChangeFlags:d.getUint32(108,true)};
     if(values.mappingChangeFlags&16)values.executableEpoch=d.getBigUint64(112,true);
     this.capacity=values.capacity;
+    if(reuse) {
+      source??=d.byteOffset%4?null:new Uint32Array(d.buffer,d.byteOffset,32);
+      const words=new Uint32Array(32);
+      if(source)words.set(source);else for(let index=0;index<32;index++)words[index]=d.getUint32(index*4,true);
+      this.descriptorCache={buffer:d.buffer,base:d.byteOffset,source,words,values};
+    }
     return values;
   }
   refresh() {
-    const info=this.descriptor(),d=new DataView(this.engine.memory.buffer);
+    const info=this.descriptor(this.descriptorReuse),d=new DataView(this.engine.memory.buffer);
     this.lastMappingScanCount=0;this.lastMappingFullRebuild=false;
     if(this.identity!==null && this.identity!==info.identity)throw new Error('v86 backing identity changed');
     this.identity=info.identity;
@@ -266,6 +290,12 @@ export class PageTables {
       if(count) {
         if(this.policy.selectiveCode)this.codeValidity.acknowledgeGuestWrites(info,slots);
         this.codeVersion=info.code;
+      }
+      const cached=this.descriptorReuse&&this.descriptorCache;
+      if(cached?.buffer===buffer && cached.base===d.byteOffset && cached.values.identity===info.identity && cached.values.mapping===info.mapping) {
+        cached.words[18]=d.getUint32(48,true);cached.words[19]=d.getUint32(52,true);
+        cached.words[20]=d.getUint32(56,true);cached.words[21]=d.getUint32(60,true);
+        cached.values.transaction=info.transaction;cached.values.code=info.code;
       }
       return count;
     } catch(error) {

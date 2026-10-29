@@ -135,6 +135,57 @@ function world({journal=false,nativeDirty=false,nativeDirtyEpoch=false,dirtyGate
     pending,acks,ackAttempts,dirtyPublications,nativeCollections,requests,hooks,enqueue};
 }
 
+test('descriptor reuse compares the whole fresh record and retains journal, malformed and grow barriers',()=>{
+  const f=world({journal:true}),tables=new PageTables(f.engine,f.cpu),owner={paused:true,open:false};
+  assert.equal(tables.descriptorReuse,false);
+  for(const invalid of [undefined,{paused:false,open:false},{paused:true,open:true}])
+    assert.throws(()=>tables.configureDescriptorReuse(true,invalid),/paused/);
+  assert.equal(tables.configureDescriptorReuse(true,owner),true);
+  const original=f.engine.ok;let views=0,mutate=null;
+  f.engine.ok=function(operation,...args){const result=original.call(this,operation,...args);
+    if(operation==='component_cpu_view'){views++;mutate?.(this.resultView(128));}return result;};
+  tables.refresh();tables.refresh();
+  assert.equal(views,2,'cache hits still request the native descriptor');
+  assert.equal(tables.descriptorReuseMisses,1);assert.equal(tables.descriptorReuseHits,1);
+  assert.notEqual(tables.descriptor(),tables.descriptor(),'public descriptor reads remain fresh owned objects');
+  assert.equal(tables.descriptorReuseHits,1);
+  mutate=view=>view.setUint32(60,1,true);tables.refresh();
+  assert.equal(tables.descriptorReuseMisses,2,'even an otherwise unused word must prevent reuse');
+  mutate=view=>view.setUint32(0,0,true);
+  assert.throws(()=>tables.refresh(),/descriptor/);
+  mutate=null;
+  f.changeMapping(DATA+1,2,3);f.content(2,f.info.transaction);tables.refresh();
+  assert.equal(f.pending.size,0);assert.equal(tables.rowsByPage.get(DATA+1).slot,2);
+  const misses=tables.descriptorReuseMisses;tables.refresh();
+  assert.equal(tables.descriptorReuseMisses,misses+1,'cleared journal count must be observed after ACK');
+  tables.descriptor();const snapshot=new Uint8Array(f.memory.buffer,140,128).slice(),beforeGrow=tables.descriptorReuseMisses;
+  f.memory.grow(1);
+  f.engine.ok=function(operation,...args){if(operation==='component_cpu_view')new Uint8Array(f.memory.buffer,140,128).set(snapshot);else return original.call(this,operation,...args);};
+  tables.refresh();assert.equal(tables.descriptorReuseMisses,beforeGrow+1,'equal bytes in a new memory buffer require fresh decoding');
+  tables.configureDescriptorReuse(false,owner);assert.equal(tables.descriptorReuse,false);
+});
+
+test('descriptor reuse adopts only validated native publication stamps and still observes executable changes',()=>{
+  const f=world({journal:true,nativeDirty:true,nativeDirtyEpoch:true,preciseExecutable:true});
+  const tables=new PageTables(f.engine,f.cpu);tables.configureDescriptorReuse(true,{paused:true,open:false});tables.refresh();
+  const dirty=page=>{f.data.setUint32(tables.pte(page),f.data.getUint32(tables.pte(page),true)|64,true);
+    f.data.setUint32(DIRECTORY,f.data.getUint32(DIRECTORY,true)|32,true);};
+  dirty(DATA);assert.equal(tables.publishDirty(),1);
+  const misses=tables.descriptorReuseMisses;tables.refresh();
+  assert.equal(tables.descriptorReuseMisses,misses);assert.equal(tables.descriptorReuseHits,1);
+  assert.equal(tables.descriptor().transaction,f.info.transaction);
+  const generated={id:'descriptor-guest-code'};f.compiled.set(CODE,generated);
+  dirty(CODE);assert.equal(tables.publishDirty(),1);tables.refresh();
+  assert.equal(tables.descriptorReuseMisses,misses+1,'executable epoch must come from the next full native descriptor');
+  assert.equal(f.compiled.get(CODE),generated);
+  f.hooks.collectResult=(data,at)=>data.setUint32(at,0,true);dirty(DATA);
+  assert.throws(()=>tables.publishDirty(),/header/);
+  const malformedMisses=tables.descriptorReuseMisses;tables.refresh();
+  assert.equal(tables.descriptorReuseMisses,malformedMisses+1,'malformed publication cannot patch the descriptor baseline');
+  f.hooks.collectResult=()=>f.write(0);dirty(DATA);assert.equal(tables.publishDirty(),1);tables.refresh();
+  assert.equal(f.compiled.has(CODE),false,'a host write after collection must still invalidate executable aliases');
+});
+
 test('data-only mapping retains an already generated v86 code module',()=>{
   const f=world(),tables=new PageTables(f.engine,f.cpu,{selectiveCode:true,incrementalSync:false});
   const generated={id:'retained-code'};f.compiled.set(CODE,generated);
