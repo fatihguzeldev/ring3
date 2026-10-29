@@ -723,6 +723,49 @@ test('a claimed startup feature failure remains terminal after native configurat
   assert.deepEqual(f.events,before,'terminal startup failure cannot retry native mutation or guest execution');
 });
 
+function stagingFixture() {
+  const f=startupFixture(),c=f.cache,ordinary=c.engine.ok,result=new DataView(new ArrayBuffer(16)),ordinaryView=c.engine.resultView;
+  let enabled=false,retainedBytes=0,busy=false,corrupt=null;
+  c.lockStagingReuse=false;c.runtime={hash:'cpu',jitConfig:[],counters:()=>({})};
+  c.engine.api.component_cpu_set_lock_staging_reuse=()=>{};c.engine.api.component_cpu_lock_staging_reuse=()=>{};
+  c.engine.resultView=size=>size===16?result:ordinaryView(size);
+  c.engine.ok=(operation,...args)=>{
+    if(!['component_cpu_set_lock_staging_reuse','component_cpu_lock_staging_reuse'].includes(operation))return ordinary(operation,...args);
+    f.events.push(operation==='component_cpu_set_lock_staging_reuse'?'staging:set':'staging:get');
+    if(operation==='component_cpu_set_lock_staging_reuse') {
+      if(busy)throw Object.assign(new Error('staging Busy'),{status:12});enabled=!!args[2];if(!enabled)retainedBytes=0;
+    }
+    result.setUint32(0,Number(enabled),true);result.setUint32(4,retainedBytes,true);result.setBigUint64(8,(1n<<63n)+9n,true);corrupt?.(result);
+  };
+  return {...f,setBusy(value){busy=value;},corrupt(fn){corrupt=fn;}};
+}
+
+test('startup enables lock staging only when both native exports are present',()=>{
+  const f=stagingFixture(),c=f.cache;c.initializeExecutionPolicy();
+  assert.equal(c.lockStagingReuse,true);assert.equal(c.executionPolicyInitialized,true);assert.equal(c.runs,0);assert.equal(c.imported,false);
+  assert(f.events.indexOf('staging:set')>f.events.indexOf('global:true'));
+  const before=f.events.slice();assert.equal(c.stats().lockStagingReuse,true);assert.deepEqual(f.events,before,'stats does not query native staging state');
+  for(const name of ['component_cpu_set_lock_staging_reuse','component_cpu_lock_staging_reuse']) {
+    const old=stagingFixture();delete old.cache.engine.api[name];old.cache.initializeExecutionPolicy();
+    assert.equal(old.cache.lockStagingReuse,false);assert(!old.events.includes('staging:set'));
+  }
+});
+
+test('lock staging mode publishes and refreshes mappings while Busy and malformed results cannot commit',()=>{
+  const owner={paused:true,open:false},f=stagingFixture(),c=f.cache;
+  for(const invalid of [undefined,{paused:false,open:false},{paused:true,open:true}])assert.throws(()=>c.configureLockStagingReuse(true,invalid),/paused/);
+  assert.deepEqual(f.events,[]);c.dirtyPending=true;c.configureLockStagingReuse(true,owner);
+  assert.deepEqual(f.events,['dirty','refresh','staging:set','refresh']);
+  assert.deepEqual(c.getLockStagingReuse(),{enabled:true,retainedBytes:0,reuses:(1n<<63n)+9n});
+  c.configureLockStagingReuse(false,owner);assert.equal(c.lockStagingReuse,false);
+  const busy=stagingFixture();busy.setBusy(true);assert.throws(()=>busy.cache.configureLockStagingReuse(true,owner),error=>error.status===12);
+  assert.equal(busy.cache.lockStagingReuse,false);assert.equal(busy.cache.inlineFailure,null);
+  for(const corrupt of [d=>d.setUint32(0,2,true),d=>d.setUint32(4,1,true),d=>d.setUint32(4,262145,true),d=>d.setUint32(0,0,true)]) {
+    const bad=stagingFixture();bad.corrupt(corrupt);assert.throws(()=>bad.cache.configureLockStagingReuse(true,owner),/invalid/);
+    assert.equal(bad.cache.lockStagingReuse,false);
+  }
+});
+
 test('graphics overlap publishes before guarded mode changes and queries the exact fresh u64 counter',()=>{
   const f=overlapFixture(),c=f.cache,owner={paused:true,open:false};
   for(const invalid of [undefined,{paused:false,open:false},{paused:true,open:true}])

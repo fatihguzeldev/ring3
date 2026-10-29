@@ -104,7 +104,7 @@ export class V86CodeCache {
     this.directBindings=false;this.directBindingCompletions=0;
     this.directStateInputs=false;this.directStateInputCompletions=0;
     this.guestReturns=false;this.guestReturnCompletions=0;
-    this.graphicsOverlap=false;
+    this.graphicsOverlap=false;this.lockStagingReuse=false;
     this.relaxedFpu=runtime.relaxedFpu===true;
     this.portBridge=null;this.portBridgeBound=false;this.wasmPorts=false;this.wasmPortsActive=false;this.wasmPortFpuMode=null;
     this.wasmPortCompletions=0;this.wasmPortDeclines=0;this.wasmPortCheckpoints=0;this.portBridgeDeclinedPc=null;
@@ -132,6 +132,7 @@ export class V86CodeCache {
       if(this.tables.globalCodeSupported===true)this.tables.configureGlobalCode(true,owner);
       if(this.tables.targetedDirtySupported===true && this.tables.nativeDirty && this.tables.policy.incrementalSync)
         this.tables.configureTargetedDirty(true,owner);
+      if(this.lockStagingReuseSupported)this.configureLockStagingReuse(true,owner);
       this.executionPolicyInitialized=true;
     } catch(error) {this.inlineFailure=error;throw error;}
   }
@@ -448,6 +449,35 @@ export class V86CodeCache {
     if(current.mode!==this.portGateMode)throw new Error('native v86 gate mode owner changed');
     this.applyPortGates(true,enabled?2:1);return enabled;
   }
+  get lockStagingReuseSupported() {
+    return typeof this.engine.api?.component_cpu_set_lock_staging_reuse==='function' &&
+      typeof this.engine.api?.component_cpu_lock_staging_reuse==='function';
+  }
+  readLockStagingReuse() {
+    const d=this.engine.resultView(16);
+    if(d.byteLength!==16)throw new Error('invalid native v86 lock staging result');
+    const enabled=d.getUint32(0,true),retainedBytes=d.getUint32(4,true);
+    if(enabled>1 || retainedBytes>262144 || retainedBytes%4096 || (!enabled && retainedBytes))
+      throw new Error('invalid native v86 lock staging result');
+    return {enabled:enabled===1,retainedBytes,reuses:d.getBigUint64(8,true)};
+  }
+  getLockStagingReuse() {
+    if(!this.lockStagingReuseSupported)throw new Error('native v86 lock staging is unsupported');
+    this.engine.ok('component_cpu_lock_staging_reuse',...KEY);return this.readLockStagingReuse();
+  }
+  configureLockStagingReuse(enabled,owner) {
+    if(owner?.paused!==true || owner?.open!==false || this.open || this.closed || this.tables.ownsPin!==true || typeof enabled!=='boolean')
+      throw new Error('v86 lock staging changes require a closed paused owner');
+    if(this.inlineFailure)throw this.inlineFailure;
+    if(enabled===this.lockStagingReuse)return enabled;
+    if(!this.lockStagingReuseSupported)throw new Error('native v86 lock staging is unsupported');
+    this.publish();this.tables.refresh();
+    this.engine.ok('component_cpu_set_lock_staging_reuse',...KEY,enabled?1:0);
+    try {
+      if(this.readLockStagingReuse().enabled!==enabled)throw new Error('invalid native v86 lock staging mode');
+      this.tables.refresh();this.lockStagingReuse=enabled;return enabled;
+    } catch(error) {this.inlineFailure=error;throw error;}
+  }
   readGraphicsOverlap() {
     const d=this.engine.resultView(16),enabled=d.getUint32(0,true);
     if(enabled>1 || d.getUint32(4,true)!==0)throw new Error('invalid native v86 graphics overlap result');
@@ -544,7 +574,7 @@ export class V86CodeCache {
       portGates:this.portGates,portGateCalls:this.portGateCalls,deniedPortCalls:this.deniedPortCalls,
       portGateMode:this.portGateMode,portGatePatchedCount:this.portGatePatchedCount,
       guestReturns:this.guestReturns,guestReturnsSupported:this.guestReturnsSupported,guestReturnCompletions:this.guestReturnCompletions,
-      graphicsOverlap:this.graphicsOverlap,
+      graphicsOverlap:this.graphicsOverlap,lockStagingReuse:this.lockStagingReuse===true,lockStagingReuseSupported:this.lockStagingReuseSupported,
       wasmPorts:this.wasmPorts,wasmPortsSupported:this.wasmPortsSupported,
       wasmPortCompletions:this.wasmPortCompletions,wasmPortDeclines:this.wasmPortDeclines,wasmPortCheckpoints:this.wasmPortCheckpoints,
       inlineGates:this.inlineGates,inlineCompletions:this.inlineCompletions,inlineYields:this.inlineYields,
