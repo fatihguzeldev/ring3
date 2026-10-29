@@ -15,7 +15,7 @@ impl EngineInstance {
         eax: u32,
         accepted_mask: u32,
     ) -> Result<bool, HostError> {
-        if accepted_mask == 0 || accepted_mask & !0x7ff != 0 {
+        if accepted_mask == 0 || accepted_mask & !0x1fff != 0 {
             return Ok(false);
         }
         if self.exceptions.has_deliveries() || self.guard_owned_host_mutation().is_err() {
@@ -36,6 +36,8 @@ impl EngineInstance {
             0x4023d => 1 << 8,
             0x40253 => 1 << 9,
             0x40255 => 1 << 10,
+            0x40228 => 1 << 11,
+            0x4022c => 1 << 12,
             _ => 0,
         };
         if accepted_mask & bit == 0 {

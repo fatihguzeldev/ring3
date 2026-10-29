@@ -134,7 +134,7 @@ impl EngineInstance {
     ) -> Result<u32, HostError> {
         let Some(gate) = MethodGate::from_id(id).filter(|gate| {
             gate.interface == InterfaceKind::Device
-                && matches!(gate.slot, 37 | 42 | 46 | 50 | 61 | 63 | 83 | 85)
+                && matches!(gate.slot, 37 | 40 | 42 | 44 | 46 | 50 | 61 | 63 | 83 | 85)
         }) else {
             return Err(HostError::Call(CallError::InvalidRequest));
         };

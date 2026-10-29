@@ -154,7 +154,8 @@ impl EngineInstance {
             && !tls_getter
             && !gate.is_some_and(|gate| {
                 gate.interface == InterfaceKind::Device
-                    && matches!(gate.slot, 37 | 42 | 46 | 50 | 61 | 63 | 70 | 71 | 83 | 85)
+                    && (matches!(gate.slot, 37 | 42 | 46 | 50 | 61 | 63 | 70 | 71 | 83 | 85)
+                        || (local_state.is_some() && matches!(gate.slot, 40 | 44)))
             })
         {
             return None;
@@ -251,10 +252,26 @@ impl EngineInstance {
         let args = frame.arguments();
         let input = match gate.slot {
             37 => Some((args[2], 64)),
+            40 => Some((args[1], 24)),
             42 => Some((args[1], 68)),
+            44 => Some((args[2], 104)),
             _ => None,
         };
         if input.is_some_and(|(address, length)| {
+            if matches!(gate.slot, 40 | 44) {
+                let Some(end) = u64::from(address)
+                    .checked_add(length as u64)
+                    .filter(|&end| address != 0 && end <= 1 << 32)
+                else {
+                    return true;
+                };
+                // declining a direct input must not arm a guarded service fault.
+                return (u64::from(address) / 4096..=(end - 1) / 4096).any(|page| {
+                    !memory
+                        .permissions_at(GuestAddress((page * 4096) as u32))
+                        .is_ok_and(|permissions| permissions.allows(Access::Read))
+                });
+            }
             memory
                 .check_span(GuestAddress(address), length, Access::Read)
                 .is_err()

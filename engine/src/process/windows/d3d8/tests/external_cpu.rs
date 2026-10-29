@@ -352,6 +352,8 @@ fn setup() -> (EngineInstance, GuestAddress) {
 fn prepare(engine: &mut EngineInstance, device: GuestAddress, slot: u8) -> u32 {
     let args: &[u32] = match slot {
         37 => &[device.0, 1, PAYLOAD],
+        40 => &[device.0, PAYLOAD],
+        44 => &[device.0, 0, PAYLOAD],
         42 => &[device.0, PAYLOAD],
         46 => &[device.0, 0, 1],
         50 => &[device.0, 7, 1],
@@ -361,6 +363,20 @@ fn prepare(engine: &mut EngineInstance, device: GuestAddress, slot: u8) -> u32 {
         _ => &[device.0, 0, PAYLOAD, 1],
     };
     let memory = engine.memory.as_mut().unwrap();
+    if slot == 40 {
+        for (index, value) in [0u32, 0, 8, 8, 0, 1f32.to_bits()].into_iter().enumerate() {
+            memory
+                .write(
+                    GuestAddress(PAYLOAD + index as u32 * 4),
+                    &value.to_le_bytes(),
+                )
+                .unwrap();
+        }
+    } else if slot == 44 {
+        memory
+            .write(GuestAddress(PAYLOAD), &3u32.to_le_bytes())
+            .unwrap();
+    }
     memory
         .write(GuestAddress(DATA), &0x9002u32.to_le_bytes())
         .unwrap();
@@ -389,7 +405,7 @@ fn prepare(engine: &mut EngineInstance, device: GuestAddress, slot: u8) -> u32 {
 
 #[test]
 fn external_direct_gate_d3d8_facade_matches_original_scalar_dispatch() {
-    for slot in [37, 42, 46, 50, 63, 61, 83, 85] {
+    for slot in [37, 40, 42, 44, 46, 50, 63, 61, 83, 85] {
         let (mut direct, device) = setup();
         let (mut original, original_device) = setup();
         assert_eq!(device, original_device);
@@ -411,6 +427,9 @@ fn external_direct_gate_d3d8_facade_matches_original_scalar_dispatch() {
         } else {
             prepare(&mut direct, device, slot)
         };
+        if matches!(slot, 40 | 44) {
+            prepare(&mut original, original_device, slot);
+        }
         if slot == 37 {
             direct
                 .memory
@@ -427,7 +446,10 @@ fn external_direct_gate_d3d8_facade_matches_original_scalar_dispatch() {
             u32::from(MethodGate::from_id(id).unwrap().method().stack_words),
         )
         .unwrap();
-        assert!(direct.external_cpu_can_defer_gate(PC, id));
+        assert_eq!(
+            direct.external_cpu_can_defer_gate(PC, id),
+            !matches!(slot, 40 | 44)
+        );
         let (generation, token) = super::transport::capture_gate(
             &mut original,
             MethodGate::from_id(id).unwrap(),
@@ -744,52 +766,56 @@ fn prepare_binding(
     (id, args)
 }
 
+fn owned_direct_setup() -> (EngineInstance, GuestAddress) {
+    let mut engine = EngineInstance::new(1024, 91).unwrap();
+    engine.register_kernel32_module(0x70000000).unwrap();
+    engine.register_d3d8_module(0x72000000).unwrap();
+    engine
+        .register_guest_module(
+            "direct.exe",
+            include_bytes!(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/tests/process/images/startup/imports/fixtures/p2-c-imports/program.exe"
+            )),
+        )
+        .unwrap();
+    engine
+        .start_module_process(
+            "direct.exe",
+            None,
+            crate::process::ModuleRuntimeConfig32 {
+                stack_base: 0x7e100000,
+                stack_pages: 8,
+                runtime_base: 0x7d000000,
+            },
+        )
+        .unwrap();
+    engine.load_library_module("d3d8.dll", None).unwrap();
+    let (context, mut memory, device) = super::support::runtime_in(engine.memory.take().unwrap());
+    memory
+        .map_zeroed(
+            PageRange::new(GuestAddress(PAYLOAD), 1).unwrap(),
+            Permissions::READ_WRITE,
+        )
+        .unwrap();
+    engine.memory = Some(memory);
+    engine.d3d8 = Some(context);
+    engine
+        .configure_user32(
+            Default::default(),
+            PageRange::new(GuestAddress(0x3000_0000), 16).unwrap(),
+        )
+        .unwrap();
+    engine.enable_core_execution().unwrap();
+    engine.external_cpu_memory_pinned = true;
+    engine.set_external_cpu_gate_mode(1).unwrap();
+    (engine, device)
+}
+
 #[test]
 fn external_direct_gate_mask_binding_keeps_legacy_and_unrequested_calls_neutral() {
     for (slot, bit) in [(61, 8), (83, 9), (85, 10)] {
-        let mut engine = EngineInstance::new(1024, 91).unwrap();
-        engine.register_kernel32_module(0x70000000).unwrap();
-        engine.register_d3d8_module(0x72000000).unwrap();
-        engine
-            .register_guest_module(
-                "direct.exe",
-                include_bytes!(concat!(
-                    env!("CARGO_MANIFEST_DIR"),
-                    "/tests/process/images/startup/imports/fixtures/p2-c-imports/program.exe"
-                )),
-            )
-            .unwrap();
-        engine
-            .start_module_process(
-                "direct.exe",
-                None,
-                crate::process::ModuleRuntimeConfig32 {
-                    stack_base: 0x7e100000,
-                    stack_pages: 8,
-                    runtime_base: 0x7d000000,
-                },
-            )
-            .unwrap();
-        engine.load_library_module("d3d8.dll", None).unwrap();
-        let (context, mut memory, device) =
-            super::support::runtime_in(engine.memory.take().unwrap());
-        memory
-            .map_zeroed(
-                PageRange::new(GuestAddress(PAYLOAD), 1).unwrap(),
-                Permissions::READ_WRITE,
-            )
-            .unwrap();
-        engine.memory = Some(memory);
-        engine.d3d8 = Some(context);
-        engine
-            .configure_user32(
-                Default::default(),
-                PageRange::new(GuestAddress(0x3000_0000), 16).unwrap(),
-            )
-            .unwrap();
-        engine.enable_core_execution().unwrap();
-        engine.external_cpu_memory_pinned = true;
-        engine.set_external_cpu_gate_mode(1).unwrap();
+        let (mut engine, device) = owned_direct_setup();
         let resource = binding_resource(&mut engine, device, slot);
         for bound in [resource, resource, GuestAddress(0)] {
             let (id, _) = prepare_binding(&mut engine, device, slot, bound);
@@ -816,7 +842,7 @@ fn external_direct_gate_mask_binding_keeps_legacy_and_unrequested_calls_neutral(
                 arena,
                 "legacy8 must decline the owned binding"
             );
-            for mask in [0xff, 0x7ff ^ (1 << bit), 0x800 | (1 << bit)] {
+            for mask in [0xff, 0x7ff ^ (1 << bit), 0x2000 | (1 << bit)] {
                 assert!(
                     !engine
                         .try_direct_external_cpu_gate_mask(pc, DATA, 0xabcdef01, mask)
@@ -1300,4 +1326,164 @@ fn external_cpu_dirty_policy_set_last_error_rejects_cow_and_executable_aliases()
     let token = engine.capture_core_windows_call().unwrap().token;
     engine.complete_core_windows_call(token).unwrap();
     assert_eq!(engine.memory().unwrap().transaction_version(), version);
+}
+
+#[test]
+fn external_direct_gate_mask_state_inputs_require_opt_in_and_preserve_recording_and_cpu() {
+    use crate::abi::arena::TRANSFER_OFFSET;
+    for (slot, bit, length) in [(40, 11, 24), (44, 12, 104)] {
+        let (mut engine, device) = owned_direct_setup();
+        let id = prepare(&mut engine, device, slot);
+        let pc = engine
+            .module_gates()
+            .unwrap()
+            .into_iter()
+            .find(|gate| gate.id == id)
+            .unwrap()
+            .entry
+            .0;
+        let input_arg = if slot == 40 { 1 } else { 2 };
+        let input_address = DATA + (input_arg + 1) * 4;
+        let payload = PageRange::new(GuestAddress(PAYLOAD), 1).unwrap();
+        let baseline = engine.arena().to_vec();
+        for mask in [0xff, 0x7ff, 0x1fff ^ (1 << bit), 0x2000 | (1 << bit)] {
+            assert!(
+                !engine
+                    .try_direct_external_cpu_gate_mask(pc, DATA, 0xabcdef01, mask)
+                    .unwrap()
+            );
+            assert_eq!(engine.arena(), baseline);
+        }
+        for (pointer, guarded) in [
+            (0, false),
+            (0xfffffff0, false),
+            (PAYLOAD + 4096 - length + 1, false),
+            (PAYLOAD, true),
+        ] {
+            engine
+                .memory
+                .as_mut()
+                .unwrap()
+                .write(GuestAddress(input_address), &pointer.to_le_bytes())
+                .unwrap();
+            if guarded {
+                engine
+                    .memory
+                    .as_mut()
+                    .unwrap()
+                    .protect(payload, Permissions::READ_WRITE.with_guard())
+                    .unwrap();
+            }
+            let arena = engine.arena().to_vec();
+            let version = engine.memory().unwrap().transaction_version();
+            engine.memory().unwrap().begin_guard_service().unwrap();
+            assert!(
+                !engine
+                    .try_direct_external_cpu_gate_mask(pc, DATA, 0xabcdef01, 1 << bit)
+                    .unwrap()
+            );
+            assert_eq!(engine.arena(), arena);
+            assert_eq!(engine.memory().unwrap().transaction_version(), version);
+            assert!(engine.memory().unwrap().end_guard_service().is_none());
+            if guarded {
+                engine
+                    .memory
+                    .as_mut()
+                    .unwrap()
+                    .protect(payload, Permissions::READ_WRITE)
+                    .unwrap();
+            }
+        }
+        engine
+            .memory
+            .as_mut()
+            .unwrap()
+            .write(GuestAddress(input_address), &PAYLOAD.to_le_bytes())
+            .unwrap();
+        engine
+            .d3d8
+            .as_mut()
+            .unwrap()
+            .device_mut(device)
+            .unwrap()
+            .state_mut()
+            .unwrap()
+            .begin_state_block()
+            .unwrap();
+        let arena = engine.arena().to_vec();
+        let version = engine.memory().unwrap().transaction_version();
+        let epoch = engine.core_epoch;
+        let token = engine.call_token;
+        assert!(
+            engine
+                .try_direct_external_cpu_gate_mask(pc, DATA, 0xabcdef01, 0x1fff)
+                .unwrap()
+        );
+        let packet = &engine.arena()[TRANSFER_OFFSET..TRANSFER_OFFSET + 32];
+        crate::abi::header::validate(packet, *b"R3IF", 32).unwrap();
+        assert_eq!(crate::abi::header::read_u32(packet, 16), id);
+        assert_eq!(crate::abi::header::read_u32(packet, 20), 0);
+        assert_eq!(crate::abi::header::read_u32(packet, 24), 0x9002);
+        assert_eq!(
+            crate::abi::header::read_u32(packet, 28),
+            DATA + 4 + u32::from(MethodGate::from_id(id).unwrap().method().stack_words) * 4
+        );
+        assert_eq!(
+            &engine.arena()[..TRANSFER_OFFSET],
+            &arena[..TRANSFER_OFFSET]
+        );
+        assert_eq!(
+            &engine.arena()[TRANSFER_OFFSET + 32..],
+            &arena[TRANSFER_OFFSET + 32..]
+        );
+        assert_eq!(engine.memory().unwrap().transaction_version(), version);
+        assert_eq!(engine.core_epoch, epoch);
+        assert_eq!(engine.call_token, token);
+        assert!(!engine.external_cpu_can_defer_gate(PC, id));
+        let state = engine
+            .d3d8
+            .as_mut()
+            .unwrap()
+            .device_mut(device)
+            .unwrap()
+            .state_mut()
+            .unwrap();
+        if slot == 40 {
+            assert_eq!(state.snapshot().viewport.width, 16);
+        } else {
+            assert!(state.snapshot().lights.is_empty());
+        }
+        let block = state.end_state_block().unwrap();
+        state.apply_state_block(&block).unwrap();
+        if slot == 40 {
+            assert_eq!(state.snapshot().viewport.width, 8);
+        } else {
+            assert_eq!(state.light(0).unwrap().kind, 3);
+        }
+        assert_ne!(
+            u32::from_le_bytes(
+                engine.memory.as_mut().unwrap().external_descriptor()[108..112]
+                    .try_into()
+                    .unwrap()
+            ) & 256,
+            0
+        );
+        // invalid scalar data remains the original handler's HRESULT, not a retry.
+        let invalid = if slot == 40 { PAYLOAD + 8 } else { PAYLOAD };
+        engine
+            .memory
+            .as_mut()
+            .unwrap()
+            .write(GuestAddress(invalid), &0u32.to_le_bytes())
+            .unwrap();
+        assert!(
+            engine
+                .try_direct_external_cpu_gate_mask(pc, DATA, 0xabcdef01, 1 << bit)
+                .unwrap()
+        );
+        assert_eq!(
+            crate::abi::header::read_u32(&engine.arena()[TRANSFER_OFFSET..], 20),
+            crate::graphics::d3d8::api::HResult::INVALID_CALL.0
+        );
+    }
 }

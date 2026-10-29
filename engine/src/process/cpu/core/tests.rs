@@ -310,7 +310,7 @@ fn external_direct_gate_mask_admits_only_requested_known_ids_without_decline_mut
     let epoch = engine.core_epoch;
     let token = engine.call_token;
     let version = engine.memory().unwrap().transaction_version();
-    for mask in [0, 2, 0x100, 0x800, 0x801, u32::MAX] {
+    for mask in [0, 2, 0x100, 0x2000, 0x2001, u32::MAX] {
         assert!(
             !engine
                 .try_direct_external_cpu_gate_mask(pc, esp, 0xabcdef01, mask)
