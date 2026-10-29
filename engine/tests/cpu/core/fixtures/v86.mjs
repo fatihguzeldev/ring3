@@ -415,6 +415,13 @@ try {
     invoke(ids.slow);const afterSlow=programPc+program.length;
     program.push(0xa3,...u32(output+12),0xc7,0x05,...u32(output+16),...u32(0x52494e47));
     invoke(ids.slow);program.push(0xeb,0xfe);upload(programPc,program);
+    const densePc=0x600d00,denseCalls=512,denseSlices=256;
+    if(guestReturnMode) {
+      const dense=[0xb9,...u32(denseCalls)],loop=dense.length;
+      dense.push(0xb8,...u32(entries.get(ids.get)),0xff,0xd0,0x49,0x75);
+      dense.push((loop-dense.length-1)&255,0xb8,...u32(entries.get(ids.slow)),0xff,0xd0,0xeb,0xfe);
+      upload(densePc,dense);
+    }
     cache.budget=100002;
     const inlineReport=report[directMode?'direct':'inline']={tlsIndex,programPc,afterGet,afterSlow,atomicSupported,
       directMode,bindingMode,guestReturnMode,directOperation,requestedMask:bindingMode?0x7ff:0xff,
@@ -548,6 +555,33 @@ try {
       stage='cold inline work aggregate';ex.set_jit_config(0,1);reset();checkChain(execute('cold'));
       ex.set_jit_config(0,0);
       inlineReport.jitBefore=runtime.counters();
+      if(guestReturnMode) {
+        stage='bounded registered thunk first-JIT heat threshold';
+        const getEntry=entries.get(ids.get),physicalPage=new DataView(memory.buffer).getUint32(cache.tables.pte(getEntry>>>12),true)&~4095,
+          before=cache.stats(),counter=cpuViews(memory).data.getUint32(664,true);
+        const heat=inlineReport.thresholdWarmup={callsPerSlice:denseCalls,maxSlices:denseSlices,slices:0,calls:0,
+          thunkInstructions:0,initialThreshold:200000,thresholdEvidence:'actual ce21 cycle_internal literal at1859961; no CPU configuration change',
+          entry:getEntry,physicalPage,physicalEntry:physicalPage+(getEntry&4095),beforeCounter:counter,
+          beforeJit:runtime.counters(),perCallInstrumentation:false};
+        for(let index=0;index<denseSlices;index++) {
+          seed(densePc);const prior=cache.stats(),priorCounter=cpuViews(memory).data.getUint32(664,true);
+          cache.import();const run=cache.execute(cache.select());cache.publish();
+          const after=cache.stats(),delta=(cpuViews(memory).data.getUint32(664,true)-priorCounter)>>>0;
+          assert.equal(run.reason,8);assert.equal(run.detail,ids.slow);assert.equal(run.work,denseCalls*6+4);
+          assert.equal(run.retired,run.work);assert.equal(delta,run.work);
+          assert.equal(after.directCompletions-prior.directCompletions,denseCalls);
+          assert.equal(after.guestReturnCompletions-prior.guestReturnCompletions,denseCalls);
+          assert.equal(after.gates-prior.gates,denseCalls+1);assert.deepEqual(banks(),savedBanks);
+          heat.slices++;heat.calls+=denseCalls;heat.thunkInstructions+=denseCalls*2;
+          const row={slice:index+1,beforeCounter:priorCounter,delta,afterCounter:cpuViews(memory).data.getUint32(664,true),work:run.work};
+          if(index===0)heat.first=row;if(index===denseSlices-1)heat.last=row;
+          await new Promise(resolve=>setTimeout(resolve,0));
+        }
+        heat.afterCounter=cpuViews(memory).data.getUint32(664,true);heat.counterDelta=(heat.afterCounter-counter)>>>0;
+        heat.afterJit=runtime.counters();heat.directCompletions=cache.stats().directCompletions-before.directCompletions;
+        assert.equal(heat.calls,131072);assert.equal(heat.thunkInstructions,262144);assert(heat.thunkInstructions>heat.initialThreshold);
+        assert.equal(heat.counterDelta,denseSlices*(denseCalls*6+4));save();
+      }
       for(let index=0;index<20;index++){reset();checkChain(execute('warmup'));await new Promise(resolve=>setTimeout(resolve,2));}
       inlineReport.jitAfter=runtime.counters();
       assert(inlineReport.jitAfter.finalizedModules>inlineReport.jitBefore.finalizedModules);
