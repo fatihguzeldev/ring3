@@ -12,6 +12,8 @@ const DIRECT_STATE_INPUT_GATE_IDS=new Set([0x40228,0x4022c]);
 const GUEST_RETURN_GATE_IDS=new Set([0x10001,0x40225,0x4022a,0x4022e,0x40232,0x4023f,0x4023d,0x40253,0x40255]);
 
 export async function prepareV86(options={}, {signal}={}) {
+  const relaxedFpu=options.relaxedFpu===undefined?false:options.relaxedFpu;
+  if(typeof relaxedFpu!=='boolean')throw new TypeError('v86 relaxed FPU option must be boolean');
   const memorySize=options.memorySize??PHYSICAL_BYTES;
   if(!Number.isInteger(memorySize) || memorySize<PHYSICAL_BYTES || memorySize>256*1024*1024)
     throw new Error('v86 physical memory must be between160 and256MiB');
@@ -51,15 +53,15 @@ export async function prepareV86(options={}, {signal}={}) {
     ex[`set_${name}`](value);
     if(ex[`get_${name}`]()!==value)throw new Error(`v86 code generation mismatch ${name}`);
   }
-  ex.set_relaxed_fpu(0);
-  if(ex.get_relaxed_fpu()!==0)throw new Error('v86 strict FPU mode was not applied');
+  ex.set_relaxed_fpu(relaxedFpu?1:0);
+  if(ex.get_relaxed_fpu()!==(relaxedFpu?1:0))throw new Error('v86 FPU mode was not applied');
   const hp=ex.get_hypercall_page_ptr()>>>0,d=new DataView(cpu.wasm_memory.buffer);
   d.setUint32(hp+8,0,true);
   ex.set_park_eip(PARK);
   let generated=0,generatedBytes=0,finalized=0,attached=false,disposed=false;
   cpu.test_hook_did_generate_wasm=encoded=>{generated++;generatedBytes+=encoded.byteLength;};
   cpu.test_hook_did_finalize_wasm=()=>{finalized++;};
-  const runtime={cpu,memory:cpu.wasm_memory,hash,portBridge,portBridgeOriginalIO,portBridgeFallback,
+  const runtime={cpu,memory:cpu.wasm_memory,hash,relaxedFpu,portBridge,portBridgeOriginalIO,portBridgeFallback,
     async attach(engine,execution={}) {
       if(attached || disposed)throw new Error('v86 runtime cannot attach twice');
       signal?.throwIfAborted();
@@ -101,7 +103,7 @@ export class V86CodeCache {
     this.directStateInputs=false;this.directStateInputCompletions=0;
     this.guestReturns=false;this.guestReturnCompletions=0;
     this.graphicsOverlap=false;
-    this.relaxedFpu=false;
+    this.relaxedFpu=runtime.relaxedFpu===true;
     this.portBridge=null;this.portBridgeBound=false;this.wasmPorts=false;this.wasmPortsActive=false;
     this.wasmPortCompletions=0;this.wasmPortDeclines=0;this.wasmPortCheckpoints=0;this.portBridgeDeclinedPc=null;
     this.executionPolicyInitialized=false;

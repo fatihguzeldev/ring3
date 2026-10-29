@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import {V86CodeCache} from '../runtime/v86/index.js';
+import {V86CodeCache,prepareV86} from '../runtime/v86/index.js';
 import {cpuViews,importState} from '../runtime/v86/state.js';
 import {Traps} from '../runtime/v86/traps.js';
 import {PARK,SEGMENTS,X87} from '../runtime/v86/layout.js';
@@ -61,6 +61,17 @@ function fixture(traps, gate = 0x40232) {
 }
 
 const gateTrap = () => ({vector: 6, pc: 0x1000, flags: 2, esp: 0, cs: 0, ss: 0});
+
+test('relaxed FPU boot is boolean-only before fetch and strict-compatible when omitted',async()=>{
+  const original=globalThis.fetch;let fetches=0;
+  globalThis.fetch=async()=>{fetches++;return {ok:false,status:418};};
+  try {
+    for(const value of [null,0,1,'true',{}])await assert.rejects(prepareV86({relaxedFpu:value}),/must be boolean/);
+    assert.equal(fetches,0,'invalid mode options cannot start CPU loading');
+    for(const options of [{},{relaxedFpu:false},{relaxedFpu:true}])await assert.rejects(prepareV86(options),/HTTP418/);
+    assert.equal(fetches,3,'omitted, strict and explicit experimental modes reach the same CPU loading path');
+  } finally {globalThis.fetch=original;}
+});
 
 test('SetRenderState defers dirty publication until the next non-allowlisted gate', () => {
   const f = fixture([gateTrap(), gateTrap()]);
