@@ -1,0 +1,10 @@
+{
+  "baseline": {
+    "sha256": "4e98f2b1ecacb63803b43fa584d69e0de05b5fcf6f747587f5526442bce29a22",
+    "source": "/Users/fatihguzel/ring3/target/cpu-execution-redesign/baseline-48307337.wasm"
+  },
+  "candidate": {
+    "sha256": "d63a599bef1a4d9ba32d1591ade21fee964da73f9d8c47b695260159819b79a9",
+    "source": "/Users/fatihguzel/ring3/target/cpu-execution-redesign/prepared.wasm"
+  }
+}
