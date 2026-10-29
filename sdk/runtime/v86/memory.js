@@ -1,7 +1,7 @@
 import {KEY} from '../engine.js';
 import {PAGE,BACKING_BASE,DIRECTORY,TABLES,GDT,PRIVATE_VA} from './layout.js';
 import {CodeValidity} from './code-validity.js';
-import {DirtyPages} from './dirty-pages.js';
+import {DirtyPages,createDirtyRearm} from './dirty-pages.js';
 
 export class PageTables {
   constructor(engine,cpu,options={}) {
@@ -63,6 +63,7 @@ export class PageTables {
     if(enabled && (!this.targetedDirtySupported || !this.nativeDirty || !this.policy.incrementalSync))
       throw new Error('native v86 targeted dirty rearm is unsupported');
     if(enabled===this.targetedDirty)return enabled;
+    if(enabled)this.batchDirtyRearm??=createDirtyRearm(this.engine.memory,this.invalidateDirtyPage);
     this.publishDirty();this.cpu.full_clear_tlb();this.targetedDirty=enabled;return enabled;
   }
   rearmDirtyPages(offsets,unchangedCode) {
@@ -83,7 +84,7 @@ export class PageTables {
     try {
       // the pinned opcode helper only invalidates translation caches on its cpl0 path.
       cpl[0]=0;
-      for(const offset of offsets)this.invalidateDirtyPage((((offset-4096)/4)*4096)>>>0);
+      this.batchDirtyRearm(offsets.byteOffset,offsets.length);
     } finally {cpl[0]=previous;}
     this.targetedDirtyPublications++;this.targetedDirtyPages+=offsets.length;return true;
   }
