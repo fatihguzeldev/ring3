@@ -5,6 +5,8 @@ import {PageTables} from './memory.js';
 import {Traps} from './traps.js';
 import {cpuViews,importState,exportState,rememberStateBanks,forgetStateBanks} from './state.js';
 
+const INLINE_GATE_IDS=new Set([0x10001,0x10002,0xf000b,0x40225,0x4022a,0x4022e,0x40232,0x4023f]);
+
 export async function prepareV86(options={}, {signal}={}) {
   const memorySize=options.memorySize??PHYSICAL_BYTES;
   if(!Number.isInteger(memorySize) || memorySize<PHYSICAL_BYTES || memorySize>256*1024*1024)
@@ -78,6 +80,7 @@ export class V86CodeCache {
     this.deferDirty=true;this.dirtyPending=false;this.deferredDirtyPublications=0;
     this.reuseNumericState=true;
     this.portGates=false;this.portGateModeTouched=false;this.portGateCalls=0;this.deniedPortCalls=0;
+    this.inlineGates=false;this.inlineCompletions=0;this.inlineYields=0;this.inlineFailure=null;
   }
   get pc() {return this.engine.get(48);}
   readCodeByte(address) {
@@ -92,16 +95,19 @@ export class V86CodeCache {
     return views.bytes[tables.ram+BACKING_BASE+(mapped-1)*PAGE+(address&4095)];
   }
   import() {
+    if(this.inlineFailure)throw this.inlineFailure;
     if(this.closed)throw new Error('v86 adapter is closed');
     this.tables.refresh();
     importState(this.engine,this.cpu,this.traps);
     this.traps.pending=null;this.imported=true;
   }
   select() {
+    if(this.inlineFailure)throw this.inlineFailure;
     if(!this.imported)this.import();
     return {id:'v86',pc:this.pc};
   }
   execute() {
+    if(this.inlineFailure)throw this.inlineFailure;
     if(!this.imported)this.import();
     const cpu=this.cpu,h=this.engine,hp=cpu.wm.exports.get_hypercall_page_ptr()>>>0;
     let work=0,retired=0,stop=2,detail=0,auxiliary=0,vector=0,trap=null,deferAllowed=false;
@@ -129,7 +135,7 @@ export class V86CodeCache {
       }
       break;
     }
-    if(trap) {
+    if(trap && !trap.budgetYield) {
       vector=trap.vector;
       if(vector===6) {
         h.ok('component_cpu_gate',...KEY,trap.pc);
@@ -160,7 +166,55 @@ export class V86CodeCache {
     this.imported=false;this.traps.pending=null;this.runs++;this.regions++;
     this.retired+=retired;this.work+=work;
     return {pc:this.pc,coreReason:stop,reason:h.get(72),detail:h.get(80),retired,work,
+      inlineYield:trap?.budgetYield===true,
       kind:'v86',id:'v86',regions:1,chainedColdRuns:0,chainedColdWork:0,chainedColdRetired:0};
+  }
+  inlineNativePending() {
+    const h=this.engine;
+    if(h.api.pending_windows_thread_schedule())return true;
+    h.ok('pending_windows_callback');
+    return h.resultView(96).getUint32(12,true)!==0;
+  }
+  tryInlineGate(trap) {
+    if(this.inlineFailure)throw this.inlineFailure;
+    const owner=this.inlineOwner,h=this.engine;
+    if(!this.inlineGates || !this.portGates || !this.deferDirty ||
+        this.tables.dirtyGateFlagsSupported!==true || !owner?.canContinue())return false;
+    exportState(h,this.cpu,trap);
+    if(this.reuseNumericState!==false)rememberStateBanks(h,this.cpu);
+    this.dirtyPending=true;
+    const lookup=()=>{
+      h.ok('component_cpu_gate',...KEY,trap.pc);
+      const result=h.resultView(8),id=result.getUint32(0,true);
+      return (result.getUint32(4,true)&3)===3 && INLINE_GATE_IDS.has(id)?id:0;
+    };
+    const id=lookup();
+    if(!id || this.inlineNativePending())return false;
+    owner.observeClock();
+    if(!owner.canContinue() || this.inlineNativePending() || lookup()!==id)return false;
+    try {
+      // the enclosing main_loop owns all instruction credits, including these calls.
+      h.ok('component_cpu_publish',...KEY,7,0,0,id,0,0);
+      const status=h.status('component_cpu_try_complete_gate',...KEY);
+      if(status!==0 || h.get(72)!==3 || this.inlineNativePending())
+        throw Object.assign(new Error(`v86 inline gate completion failed ${status}`),{status,id,pc:trap.pc});
+      importState(h,this.cpu,this.traps);
+      this.inlineCompletions++;this.gates++;this.portGateCalls++;this.deferredDirtyPublications++;
+      if(!owner.canContinue()) {this.inlineYields++;return 'yield';}
+      return true;
+    } catch(error) {this.inlineFailure=error;throw error;}
+  }
+  configureInlineGates(enabled,owner) {
+    if(owner?.paused!==true || owner?.open!==false || this.open || this.closed || typeof enabled!=='boolean')
+      throw new Error('v86 inline gate changes require a closed paused owner');
+    if(this.inlineFailure)throw this.inlineFailure;
+    if(enabled && (typeof this.inlineOwner?.canContinue!=='function' ||
+        typeof this.inlineOwner?.observeClock!=='function' ||
+        typeof this.engine.api.component_cpu_try_complete_gate!=='function'))
+      throw new Error('v86 inline gates require a synchronous owner and native completion');
+    this.publish();this.inlineGates=enabled;
+    this.traps.continueGate=enabled?trap=>this.tryInlineGate(trap):null;
+    return enabled;
   }
   publish() {
     if(!this.dirtyPending)return;
@@ -204,6 +258,8 @@ export class V86CodeCache {
       workBudget:this.budget,gates:this.gates,faults:this.faults,cowFaults:this.cowFaults,
       dirtyPages:this.dirtyPages,deferDirty:this.deferDirty,
       portGates:this.portGates,portGateCalls:this.portGateCalls,deniedPortCalls:this.deniedPortCalls,
+      inlineGates:this.inlineGates,inlineCompletions:this.inlineCompletions,inlineYields:this.inlineYields,
+      inlineFailed:!!this.inlineFailure,
       deferredDirtyPublications:this.deferredDirtyPublications,wasmMemoryBytes:this.memory.buffer.byteLength,
       executePermissionEnforcement:false,faultAccessLength:'one-byte conservative fault span',
       x87TagSemantics:'v86 represents occupancy and derives nonempty tags from payload; incompatible imports fail',

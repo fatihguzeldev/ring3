@@ -238,3 +238,22 @@ test('the core backend keeps the ordinary capture and completion path', async ()
   assert.equal(clocks, 2);
   assert.equal(session.fastNativeCompletions, 0);
 });
+
+test('an inline completion yield returns to the host before another CPU entry or gate capture', async () => {
+  let executions=0,published=0,waits=0;
+  const session=Object.assign(Object.create(Session.prototype),{
+    running:true,paused:false,stopped:false,lastSchedule:Infinity,lastStatus:Infinity,
+    recent:[],thread:1,blocked:new Map(),exits:new Map(),
+    engine:{get:()=>3,api:{pending_windows_thread_schedule:()=>0},
+      ok(){throw new Error('a completed inline yield must not recapture its gate');}},
+    media:{update(){},async graphicsOutput(){},graphicsTransport:{}},
+    code:{publish(){published++;},import(){},select:()=>null,execute(){
+      assert.equal(++executions,1,'the host must see the completed yield before another CPU entry');
+      return {coreReason:2,inlineYield:true};
+    }},
+    async providers(){return false;},observeClock:()=>0n,initializer:()=>null,stack:()=>[],
+    async wait(){waits++;session.running=false;},
+  });
+  await session.loop();
+  assert.equal(executions,1);assert.equal(published,2);assert.equal(waits,1);
+});

@@ -38,11 +38,24 @@ export class Traps {
     if(v.bytes[612]!==3)throw new Error('v86 gate port accessed outside guest ring3');
     const pc=d.getUint32(560,true),candidate=this.portGates && write8 && d.getUint32(556,true)===((pc+2)>>>0)
       && this.readCode?.(pc)===0xe6 && this.readCode((pc+1)>>>0)===GATE_PORT;
-    this.pending={vector:candidate?6:13,error:0,pc,cs:v.selectors[1],ss:v.selectors[2],
+    const trap={vector:candidate?6:13,error:0,pc,cs:v.selectors[1],ss:v.selectors[2],
       flags:this.cpu.wm.exports.get_eflags()>>>0,esp:v.regs[4],address:0,
       portGate:candidate,portDenied:!candidate,privateInstructions:0,
       registers:candidate?null:Array.from(v.regs)};
-    d.setUint32(556,PARK,true);d.setUint32(620,0xffffffff,true);
+    if(candidate && this.continueGate) {
+      const continued=this.continueGate(trap);
+      if(continued===true)return;
+      if(continued==='yield') {
+        const returned=cpuViews(this.memory);
+        this.pending={budgetYield:true,privateInstructions:0,
+          pc:returned.data.getUint32(556,true),esp:returned.regs[4],
+          flags:this.cpu.wm.exports.get_eflags()>>>0,
+          cs:returned.selectors[1],ss:returned.selectors[2]};
+      }
+    }
+    this.pending??=trap;
+    const parked=d.buffer===this.memory.buffer?d:new DataView(this.memory.buffer);
+    parked.setUint32(556,PARK,true);parked.setUint32(620,0xffffffff,true);
     if(!candidate)throw PORT_IO_FAULT;
   }
   setDescriptor(selector,base,limit,access,default32=true) {

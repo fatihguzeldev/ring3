@@ -141,6 +141,13 @@ export class Session {
     while (await this.files.sourceProgress()) this.abort.signal.throwIfAborted();
     this.abort.signal.throwIfAborted();
     this.code = this.externalCpu ? await this.externalCpu.attach(h, execution) : new CodeCache(h, execution);
+    if(this.backend==='v86')this.code.inlineOwner={
+      canContinue:()=>this.running && !this.paused && !this.stopped && !this.measurements &&
+        !this.callDiagnostics && !this.frameProbe && !globalThis.__r3PhaseWindow &&
+        !this.stack().length && !this.needsSchedule && performance.now()<this.inlineQuantumDeadline &&
+        !h.api.pending_windows_thread_schedule(),
+      observeClock:()=>this.observeClock(),
+    };
     this.abort.signal.throwIfAborted();
     this.observation?.observer.event("execution.backend", { backend: this.backend, callback_backend: this.backend,
       engine_sha256: h.hash, cpu_sha256: this.externalCpu?.hash });
@@ -381,6 +388,7 @@ export class Session {
       const init = this.initializer();
       this.code.import();
       const start = performance.now();
+      this.inlineQuantumDeadline=start+6;
       do {
         const unit = this.measurements
             ? this.measurements.run("entry", () => this.code.select())
@@ -400,6 +408,7 @@ export class Session {
         }
         this.recent.push(run);
         if (this.recent.length > 48) this.recent.shift();
+        if(run.inlineYield)break;
         if (run.coreReason === 1 || run.coreReason === 2 || run.coreReason === 6) continue;
         if (run.reason === 9) break;
         if (faults.has(run.reason)) {

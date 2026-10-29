@@ -10,7 +10,7 @@ import {image as moduleImage} from '../../../loader/modules/wasm/fixtures/runtim
 
 const [enginePath, reportPath, permissionText = '1', portText = ''] = process.argv.slice(2);
 assert(enginePath && reportPath, 'usage: v86.mjs imported-engine.wasm fresh-report.json');
-assert(['', 'port'].includes(portText));
+assert(['', 'port', 'inline'].includes(portText));
 const deniedPermission = Number(permissionText);
 assert([0,1].includes(deniedPermission));
 const hash = bytes => createHash('sha256').update(bytes).digest('hex');
@@ -20,7 +20,7 @@ assert.equal(hash(image), '7c0451977a0818d5f4905a2b00f3a3bae63b9449ef22775ea003e
 const cpuBytes = readFileSync(new URL('../../../../../sdk/runtime/v86/vendor/v86.wasm', import.meta.url));
 const report = {complete: false, engineSha256: artifact.sha256, cpuSha256: hash(cpuBytes),
   scope: 'actual unmodified v86 CPU, shared RAM, authored PE with four Ring3 Windows calls; no game/FPS claim',
-  portControls:portText==='port',calls: [], runs: [], ownCpuCalls: 0};
+  portControls:portText==='port',inlineControls:portText==='inline',calls: [], runs: [], ownCpuCalls: 0};
 writeFileSync(reportPath, JSON.stringify(report), {flag: 'wx'});
 const save = () => writeFileSync(reportPath, JSON.stringify(report, (_key, value) =>
   typeof value === 'bigint' ? String(value) : value, 2) + '\n');
@@ -240,7 +240,135 @@ try {
     assert.equal(read(dataAddress),3,'same-VA remap executes new canonical bytes');
     report.hostCodeInvalidation={clears,finalizedModules:cache.stats().v86.finalizedModules};
   } finally {cache.cpu.jit_clear_cache=clear;}
-  if(portText==='port') {
+  if(portText==='inline') {
+    stage='inline native API continuation';
+    engine.ok('protect',0x601000,1,3);
+    const entries=new Map();
+    for(let start=0,total=1;start<total;) {
+      engine.ok('module_gates_page',start,128);const rows=engine.resultView(4096);
+      total=rows.getUint32(16,true);const count=rows.getUint32(24,true);assert(count>0);
+      for(let index=0;index<count;index++)entries.set(rows.getUint32(36+index*8,true),rows.getUint32(32+index*8,true));
+      start+=count;
+    }
+    const ids={get:0x10001,set:0x10002,allocate:0xf0009,tlsGet:0xf000b,tlsSet:0xf000c,slow:0xc0002};
+    for(const id of Object.values(ids))assert(entries.has(id),`real registered gate ${id.toString(16)}`);
+    const programPc=0x600900,output=0x601900,stack=0x601800,initialError=0xf1234567,nextError=0x10203040,tlsValue=0x55aa7788;
+    const savedBanks=banks();let allow=true,clockCalls=0;
+    cache.inlineOwner={canContinue:()=>allow,observeClock(){clockCalls++;engine.ok('observe_cpu_clock',0,0);}};
+    assert.equal(cache.configurePortGates(true,{paused:true,open:cache.open}),true);
+    const seed=pc=>{
+      const registers=[0x11223344,0,0xe1,0x3456789a,stack,0x456789ab,0x56789abc,0x6789abcd];
+      const data=new DataView(memory.buffer);
+      registers.forEach((value,index)=>data.setUint32(engine.base+16+index*4,value,true));
+      data.setUint32(engine.base+48,pc,true);data.setUint32(engine.base+52,0x646,true);
+      return registers;
+    };
+    const nativeCall=(id,args=[])=>{
+      const enabled=cache.inlineGates;
+      if(enabled)cache.configureInlineGates(false,{paused:true,open:cache.open});
+      seed(entries.get(id));put(stack,0x600c00);args.forEach((value,index)=>put(stack+4+index*4,value));
+      cache.import();const run=cache.execute(cache.select());cache.publish();assert.equal(run.detail,id);
+      engine.ok('core_capture_windows_call');const token=engine.resultView(112).getUint32(16,true);
+      engine.ok('core_complete_windows_call',token);const result=engine.get(16);
+      if(enabled)cache.configureInlineGates(true,{paused:true,open:cache.open});
+      return result;
+    };
+    const tlsIndex=nativeCall(ids.allocate);assert(tlsIndex<1088);
+    assert.equal(nativeCall(ids.tlsSet,[tlsIndex,tlsValue]),1);
+    const threadId=nativeCall(ids.slow),program=[0xb9,...u32(20000),0x49,0x75,0xfd];
+    const invoke=id=>program.push(0xb8,...u32(entries.get(id)),0xff,0xd0);
+    invoke(ids.get);const afterGet=programPc+program.length;program.push(0xa3,...u32(output));
+    program.push(0x68,...u32(nextError));invoke(ids.set);program.push(0xa3,...u32(output+4));
+    program.push(0x68,...u32(tlsIndex));invoke(ids.tlsGet);program.push(0xa3,...u32(output+8));
+    invoke(ids.slow);const afterSlow=programPc+program.length;
+    program.push(0xa3,...u32(output+12),0xc7,0x05,...u32(output+16),...u32(0x52494e47));
+    invoke(ids.slow);program.push(0xeb,0xfe);upload(programPc,program);
+    cache.budget=100002;
+    report.inline={tlsIndex,programPc,afterGet,afterSlow,authoredLoopPrefixInstructions:40001,
+      authoredFirstOuterInstructions:40018,runs:[],semantics:'all intermediate gate publications carry zero credits; only completed outer main_loop deltas are charged'};
+    const reset=()=>{nativeCall(ids.set,[initialError]);for(let index=0;index<5;index++)put(output+index*4,0);seed(programPc);};
+    const workPacket=()=>engine.get(4604);
+    const execute=(label)=>{
+      const original=engine.ok,publications=[],before=cache.stats(),counter=cpuViews(memory).data.getUint32(664,true);
+      engine.ok=function(operation,...args) {
+        const result=original.call(this,operation,...args);
+        if(operation==='component_cpu_publish')publications.push({stop:args[2],id:args[5],retired:args[6],work:args[7],
+          packetWork:workPacket(),visibleCounter:cpuViews(memory).data.getUint32(664,true),
+          stack:new Error('inline publication').stack});
+        return result;
+      };
+      let run;
+      try {cache.import();run=cache.execute(cache.select());cache.publish();}
+      finally {engine.ok=original;}
+      const after=cache.stats(),delta=(cpuViews(memory).data.getUint32(664,true)-counter)>>>0;
+      const row={label,run,publications,beforeCounter:counter,delta,inlineCompletions:after.inlineCompletions-before.inlineCompletions,
+        runs:after.runs-before.runs,regions:after.regions-before.regions,gates:after.gates-before.gates,workPacket:workPacket(),clockCalls};
+      assert.equal(run.work,delta);assert.equal(workPacket(),delta);
+      assert.equal(after.work-before.work,delta);assert.equal(after.retired-before.retired,run.retired);
+      assert.equal(row.runs,1);assert.equal(row.regions,1);assert.deepEqual(banks(),savedBanks);
+      for(const publication of publications.slice(0,-1)) {
+        assert.equal(publication.work,0);assert.equal(publication.retired,0);assert.equal(publication.packetWork,0);
+      }
+      if(label==='warmup') {
+        report.inline.warmupCount=(report.inline.warmupCount??0)+1;report.inline.lastWarmup=row;
+      } else {report.inline.runs.push(row);save();}
+      return row;
+    };
+    const checkChain=row=>{
+      assert.equal(row.run.reason,8);assert.equal(row.run.detail,ids.slow);
+      assert.equal(row.run.pc,entries.get(ids.slow));assert.equal(row.inlineCompletions,3);
+      assert.equal(row.gates,4);assert.equal(row.publications.length,4);
+      assert.equal(row.delta,40018);assert.equal(row.run.retired,40018);
+      assert.equal(engine.get(32),stack-4);assert.equal(engine.get(52),0x646);
+      assert.deepEqual([read(output),read(output+4),read(output+8)],[initialError,entries.get(ids.set),tlsValue]);
+      assert.equal(read(0x7f000034),0,'successful actual TLS getter clears LastError');
+      assert.equal(read(output+16),0,'first slow gate has not executed its return continuation');
+    };
+    cache.configureInlineGates(true,{paused:true,open:cache.open});
+    const ex=cache.cpu.wm.exports,oldJit=ex.get_jit_config(0),oldStackLimit=Error.stackTraceLimit;
+    Error.stackTraceLimit=64;
+    try {
+      stage='cold inline work aggregate';ex.set_jit_config(0,1);reset();checkChain(execute('cold'));
+      ex.set_jit_config(0,0);
+      report.inline.jitBefore=runtime.counters();
+      for(let index=0;index<300;index++){reset();checkChain(execute('warmup'));await new Promise(resolve=>setTimeout(resolve,2));}
+      report.inline.jitAfter=runtime.counters();
+      assert(report.inline.jitAfter.finalizedModules>report.inline.jitBefore.finalizedModules);
+      stage='generated inline work aggregate';reset();const warmed=execute('generated');checkChain(warmed);
+      report.inline.nativeGateWitness={generatedCallback:/at g[0-9a-f]+@t/.test(warmed.publications[0].stack),
+        semantics:'registered API thunk may remain interpreted; finalized modules during this caller campaign and the separate actual continuation probe provide the bounded JIT evidence'};
+      engine.ok('core_capture_windows_call');const token=engine.resultView(112).getUint32(16,true);
+      engine.ok('core_complete_windows_call',token);assert.equal(engine.get(48),afterSlow);
+      const followOn=execute('first slow gate completed once');
+      assert.equal(followOn.inlineCompletions,0);assert.equal(followOn.delta,5);assert.equal(followOn.run.detail,ids.slow);
+      assert.equal(read(output+12),threadId);assert.equal(read(output+16),0x52494e47);
+      stage='inline owner opt-out';reset();allow=false;const clocks=clockCalls,optOut=execute('owner opt-out');
+      assert.equal(optOut.inlineCompletions,0);assert.equal(optOut.run.detail,ids.get);
+      assert.equal(optOut.delta,40004);assert.equal(clockCalls,clocks);assert.equal(optOut.publications.length,1);
+      allow=true;
+      stage='completed inline deadline yields returned state';reset();const completed=cache.inlineCompletions;
+      cache.inlineOwner.canContinue=()=>cache.inlineCompletions===completed;
+      const yielded=execute('deadline after successful completion');
+      assert.equal(yielded.run.inlineYield,true);assert.equal(yielded.run.coreReason,2);assert.equal(yielded.delta,40004);
+      assert.equal(yielded.inlineCompletions,1);assert.equal(engine.get(48),afterGet);
+      assert.equal(engine.get(16),initialError);assert.equal(engine.get(32),stack);assert.equal(read(output),0);
+      cache.inlineOwner.canContinue=()=>true;const resumed=execute('resume after completed deadline yield');
+      assert.equal(resumed.run.detail,ids.slow);assert.equal(resumed.inlineCompletions,2);
+      assert.equal(yielded.delta+resumed.delta,40018);
+      stage='captured inline Busy is terminal';reset();const status=engine.status,before=cache.stats();let captures=0,failure;
+      engine.status=function(operation,...args) {
+        if(operation==='component_cpu_try_complete_gate') {
+          captures++;status.call(this,'core_capture_windows_call');return 12;
+        }
+        return status.call(this,operation,...args);
+      };
+      try {cache.import();assert.throws(()=>cache.execute(cache.select()),error=>{failure=error;return error.status===12;});}
+      finally {engine.status=status;}
+      for(const operation of ['import','select','execute'])assert.throws(()=>cache[operation](),error=>error===failure);
+      assert.equal(captures,1);assert.equal(cache.stats().runs,before.runs);assert.equal(read(output+16),0);
+      assert.equal(cache.stats().inlineFailed,true);report.inline.busy={poisoned:true,captures,message:failure.message};
+    } finally {ex.set_jit_config(0,oldJit);Error.stackTraceLimit=oldStackLimit;}
+  } else if(portText==='port') {
     stage='owned port gates and denied I/O forms';
     assert.equal(cache.portGates,false,'the existing default remains UD2');
     const probePc=0x600700,source=0x601600,destination=0x601640,unmapped=0x6f0000;
