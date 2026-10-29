@@ -11,7 +11,7 @@ export const SYSTEM_MODULES = [
 function config(engine,magic,operation,values) {const bytes=record(magic,64);values.forEach((v,i)=>view(bytes).setUint32(16+i*4,v,true));engine.request(bytes);engine.ok(operation,bytes.length);}
 export function configure(h) {
   h.ok('configure_cpu_clock',1_000_000_000,0,0,0);
-  h.ok('configure_windows_memory',4096,65536,64,1_048_576,4096,64*1024*1024);
+  h.ok('configure_windows_memory',4096,65536,64,1_048_576,4096,128*1024*1024);
   h.ok('configure_media',48000);const mediaEpoch=view(h.take(64)).getBigUint64(16,true);
   h.ok('configure_synchronization',1024,4096,8192,64);h.ok('configure_threads',64,1024,256,16,4096);
   h.ok('configure_module_limits',128,192*1024*1024,64,131072,8*1024*1024);
