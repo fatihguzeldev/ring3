@@ -79,7 +79,7 @@ impl EngineInstance {
             && !tls_getter
             && !gate.is_some_and(|gate| {
                 gate.interface == InterfaceKind::Device
-                    && matches!(gate.slot, 37 | 42 | 46 | 50 | 61 | 63 | 83 | 85)
+                    && matches!(gate.slot, 37 | 42 | 46 | 50 | 61 | 63 | 70 | 71 | 83 | 85)
             })
         {
             return false;

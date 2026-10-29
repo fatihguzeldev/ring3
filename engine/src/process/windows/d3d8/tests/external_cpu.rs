@@ -5,9 +5,13 @@ use crate::{
         x86::{STATE_SIZE, encode_state_current},
     },
     cpu::x86::State32,
-    graphics::d3d8::api::{InterfaceKind, MethodGate},
+    graphics::d3d8::{
+        api::{InterfaceKind, MethodGate},
+        device::Device,
+        resources::LockFlags,
+    },
     memory::{GuestAddress, PageRange, Permissions},
-    process::EngineInstance,
+    process::{CallError, EngineInstance, HostError},
 };
 
 const PC: u32 = 0x9000;
@@ -36,6 +40,8 @@ fn prepare(engine: &mut EngineInstance, device: GuestAddress, slot: u8) -> u32 {
         46 => &[device.0, 0, 1],
         50 => &[device.0, 7, 1],
         63 => &[device.0, 0, 1, 1],
+        70 => &[device.0, 4, 0, 1],
+        71 => &[device.0, 4, 0, 3, 0, 1],
         _ => &[device.0, 0, PAYLOAD, 1],
     };
     let memory = engine.memory.as_mut().unwrap();
@@ -63,6 +69,226 @@ fn prepare(engine: &mut EngineInstance, device: GuestAddress, slot: u8) -> u32 {
         slot,
     }
     .id()
+}
+
+fn prepare_draw(slot: u8, fragmented: bool) -> (EngineInstance, GuestAddress, u32) {
+    let (mut engine, device) = setup();
+    if fragmented {
+        let context = engine.d3d8.as_mut().unwrap();
+        let description = context.device(device).unwrap().description();
+        let mut limits = context.config.device;
+        limits.commands.batch_bytes = 128;
+        *context.device_mut(device).unwrap() = Device::new(1, description, limits).unwrap();
+    }
+    let drain = |context: &mut super::super::D3D8Runtime32| {
+        while let Some(packet) = context.device_mut(device).unwrap().seal_batch().unwrap() {
+            context
+                .device_mut(device)
+                .unwrap()
+                .acknowledge_batch(packet)
+                .unwrap();
+        }
+    };
+    drain(engine.d3d8.as_mut().unwrap());
+    for binding in [83, 85] {
+        let pointer = binding_resource(&mut engine, device, binding);
+        drain(engine.d3d8.as_mut().unwrap());
+        let (_, args) = prepare_binding(&mut engine, device, binding, pointer);
+        let mut context = engine.d3d8.take().unwrap();
+        let memory = engine.memory.as_mut().unwrap();
+        let surface = context.resource(pointer, device).unwrap();
+        let bytes: &[u8] = if binding == 83 {
+            &[0x3a; 36]
+        } else {
+            &[0, 0, 1, 0, 2, 0]
+        };
+        context
+            .lock_buffer_guest(
+                memory,
+                device,
+                surface.resource,
+                0,
+                bytes.len() as u32,
+                LockFlags(0),
+                PAYLOAD,
+            )
+            .unwrap();
+        memory
+            .write(GuestAddress(read(memory, PAYLOAD)), bytes)
+            .unwrap();
+        context.unlock_guest(memory, device, surface).unwrap();
+        assert_eq!(
+            context
+                .device(device)
+                .unwrap()
+                .resources()
+                .version(surface.resource),
+            Ok(2)
+        );
+        assert_eq!(
+            &context
+                .device(device)
+                .unwrap()
+                .resources()
+                .bytes(surface)
+                .unwrap()[..bytes.len()],
+            bytes
+        );
+        drain(&mut context);
+        context
+            .binding_call(memory, device, binding, &args)
+            .unwrap();
+        engine.d3d8 = Some(context);
+    }
+    let context = engine.d3d8.as_mut().unwrap();
+    context
+        .device_mut(device)
+        .unwrap()
+        .bind_vertex_shader(2)
+        .unwrap();
+    context.device_mut(device).unwrap().begin_scene().unwrap();
+    let id = prepare(&mut engine, device, slot);
+    (engine, device, id)
+}
+
+#[test]
+fn external_cpu_dirty_policy_draws_use_explicit_resource_versions_without_guest_mutation() {
+    for slot in [70, 71] {
+        let (mut engine, device, id) = prepare_draw(slot, false);
+        let before = engine.memory.as_mut().unwrap().external_descriptor();
+        let mut ram = [0; 4096];
+        engine
+            .memory()
+            .unwrap()
+            .read(GuestAddress(DATA), &mut ram)
+            .unwrap();
+        assert!(
+            engine.external_cpu_can_defer_gate(PC, id),
+            "draw slot {slot}"
+        );
+        let args = if slot == 70 {
+            vec![device.0, 4, 0, 1]
+        } else {
+            vec![device.0, 4, 0, 3, 0, 1]
+        };
+        let mut context = engine.d3d8.take().unwrap();
+        assert_eq!(
+            context
+                .draw_call(engine.memory.as_mut().unwrap(), device, slot, &args)
+                .unwrap(),
+            Some(0)
+        );
+        let backend = context.device_mut(device).unwrap();
+        let target = backend.back_buffer(0).unwrap();
+        assert_eq!(backend.resources().version(target.resource), Ok(2));
+        backend.seal_batch().unwrap().unwrap();
+        let (_, fragments) =
+            crate::abi::graphics::d3d8::packet(backend.queue().peek().unwrap().1).unwrap();
+        assert_eq!(fragments.filter(|fragment| fragment.opcode == 8).count(), 1);
+        engine.d3d8 = Some(context);
+        let after = engine.memory.as_mut().unwrap().external_descriptor();
+        assert_eq!(
+            &after[64..96],
+            &before[64..96],
+            "identity, content/code and mapping epochs"
+        );
+        assert_eq!(&after[112..120], &before[112..120]);
+        let mut current = [0; 4096];
+        engine
+            .memory()
+            .unwrap()
+            .read(GuestAddress(DATA), &mut current)
+            .unwrap();
+        assert_eq!(current, ram);
+        assert!(
+            !engine.external_cpu_can_defer_gate(PC, id),
+            "sealed queue restores publication barrier"
+        );
+    }
+}
+
+#[test]
+fn external_cpu_dirty_policy_draw_drain_retains_completion_without_replaying_draw() {
+    let (mut engine, device, id) = prepare_draw(71, true);
+    engine
+        .configure_user32(
+            Default::default(),
+            PageRange::new(GuestAddress(0x3000_0000), 16).unwrap(),
+        )
+        .unwrap();
+    assert!(engine.external_cpu_can_defer_gate(PC, id));
+    let (generation, token) = super::transport::capture_gate(
+        &mut engine,
+        MethodGate {
+            interface: InterfaceKind::Device,
+            slot: 71,
+        },
+        &[device.0, 4, 0, 3, 0, 1],
+    );
+    let before = engine.memory().unwrap().transaction_version();
+    assert_eq!(
+        engine.complete_windows_call(91, generation, token),
+        Err(HostError::Call(CallError::Busy))
+    );
+    assert!(
+        engine
+            .d3d8
+            .as_ref()
+            .unwrap()
+            .device(device)
+            .unwrap()
+            .queue()
+            .is_draining()
+    );
+    assert!(!engine.external_cpu_can_defer_gate(PC, id));
+    let target = engine
+        .d3d8
+        .as_ref()
+        .unwrap()
+        .device(device)
+        .unwrap()
+        .back_buffer(0)
+        .unwrap();
+    let mut draws = 0;
+    while let Some(packet) = engine
+        .d3d8
+        .as_mut()
+        .unwrap()
+        .device_mut(device)
+        .unwrap()
+        .seal_batch()
+        .unwrap()
+    {
+        let backend = engine.d3d8.as_ref().unwrap().device(device).unwrap();
+        let (_, fragments) =
+            crate::abi::graphics::d3d8::packet(backend.queue().peek().unwrap().1).unwrap();
+        draws += fragments
+            .filter(|fragment| fragment.opcode == 8 && fragment.flags & 1 != 0)
+            .count();
+        engine
+            .d3d8
+            .as_mut()
+            .unwrap()
+            .device_mut(device)
+            .unwrap()
+            .acknowledge_batch(packet)
+            .unwrap();
+    }
+    engine.complete_windows_call(91, generation, token).unwrap();
+    assert_eq!(draws, 1);
+    assert_eq!(
+        engine
+            .d3d8
+            .as_ref()
+            .unwrap()
+            .device(device)
+            .unwrap()
+            .resources()
+            .version(target.resource),
+        Ok(2)
+    );
+    assert_eq!(engine.memory().unwrap().transaction_version(), before);
+    assert!(engine.pending_call.is_none());
 }
 
 fn binding_resource(engine: &mut EngineInstance, device: GuestAddress, slot: u8) -> GuestAddress {
@@ -254,7 +480,7 @@ fn external_cpu_dirty_policy_allows_only_audited_scalar_setters() {
         assert_eq!(engine.memory().unwrap().transaction_version(), version);
         assert!(!engine.external_cpu_can_defer_gate(PC + 1, id));
     }
-    for slot in [38, 51, 61, 62, 71, 83] {
+    for slot in [38, 51, 61, 62, 72, 73, 83] {
         let id = prepare(&mut engine, device, slot);
         assert!(
             !engine.external_cpu_can_defer_gate(PC, id),
