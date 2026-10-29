@@ -141,12 +141,15 @@ export class Session {
     while (await this.files.sourceProgress()) this.abort.signal.throwIfAborted();
     this.abort.signal.throwIfAborted();
     this.code = this.externalCpu ? await this.externalCpu.attach(h, execution) : new CodeCache(h, execution);
-    if(this.backend==='v86')this.code.inlineOwner={
-      canContinue:()=>this.running && !this.paused && !this.stopped && !this.measurements &&
-        !this.callDiagnostics && !this.frameProbe && !globalThis.__r3PhaseWindow &&
-        !this.stack().length && !this.needsSchedule && performance.now()<this.inlineQuantumDeadline,
-      observeClock:()=>this.observeClock(),
-    };
+    if(this.backend==='v86') {
+      this.code.inlineOwner={
+        canContinue:()=>this.running && !this.paused && !this.stopped && !this.measurements &&
+          !this.callDiagnostics && !this.frameProbe && !globalThis.__r3PhaseWindow &&
+          !this.stack().length && !this.needsSchedule && performance.now()<this.inlineQuantumDeadline,
+        observeClock:()=>this.observeClock(),
+      };
+      if(typeof this.code.initializeExecutionPolicy==='function')this.code.initializeExecutionPolicy();
+    }
     this.abort.signal.throwIfAborted();
     this.observation?.observer.event("execution.backend", { backend: this.backend, callback_backend: this.backend,
       engine_sha256: h.hash, cpu_sha256: this.externalCpu?.hash });

@@ -390,6 +390,71 @@ function overlapFixture() {
   return {...f,setBusy(value){busy=value;},setNative(value,count){enabled=value;completed=count;},corrupt(fn){corrupt=fn;}};
 }
 
+function startupFixture() {
+  const f=fixture([]),c=f.cache,result=c.engine.resultView(),ordinary=c.engine.ok;
+  Object.assign(c,{imported:false,portGates:false,portGateMode:0,inlineGates:false,directGates:false,
+    directBindings:false,guestReturns:false,graphicsOverlap:false,inlineFailure:null});
+  c.inlineOwner={canContinue:()=>false,observeClock:()=>0n};
+  c.engine.api={component_cpu_set_gate_mode(){},component_cpu_try_inline_gate(){},
+    component_cpu_try_complete_gate(){},component_cpu_try_direct_gate(){},component_cpu_try_direct_gate_mask(){}};
+  c.engine.ok=(operation,...args)=>{
+    if(operation!=='component_cpu_set_gate_mode')return ordinary(operation,...args);
+    f.events.push('mode:'+args[2]);result.setUint32(0,args[2],true);result.setUint32(4,12,true);
+  };
+  c.tables.ownsPin=true;c.tables.globalCodeSupported=true;c.tables.globalCode=false;
+  c.tables.refresh=()=>f.events.push('refresh');
+  c.tables.configureGlobalCode=function(enabled,owner){
+    assert.deepEqual(owner,{paused:true,open:false});f.events.push('global:'+enabled);this.globalCode=enabled;
+  };
+  c.cpu.full_clear_tlb=()=>f.events.push('tlb');c.traps.configurePortGates=enabled=>f.events.push('io:'+enabled);
+  return f;
+}
+
+test('the fresh v86 backend initializes the measured bridge policy before importing or running guest code',()=>{
+  const f=startupFixture(),c=f.cache;c.deferDirty=false;
+  c.initializeExecutionPolicy();
+  assert.equal(c.deferDirty,true);assert.equal(c.portGates,true);assert.equal(c.portGateMode,1);
+  assert.equal(c.inlineGates,true);assert.equal(c.directGates,true);assert.equal(c.directBindings,true);
+  assert.equal(c.tables.globalCode,true);assert.equal(c.guestReturns,false);assert.equal(c.graphicsOverlap,false);
+  assert.equal(c.imported,false);assert.equal(c.runs,0);assert.equal(c.open,false);
+  assert.deepEqual(f.events.filter(event=>event.startsWith('mode:')),['mode:1']);
+  assert(f.events.indexOf('global:true')>f.events.indexOf('mode:1'));
+  assert(!f.events.includes('cpu'));assert(!f.events.includes('import'));
+  const before=f.events.slice();assert.throws(()=>c.initializeExecutionPolicy(),/initial|startup|once/);
+  assert.deepEqual(f.events,before,'the one-shot initializer cannot patch or flush twice');
+});
+
+test('startup keeps unsupported old hosts on compatible execution without pretending masked support',()=>{
+  const f=startupFixture(),c=f.cache;c.engine.api={};c.tables.dirtyGateFlagsSupported=false;c.tables.globalCodeSupported=false;
+  c.initializeExecutionPolicy();assert.deepEqual(f.events,[]);
+  assert.equal(c.deferDirty,true);assert.equal(c.portGates,false);assert.equal(c.inlineGates,false);
+  assert.equal(c.directGates,false);assert.equal(c.directBindings,false);assert.equal(c.tables.globalCode,false);
+  const old=startupFixture();delete old.cache.engine.api.component_cpu_try_inline_gate;
+  delete old.cache.engine.api.component_cpu_try_direct_gate_mask;old.cache.tables.globalCodeSupported=false;
+  old.cache.initializeExecutionPolicy();assert.equal(old.cache.inlineGates,true);assert.equal(old.cache.directGates,true);
+  assert.equal(old.cache.directBindings,false);assert.equal(old.cache.tables.globalCode,false);
+});
+
+test('startup policy admission rejects started or unowned caches before any configuration mutation',()=>{
+  for(const change of [c=>c.runs=1,c=>c.imported=true,c=>c.open=true,c=>c.closed=true,
+      c=>c.tables.ownsPin=false,c=>delete c.inlineOwner.observeClock]) {
+    const f=startupFixture();change(f.cache);
+    assert.throws(()=>f.cache.initializeExecutionPolicy(),/initial|startup/);assert.deepEqual(f.events,[]);
+    assert.equal(f.cache.portGates,false);assert.equal(f.cache.directGates,false);
+  }
+});
+
+test('a claimed startup feature failure remains terminal after native configuration has begun',()=>{
+  const f=startupFixture(),c=f.cache,failure=new Error('native startup global configuration failed');
+  c.tables.configureGlobalCode=()=>{throw failure;};
+  assert.throws(()=>c.initializeExecutionPolicy(),error=>error===failure);
+  assert.equal(c.portGates,true);assert.equal(c.inlineFailure,failure);
+  const before=f.events.slice();
+  for(const operation of ['initializeExecutionPolicy','import','select','execute'])
+    assert.throws(()=>V86CodeCache.prototype[operation].call(c),error=>error===failure);
+  assert.deepEqual(f.events,before,'terminal startup failure cannot retry native mutation or guest execution');
+});
+
 test('graphics overlap publishes before guarded mode changes and queries the exact fresh u64 counter',()=>{
   const f=overlapFixture(),c=f.cache,owner={paused:true,open:false};
   for(const invalid of [undefined,{paused:false,open:false},{paused:true,open:true}])

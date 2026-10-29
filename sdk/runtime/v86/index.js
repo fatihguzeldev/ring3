@@ -88,6 +88,30 @@ export class V86CodeCache {
     this.directBindings=false;this.directBindingCompletions=0;
     this.guestReturns=false;this.guestReturnCompletions=0;
     this.graphicsOverlap=false;
+    this.executionPolicyInitialized=false;
+  }
+  initializeExecutionPolicy() {
+    if(this.inlineFailure)throw this.inlineFailure;
+    if(this.executionPolicyInitialized || this.runs!==0 || this.imported || this.open || this.closed ||
+        this.tables.ownsPin!==true || typeof this.inlineOwner?.canContinue!=='function' ||
+        typeof this.inlineOwner?.observeClock!=='function')
+      throw new Error('v86 startup policy requires its fresh closed owner');
+    const api=this.engine.api,owner={paused:true,open:false};
+    try {
+      this.configureDirtyDeferral(true,owner);
+      const inlineSupported=this.tables.dirtyGateFlagsSupported===true &&
+        typeof api.component_cpu_set_gate_mode==='function' &&
+        (typeof api.component_cpu_try_inline_gate==='function' || typeof api.component_cpu_try_complete_gate==='function');
+      if(inlineSupported) {
+        this.configurePortGates(true,owner);this.configureInlineGates(true,owner);
+        if(typeof api.component_cpu_try_direct_gate==='function') {
+          this.configureDirectGates(true,owner);
+          if(typeof api.component_cpu_try_direct_gate_mask==='function')this.configureDirectBindings(true,owner);
+        }
+      }
+      if(this.tables.globalCodeSupported===true)this.tables.configureGlobalCode(true,owner);
+      this.executionPolicyInitialized=true;
+    } catch(error) {this.inlineFailure=error;throw error;}
   }
   get pc() {return this.engine.get(48);}
   get guestReturnsSupported() {return this.tables.guestReturnsSupported===true;}
