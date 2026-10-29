@@ -68,6 +68,44 @@ async function pipelineFixture(t) {
   return {...f,renderer,targets,run:(state,kind='triangle-list',kinds=Array(8).fill(null),patch=false,output=targets)=>renderer.gpuPipeline(state,kind,output,kinds,patch)};
 }
 
+test('normal render passes reuse attachments across state snapshots and close before barriers',async t=>{
+  const {host,events}=await graphicsFixture(t);await host.consume(packet([[1,definition]]));
+  const renderer=host.sessions.get(1n),state=pipelineState(),calls=[];let active=null,next=0;
+  host.device.createCommandEncoder=()=>({beginRenderPass(){
+    assert.equal(active,null,'encoder operations cannot nest in an open pass');const id=++next;active=id;calls.push(['begin',id]);
+    return Object.fromEntries(['setPipeline','setBindGroup','setViewport','setScissorRect','setStencilReference','setBlendConstant','draw'].map(name=>[name,(...args)=>calls.push([name,id,...args])]).concat([['end',()=>{assert.equal(active,id);active=null;calls.push(['end',id]);}]]));
+  },finish(){assert.equal(active,null);calls.push(['finish']);return {};}});
+  const color={texture:{},gpuFormat:'rgba8unorm'},depth={texture:{},gpuFormat:'depth24plus-stencil8'};
+  let level=0,depthTexture=depth.texture;
+  renderer.state=()=>state;renderer.program=()=>({});renderer.resources.packStreams=()=>({buffer:{},temporary:false});
+  renderer.renderTargets=()=>({color:{item:color,sub:{info:{width:4,height:4,level,face:0}},view:{}},depth:{item:{...depth,texture:depthTexture},sub:{info:{level:0,face:0}},view:{}}});
+  renderer.textureBindings=()=>({kinds:[],entries:[]});renderer.gpuPipeline=async()=>({getBindGroupLayout:()=>({})});
+  const draw=async()=>{const words=[4,1,...Array(25).fill(0),0,0];await renderer.draw({u64:()=>1n,targets:()=>({}),u32:()=>words.shift()});assert.equal(words.length,0);};
+  const command=(opcode,words)=>{const bytes=new Uint8Array(words.length*4),v=new DataView(bytes.buffer);words.forEach((x,i)=>v.setUint32(i*4,x,true));return {opcode,bytes};};
+  assert.equal(renderer.renderPassReuseEnabled,false);await draw();await draw();renderer.flush();
+  assert.equal(calls.filter(row=>row[0]==='begin').length,2);assert.equal(renderer.normalPasses,2);
+  renderer.configureRenderPassReuse(true);calls.length=0;await draw();
+  const snapshot=[2,0,2,174,...state.render,8,...state.stages.flatMap(row=>[29,...row]),266,9,...Array(9+17).fill(0),0,0,0,0,0,0,1,1,0,0x3f800000,0,0,0,96,...Array(384).fill(0),8,...Array(32).fill(0)];
+  await renderer.execute(command(6,snapshot));state.viewport.x=1;state.render[57]=7;state.render[60]=0xff112233;await draw();
+  assert.equal(calls.filter(row=>row[0]==='begin').length,1);assert.equal(calls.filter(row=>row[0]==='end').length,0);
+  assert.deepEqual(calls.filter(row=>row[0]==='setViewport').map(row=>row[2]),[0,1]);
+  for(const name of ['setPipeline','setBindGroup','setScissorRect','setStencilReference','setBlendConstant'])assert.equal(calls.filter(row=>row[0]===name).length,2);
+  assert.equal(renderer.renderPassReuses,1);assert.throws(()=>renderer.configureRenderPassReuse(false),/idle renderer/);
+  depthTexture={};await draw();assert.deepEqual(calls.filter(row=>['begin','end'].includes(row[0])).map(row=>row[0]),['begin','end','begin']);
+  level=1;await draw();assert.equal(calls.filter(row=>row[0]==='begin').length,3,'a different mip cannot reuse the attachment');
+  await renderer.clear({targets:()=>({}),u32:(()=>{const a=[1,0,0,0];return()=>a.shift();})(),f32:()=>1,count:()=>0});
+  assert.equal(active,null,'clear owns a distinct completed pass');
+  await draw();const upload=renderer.resources.upload;renderer.resources.upload=()=>{assert.equal(active,null);calls.push(['upload']);};
+  await renderer.execute(command(3,[]));renderer.resources.upload=upload;
+  assert.equal(active,null);assert.equal(renderer.pendingEncoder,null);assert.equal(calls.at(-1)[0],'upload');
+  await draw();const submits=events.filter(x=>x==='submit').length;
+  const execute=renderer.execute;renderer.execute=async()=>{throw Error('command failed with open pass');};
+  const bad=packet([[1,definition]]),view=new DataView(bad);for(const at of [24,32,40,72])view.setBigUint64(at,2n,true);
+  await assert.rejects(renderer.accept(bad),/command failed with open pass/);renderer.execute=execute;
+  assert.equal(active,null);assert.equal(renderer.pendingPass,null);assert.equal(renderer.pendingEncoder,null);assert.equal(events.filter(x=>x==='submit').length,submits);
+  await draw();host.close();assert.equal(active,null);assert.equal(renderer.pendingPass,null);
+});
+
 test('batched state uploads preserve aligned draw ranges and upload each encoder before submission',async t=>{
   const {host,events}=await graphicsFixture(t);await host.consume(packet([[1,definition]]));
   const renderer=host.sessions.get(1n),device=host.device,writes=[],entries=[],state=pipelineState();

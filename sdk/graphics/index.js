@@ -7,6 +7,7 @@ import {ClosedEpochs} from './device/epochs.js';
 const probeOrigin=BigInt(Math.floor(performance.timeOrigin*1e6));
 const probeStamp=()=>({origin_ns:String(probeOrigin),timestamp_ns:String(probeOrigin+BigInt(Math.floor(performance.now()*1e6)))});
 const align=(n,a)=>Math.ceil(n/a)*a;
+const sameSurface=(a,b)=>a&&b?a.item.texture===b.item.texture&&a.sub.info.level===b.sub.info.level&&a.sub.info.face===b.sub.info.face:!a&&!b;
 const color=value=>({r:(value>>>16&255)/255,g:(value>>>8&255)/255,b:(value&255)/255,a:(value>>>24)/255});
 const compare=[null,'never','less','equal','less-equal','greater','not-equal','greater-equal','always'];
 const blendFactors={1:'zero',2:'one',3:'src',4:'one-minus-src',5:'src-alpha',6:'one-minus-src-alpha',7:'dst-alpha',8:'one-minus-dst-alpha',9:'dst',10:'one-minus-dst',11:'src-alpha-saturated',14:'constant',15:'one-minus-constant'};
@@ -31,6 +32,7 @@ class DeviceRenderer {
     this.shaders=new Map();this.states=new Map();this.pipelines=new Map();this.domains=new Map();this.patches=new Map();this.temporary=[];
     this.pipelineInputs=new Map();this.pipelineInputMemoEnabled=false;this.programIdentities=new WeakMap();this.nextProgramIdentity=0;
     this.pipelineInputHits=0;this.pipelineInputMisses=0;this.pipelineBuilds=0;
+    this.renderPassReuseEnabled=false;this.pendingPass=null;this.pendingOutput=null;this.normalPasses=0;this.renderPassReuses=0;
     this.retainedIndicesEnabled=false;this.retainedIndexUses=0;
     this.stateUploadBatchEnabled=false;this.stateUploadPages=[];this.stateUploadPool=[];
     this.stateUploadBatchUses=0;this.stateUploadBatchUploads=0;this.stateUploadBatchPages=0;this.stateUploadBatchBytes=0;
@@ -41,6 +43,16 @@ class DeviceRenderer {
   configureStateUploadBatch(enabled){
     require(typeof enabled==='boolean'&&!this.closed&&!this.accepting&&!this.pendingEncoder&&!this.stateUploadPages.length,'state upload changes require an idle renderer');
     this.stateUploadBatchEnabled=enabled;return enabled;
+  }
+  configureRenderPassReuse(enabled){
+    require(typeof enabled==='boolean'&&!this.closed&&!this.accepting&&!this.pendingEncoder&&!this.pendingPass,'render pass changes require an idle renderer');
+    this.renderPassReuseEnabled=enabled;return enabled;
+  }
+  endPass(){const pass=this.pendingPass;this.pendingPass=null;this.pendingOutput=null;pass?.end();}
+  normalPass(output){
+    if(this.renderPassReuseEnabled&&this.pendingPass&&sameSurface(this.pendingOutput.color,output.color)&&sameSurface(this.pendingOutput.depth,output.depth)){this.renderPassReuses++;return this.pendingPass;}
+    this.endPass();const pass=this.encoder().beginRenderPass(this.passDescriptor(output));this.normalPasses++;
+    if(this.renderPassReuseEnabled){this.pendingPass=pass;this.pendingOutput=output;}return pass;
   }
   stateBinding(bytes){
     if(!this.stateUploadBatchEnabled)return {buffer:this.scratch(bytes,GPUBufferUsage.STORAGE)};
@@ -61,7 +73,7 @@ class DeviceRenderer {
     return {buffer:page.buffer,offset,size:bytes.byteLength};
   }
   encoder(){return this.pendingEncoder??=this.device.createCommandEncoder();}
-  flush(){const encoder=this.pendingEncoder;if(encoder){
+  flush(){this.endPass();const encoder=this.pendingEncoder;if(encoder){
     const pages=this.stateUploadPages;this.pendingEncoder=null;
     try{
       for(const page of pages){this.device.queue.writeBuffer(page.buffer,0,page.bytes,0,page.used);this.stateUploadBatchUploads++;this.stateUploadBatchBytes+=page.used;}
@@ -81,8 +93,10 @@ class DeviceRenderer {
       this.flush();
       for(const b of this.temporary)b.destroy();this.temporary.length=0;
       return {epoch:decoded.epoch,sequence:decoded.sequence,readbacks,...(frameProbe?{presentCommands}:{})};
+    } catch(error){
+      try{this.endPass();}catch(cleanup){error.cleanupFailure=cleanup.message;}throw error;
     } finally {
-      this.pendingEncoder=null;this.stateUploadPages.length=0;this.accepting=false;
+      this.pendingPass=null;this.pendingOutput=null;this.pendingEncoder=null;this.stateUploadPages.length=0;this.accepting=false;
     }
   }
   async execute(command,frameProbe) {
@@ -94,12 +108,12 @@ class DeviceRenderer {
       case 4:{const handle=r.u32();require(!this.shaders.has(handle),'shader handle reused while live');this.shaders.set(handle,shader(r));break;}
       case 5:require(this.shaders.delete(r.u32()),'stale shader deletion');break;
       case 6:{const id=r.u64();require(!this.states.has(id),'pipeline identity replay');this.states.set(id,pipeline(r));while(this.states.size>256)this.states.delete(this.states.keys().next().value);break;}
-      case 7:this.targets=r.targets();break;
+      case 7:this.endPass();this.targets=r.targets();break;
       case 8:await this.draw(r);break;
       case 9:await this.clear(r);break;
       case 10:this.copy(r);break;
       case 11:this.flush();await this.present(r,frameProbe);break;
-      case 12:{this.generation=r.u64();this.width=r.u32();this.height=r.u32();this.format=r.u32();this.samples=r.u32();this.backBuffers=Array.from({length:r.count(3)},()=>r.surface());this.depth=r.u32()?r.surface():null;break;}
+      case 12:{this.endPass();this.generation=r.u64();this.width=r.u32();this.height=r.u32();this.format=r.u32();this.samples=r.u32();this.backBuffers=Array.from({length:r.count(3)},()=>r.surface());this.depth=r.u32()?r.surface():null;break;}
       case 13:{const generation=r.u64(),event=r.u32();require(generation>0n&&event>=1&&event<=3,'device event');if(event===3){this.flush();this.removed=true;}break;}
       case 14:this.flush();result=await this.resources.readback(r);break;
       case 15:this.resources.palettes.set(r.u32(),r.take(1024).slice());break;
@@ -223,12 +237,12 @@ class DeviceRenderer {
     if(retainedIndex && this.resources.packedStreams.get(retainedIndex.key)!==retainedIndex){retainedIndex=null;indexBytes=indexWords(indexSource,indexAt,elements,indexStep);}
     const programs=this.program(p),state=this.stateBinding(stateBytes(p,programs.vertex,programs.pixel));
     const entries=[{binding:0,resource:state},{binding:1,resource:{buffer:raw}},...textures.entries];
-    const encoder=this.encoder(),pass=encoder.beginRenderPass(this.passDescriptor(output));
+    const pass=this.normalPass(output);
     pass.setPipeline(gpu);pass.setBindGroup(0,this.device.createBindGroup({layout:gpu.getBindGroupLayout(0),entries}));this.dynamic(pass,p,output);
     if(retainedIndex){pass.setIndexBuffer(retainedIndex.buffer,retainedIndex.indexFormat);pass.drawIndexed(elements,1,data.start,baseVertex,0);this.retainedIndexUses++;if(retainedIndex.cacheHit)this.resources.retainedIndexHits++;}
     else if(indexBytes){const index=this.scratch(new Uint8Array(indexBytes.buffer),GPUBufferUsage.INDEX);pass.setIndexBuffer(index,'uint32');pass.drawIndexed(indexBytes.length,1,0,baseVertex,0);}
     else pass.draw(elements,1,first,0);
-    pass.end();this.draws++;
+    if(!this.renderPassReuseEnabled)pass.end();this.draws++;
   }
   passDescriptor(output) {
     const result={colorAttachments:[{view:output.color.view,loadOp:'load',storeOp:'store'}]};
@@ -237,6 +251,7 @@ class DeviceRenderer {
   }
   dynamic(pass,p,output){const v=p.viewport,info=output.color.sub.info;require(v.x+v.width<=info.width&&v.y+v.height<=info.height,'viewport exceeds target');pass.setViewport(v.x,v.y,v.width,v.height,v.min,v.max);pass.setScissorRect(v.x,v.y,v.width,v.height);pass.setStencilReference(p.render[57]);pass.setBlendConstant(color(p.render[60]));}
   async clear(r) {
+    this.endPass();
     const targets=r.targets(),flags=r.u32(),value=r.u32(),depth=r.f32(),stencilValue=r.u32(),rectangles=Array.from({length:r.count(65536)},()=>r.rect()),output=this.renderTargets(targets);
     require(flags&&!(flags&~7),'clear flags');
     if(rectangles.length){await this.clearRectangles(output,flags,value,depth,stencilValue,rectangles);return;}
@@ -246,6 +261,7 @@ class DeviceRenderer {
     this.encoder().beginRenderPass(descriptor).end();
   }
   async clearRectangles(output,flags,value,depth,reference,rectangles){
+    this.endPass();
     require(output.depth||!(flags&6),'clear depth without target');
     const c=color(value),hasDepth=Boolean(output.depth),hasStencil=output.depth?.item.gpuFormat.includes('stencil');
     require(hasStencil||!(flags&4),'stencil clear without stencil target');
@@ -260,6 +276,7 @@ class DeviceRenderer {
     pass.end();
   }
   copy(r) {
+    this.endPass();
     const source=r.surface(),dest=r.surface(),rects=Array.from({length:r.count(65536)},()=>({from:r.rect(),to:r.words(2)})),a=this.resources.surface(source),b=this.resources.surface(dest);
     require(a.item.gpuFormat===b.item.gpuFormat,'copy format mismatch');
     if(!rects.length)rects.push({from:[0,0,a.sub.info.width,a.sub.info.height],to:[0,0]});
@@ -280,6 +297,7 @@ class DeviceRenderer {
   async patchKernel(r){require(r.u32()===1,'patch kernel version');const source=new TextDecoder('utf-8',{fatal:true}).decode(r.take(r.count(1024*1024)));this.patchModule=await checkedShader(this.device,source,'engine patch WGSL');this.patchCapture=await this.device.createComputePipelineAsync({layout:'auto',compute:{module:this.patchModule,entryPoint:'capture'}});this.patchEvaluate=await this.device.createComputePipelineAsync({layout:'auto',compute:{module:this.patchModule,entryPoint:'evaluate'}});}
   patchGeometry(r){const words=r.words(256),streams=Array.from({length:16},()=>r.u32()?{...r.version(),stride:r.u32()}:null);return {words,streams};}
   async capturePatch(geometry){
+    this.endPass();
     require(this.patchCapture,'patch WGSL missing');const params=new Uint32Array(288);params.set(geometry.words);
     const packed=this.resources.packStreams({streams:geometry.streams}),raw=packed.buffer;if(packed.temporary)this.temporary.push(raw);
     // packStreams uses a 128-byte header; kernel parameters hold the same raw byte bases.
@@ -292,6 +310,7 @@ class DeviceRenderer {
   async definePatch(r){const id=r.u64(),vertexShader=r.u32();require(!this.patches.has(id),'patch identity replay');const patch=await this.capturePatch(this.patchGeometry(r));this.patches.set(id,{id,vertexShader,...patch});}
   defineDomain(r){const id=r.u64(),triangular=r.u32(),continuous=r.u32(),segments=r.words(4),count=r.count(1000000),indexCount=r.count(6000000);require(!this.domains.has(id),'domain identity replay');const vertices=this.resources.buffer(r.take(count*8),GPUBufferUsage.STORAGE),indices=this.resources.buffer(r.take(indexCount*4),GPUBufferUsage.INDEX);this.domains.set(id,{vertices,indices,count,indexCount,triangular,continuous,segments});}
   async drawPatch(r){
+    this.endPass();
     const id=r.u64(),domain=r.u64(),targets=r.targets(),b=bindings(r),mode=r.u32(),patch=mode===0?this.patches.get(r.u64()):await this.capturePatch(this.patchGeometry(r));require(patch&&this.domains.has(domain),'patch/domain not found');
     const d=this.domains.get(domain),params=new Uint32Array(288);params.set(patch.words);const stateBuffer=this.scratch(new Uint8Array(params.buffer),GPUBufferUsage.STORAGE);
     const vertices=this.device.createBuffer({size:d.count*17*16,usage:GPUBufferUsage.STORAGE});this.temporary.push(vertices);if(mode!==0)this.temporary.push(patch.controls);
@@ -301,7 +320,7 @@ class DeviceRenderer {
     const entries=[{binding:0,resource:state},{binding:1,resource:{buffer:raw}},{binding:18,resource:{buffer:vertices}},...textures.entries];
     const encoder=this.encoder(),pass=encoder.beginRenderPass(this.passDescriptor(output));pass.setPipeline(gpu);pass.setBindGroup(0,this.device.createBindGroup({layout:gpu.getBindGroupLayout(0),entries}));this.dynamic(pass,p,output);pass.setIndexBuffer(d.indices,'uint32');pass.drawIndexed(d.indexCount);pass.end();this.draws++;
   }
-  close(){if(this.closed)return;this.closed=true;this.pendingEncoder=null;this.stateUploadPages.length=0;for(const page of this.stateUploadPool)page.buffer.destroy();this.stateUploadPool.length=0;this.resources.close();for(const p of this.patches.values())p.controls.destroy();for(const d of this.domains.values()){d.vertices.destroy();d.indices.destroy();}for(const b of this.temporary)b.destroy();this.temporary.length=0;this.patches.clear();this.domains.clear();this.states.clear();this.shaders.clear();this.pipelines.clear();this.pipelineInputs.clear();}
+  close(){if(this.closed)return;this.closed=true;this.endPass();this.pendingEncoder=null;this.stateUploadPages.length=0;for(const page of this.stateUploadPool)page.buffer.destroy();this.stateUploadPool.length=0;this.resources.close();for(const p of this.patches.values())p.controls.destroy();for(const d of this.domains.values()){d.vertices.destroy();d.indices.destroy();}for(const b of this.temporary)b.destroy();this.temporary.length=0;this.patches.clear();this.domains.clear();this.states.clear();this.shaders.clear();this.pipelines.clear();this.pipelineInputs.clear();}
 }
 
 export async function createGraphicsHost(canvas,{onDiagnostic=()=>{}}={}) {
