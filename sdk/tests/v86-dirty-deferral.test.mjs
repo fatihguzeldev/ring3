@@ -75,6 +75,18 @@ function budgetFixture() {
   return f;
 }
 
+test('targeted mapping configuration publishes pending evidence before refreshing and switching the paused mode',()=>{
+  const f=budgetFixture(),c=f.cache,owner={paused:true,open:false};
+  c.tables.configureTargetedMappings=enabled=>{f.events.push('mapping-mode');return enabled;};
+  c.dirtyPending=true;
+  assert.equal(c.configureTargetedMappings(true,owner),true);
+  assert.deepEqual(f.events,['dirty','refresh','mapping-mode']);assert.equal(c.dirtyPending,false);
+  for(const invalid of [undefined,{paused:false,open:false},{paused:true,open:true}])
+    assert.throws(()=>c.configureTargetedMappings(false,invalid),/paused/);
+  c.open=true;assert.throws(()=>c.configureTargetedMappings(false,owner),/paused/);c.open=false;
+  c.closed=true;assert.throws(()=>c.configureTargetedMappings(false,owner),/paused/);
+});
+
 test('unobserved inner Budget exits defer dirty scans only with explicit owner permission and flush on disable',()=>{
   const f=budgetFixture(),c=f.cache,owner={paused:true,open:false};
   c.inlineOwner={canContinue:()=>true,canBridge:()=>true};

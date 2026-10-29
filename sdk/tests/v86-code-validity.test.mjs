@@ -445,6 +445,48 @@ test('native read-only directory access resets require a TLB flush even without 
   assert.equal(f.info.transaction,transaction);assert.equal(f.requests.length,0);
 });
 
+test('targeted mapping refresh invalidates every changed VA after final PTE writes and before acknowledgement',()=>{
+  const f=world({journal:true,nativeDirtyEpoch:true,dirtyVirtualPages:true,preciseExecutable:true});
+  f.map(DATA+2,4,3);const t=new PageTables(f.engine,f.cpu),owner={paused:true,open:false};
+  assert.equal(t.targetedMappings,false);assert.equal(t.configureTargetedMappings(true,owner),true);
+  f.flushes.length=0;
+  f.data.setUint32(DIRECTORY,f.data.getUint32(DIRECTORY,true)|32,true);
+  f.info.privateSlots=26*1024*1024;f.data.setUint32(f.info.privateSlots+DATA*4,1,true);
+  f.changeMapping(DATA,2,3);f.changeMapping(DATA+1,3,1);f.changeMapping(DATA+2,null,0);
+  f.hooks.beforeAck=()=>{
+    assert.deepEqual(f.cpu.invalidatedPages,[DATA*PAGE,(DATA+1)*PAGE,(DATA+2)*PAGE]);
+    assert.equal(f.data.getUint32(t.pte(DATA),true)&2,0,'COW keeps the new PTE read-only');
+    assert.equal(f.data.getUint32(t.pte(DATA+2),true),0);
+  };
+  t.refresh();assert.equal(f.pending.size,0);assert.deepEqual(f.flushes,[]);
+  assert.equal(f.cpu.cpl[0],3);assert(f.data.getUint32(DIRECTORY,true)&32,'mapping refresh must retain PDE access evidence');
+  assert.deepEqual([t.targetedMappingRefreshes,t.targetedMappingPages,t.targetedMappingFallbacks],[1,3,0]);
+});
+
+test('targeted mappings retain full flushes for executable changes, rebuilds and unavailable helpers',()=>{
+  for(const kind of ['code','rebuild','helper']){
+    const f=world({journal:true,nativeDirtyEpoch:true,dirtyVirtualPages:true,preciseExecutable:true,globalCode:true});
+    const t=new PageTables(f.engine,f.cpu);t.configureGlobalCode(true,{paused:true,open:false});
+    t.configureTargetedMappings(true,{paused:true,open:false});f.flushes.length=0;
+    if(kind==='code')f.changeMapping(CODE,2,5);else f.changeMapping(DATA,2,3);
+    if(kind==='rebuild')t.mappingEpoch=null;
+    if(kind==='helper')t.invalidateDirtyPage=null;
+    t.refresh();assert.equal(f.cpu.invalidatedPages.length,0,kind);assert.equal(f.flushes[0],'full',kind);
+    assert.equal(f.flushes.includes('jit'),kind==='code',kind);assert.equal(t.targetedMappingFallbacks,1,kind);
+  }
+});
+
+test('targeted mapping failure restores CPL and full-flushes before preserving the original error',()=>{
+  const f=world({journal:true,nativeDirtyEpoch:true,dirtyVirtualPages:true}),t=new PageTables(f.engine,f.cpu);
+  t.configureTargetedMappings(true,{paused:true,open:false});f.flushes.length=0;
+  f.changeMapping(DATA,2,3);f.changeMapping(DATA+1,3,3);
+  const original=Error('INVLPG failed');let count=0;
+  t.invalidateDirtyPage=f.cpu.wm.exports.instr16_0F01_7_mem=()=>{assert.equal(f.cpu.cpl[0],0);if(++count===2)throw original;};
+  assert.throws(()=>t.refresh(),error=>error===original);
+  assert.equal(count,2);assert.equal(f.cpu.cpl[0],3);assert.deepEqual(f.flushes,['full']);
+  assert.equal(f.ackAttempts.length,0);assert.equal(f.pending.size,2);
+});
+
 test('targeted dirty rearm invalidates every dirty virtual alias and preserves read-only translations',()=>{
   const f=world({journal:true,nativeDirty:true,nativeDirtyEpoch:true,dirtyVirtualPages:true});
   f.cpu.cpl=new Proxy({},{get(_target,key){const view=new Uint8Array(f.memory.buffer,612,1);return Reflect.get(view,key,view);},

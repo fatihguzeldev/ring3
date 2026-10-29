@@ -15,6 +15,7 @@ export class PageTables {
     this.codeValidity=new CodeValidity(engine.memory);
     this.globalCode=false;
     this.targetedDirty=false;this.targetedDirtyPublications=0;this.targetedDirtyPages=0;this.targetedDirtyFallbacks=0;
+    this.targetedMappings=false;this.targetedMappingRefreshes=0;this.targetedMappingPages=0;this.targetedMappingFallbacks=0;
     this.rowsByPage=new Map();this.dirty=new DirtyPages(engine.memory,this.ram,()=>this.flushDirtyTlb());
     this.lastMappingScanCount=0;this.lastMappingFullRebuild=false;
     this.lastDirtyScanCount=0;this.lastDirtyDirectoryCount=0;
@@ -75,6 +76,22 @@ export class PageTables {
     if(enabled===this.targetedDirty)return enabled;
     if(enabled)this.batchDirtyRearm??=createDirtyRearm(this.engine.memory,this.invalidateDirtyPage);
     this.publishDirty();this.cpu.full_clear_tlb();this.targetedDirty=enabled;return enabled;
+  }
+  configureTargetedMappings(enabled,owner) {
+    if(owner?.paused!==true || owner?.open!==false || !this.ownsPin || typeof enabled!=='boolean')
+      throw new Error('v86 targeted mapping changes require a closed paused owner');
+    if(enabled && !this.targetedDirtySupported)throw new Error('native v86 targeted mappings are unsupported');
+    this.targetedMappings=enabled;return enabled;
+  }
+  invalidateMappings(pages) {
+    const buffer=this.engine.memory.buffer;
+    if(!this.targetedDirtySupported || typeof this.invalidateDirtyPage!=='function' ||
+        this.invalidateDirtyPage!==this.cpu.wm?.exports?.instr16_0F01_7_mem ||
+        this.cpu.cpl?.buffer!==buffer || this.cpu.cpl.byteOffset!==612 || this.cpu.cpl.length!==1)return false;
+    const cpl=new Uint8Array(buffer,612,1),previous=cpl[0];
+    try {cpl[0]=0;for(const page of pages)this.invalidateDirtyPage(page*PAGE);}
+    finally {cpl[0]=previous;}
+    this.targetedMappingRefreshes++;this.targetedMappingPages+=pages.length;return true;
   }
   rearmDirtyPages(offsets,unchangedCode) {
     let eligible=unchangedCode;
@@ -168,6 +185,8 @@ export class PageTables {
     return values;
   }
   refresh() {
+    let fullCleared=false;
+    try {
     const info=this.descriptor(this.descriptorReuse);
     this.lastMappingScanCount=0;this.lastMappingFullRebuild=false;
     if(this.identity!==null && this.identity!==info.identity)throw new Error('v86 backing identity changed');
@@ -222,10 +241,25 @@ export class PageTables {
     this.lastMappingScanCount=count;
     this.maps=info.maps;this.rights=info.permissions;this.privateSlots=info.privateSlots;
     this.mappingEpoch=info.mapping;
-    this.cpu.full_clear_tlb();
-    if(!this.policy.selectiveCode || this.codeValidity.refresh(info,this.pages).invalidate)this.cpu.jit_clear_cache();
+    if(this.targetedMappings) {
+      const invalidate=!this.policy.selectiveCode || this.codeValidity.refresh(info,this.pages).invalidate;
+      if(!(incremental && count>0 && count<=256 && !invalidate && this.invalidateMappings(changes))) {
+        this.cpu.full_clear_tlb();fullCleared=true;this.targetedMappingFallbacks++;
+      }
+      if(invalidate)this.cpu.jit_clear_cache();
+    } else {
+      this.cpu.full_clear_tlb();
+      if(!this.policy.selectiveCode || this.codeValidity.refresh(info,this.pages).invalidate)this.cpu.jit_clear_cache();
+    }
     if((info.mappingChangeFlags&1) && info.mappingChangeCount)
       this.engine.ok('component_cpu_ack_mappings',...KEY,Number(info.mapping&0xffffffffn),Number(info.mapping>>32n),info.mappingChangeCount);
+    } catch(error) {
+      if(this.targetedMappings && !fullCleared) {
+        this.targetedMappingFallbacks++;
+        try {this.cpu.full_clear_tlb();}catch(cleanup){error.cleanupFailure=cleanup.message;}
+      }
+      throw error;
+    }
   }
   isCopyOnWrite(address) {
     const page=address>>>12;

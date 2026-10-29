@@ -487,6 +487,12 @@ export class V86CodeCache {
     if(!this.dirtyPending)return;
     this.dirtyPages+=this.tables.publishDirty();this.dirtyPending=false;
   }
+  configureTargetedMappings(enabled,owner) {
+    if(owner?.paused!==true || owner?.open!==false || this.open || this.closed || typeof enabled!=='boolean')
+      throw new Error('v86 targeted mapping changes require a closed paused owner');
+    if(this.inlineFailure)throw this.inlineFailure;
+    this.publish();this.tables.refresh();return this.tables.configureTargetedMappings(enabled,owner);
+  }
   configureBudgetDirtyDeferral(enabled,owner) {
     if(owner?.paused!==true || owner?.open!==false || this.open || this.closed || typeof enabled!=='boolean')
       throw new Error('v86 Budget dirty changes require a closed paused owner');
@@ -532,6 +538,8 @@ export class V86CodeCache {
       workBudget:this.budget,gates:this.gates,faults:this.faults,cowFaults:this.cowFaults,
       budgetStateReuse:this.budgetStateReuse,budgetStateReuses:this.budgetStateReuses,
       budgetDirtyDeferral:this.budgetDirtyDeferral,budgetDirtyDeferrals:this.budgetDirtyDeferrals,
+      targetedMappings:this.tables.targetedMappings,targetedMappingRefreshes:this.tables.targetedMappingRefreshes,
+      targetedMappingPages:this.tables.targetedMappingPages,targetedMappingFallbacks:this.tables.targetedMappingFallbacks,
       dirtyPages:this.dirtyPages,deferDirty:this.deferDirty,
       portGates:this.portGates,portGateCalls:this.portGateCalls,deniedPortCalls:this.deniedPortCalls,
       portGateMode:this.portGateMode,portGatePatchedCount:this.portGatePatchedCount,

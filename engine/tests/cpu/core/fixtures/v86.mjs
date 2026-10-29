@@ -11,7 +11,7 @@ import {image as moduleImage} from '../../../loader/modules/wasm/fixtures/runtim
 
 const [enginePath, reportPath, permissionText = '1', portText = ''] = process.argv.slice(2);
 assert(enginePath && reportPath, 'usage: v86.mjs imported-engine.wasm fresh-report.json');
-assert(['', 'port', 'inline', 'direct', 'direct-bindings', 'direct-state-inputs', 'wasm-ports', 'guest-ret', 'global', 'overlap', 'simd', 'targeted-dirty', 'budget-dirty', 'relaxed-fpu', 'relaxed-fpu-boot'].includes(portText));
+assert(['', 'port', 'inline', 'direct', 'direct-bindings', 'direct-state-inputs', 'wasm-ports', 'guest-ret', 'global', 'overlap', 'simd', 'targeted-dirty', 'targeted-mappings', 'budget-dirty', 'relaxed-fpu', 'relaxed-fpu-boot'].includes(portText));
 const relaxedBoot=portText==='relaxed-fpu-boot';
 const wasmRelaxed=portText==='wasm-ports';
 const targetedMode=portText==='targeted-dirty';
@@ -467,7 +467,61 @@ try {
     } finally {cache.cpu.full_clear_tlb=full;cache.cpu.clear_tlb=partial;}
     engine.ok('protect',0x600000,1,7);cache.tables.refresh();
   }
-  if(portText==='budget-dirty') {
+  if(portText==='targeted-mappings') {
+    stage='targeted mapping refresh on cached data translations';new Files(engine,{files:[]},'').configure();
+    const gates=new Map(),t=cache.tables,owner={paused:true,open:false};
+    for(let start=0,total=1;start<total;){engine.ok('module_gates_page',start,128);const d=engine.resultView(4096);
+      total=d.getUint32(16,true);const count=d.getUint32(24,true);assert(count>0);
+      for(let i=0;i<count;i++)gates.set(d.getUint32(36+i*8,true),d.getUint32(32+i*8,true));start+=count;}
+    const seed=(pc,address=0)=>{const d=new DataView(memory.buffer);d.setUint32(engine.base+28,address,true);
+      d.setUint32(engine.base+32,0x601800,true);d.setUint32(engine.base+48,pc,true);d.setUint32(engine.base+52,0x246,true);};
+    const nativeCall=(id,args)=>{put(0x601800,0x600380);args.forEach((value,i)=>put(0x601804+i*4,value));seed(gates.get(id));
+      cache.import();const run=cache.execute(cache.select());cache.publish();assert.equal(run.detail,id);
+      engine.ok('core_capture_windows_call');const token=engine.resultView(112).getUint32(16,true);
+      engine.ok('core_complete_windows_call',token);return engine.get(16);};
+    const section=nativeCall(0xa0081,[0xffffffff,0,4,0,4096,0]),shared=nativeCall(0xa0084,[section,2,0,0,4096]),
+      copy=nativeCall(0xa0084,[section,1,0,0,4096]);assert(section&&shared&&copy);put(shared,0x12345678);
+    const address=0x6d0000,occupant=0x6e0000,readPc=0x600e00,writePc=0x600e20;
+    engine.ok('map',address,1,3);put(address,0x11111111);
+    upload(readPc,[0x8b,0x03,0xbe,...u32(gate),0xff,0xe6]);
+    upload(writePc,[0xc7,0x03,...u32(0x55667788),0xbe,...u32(gate),0xff,0xe6]);
+    engine.ok('protect',0x600000,1,5);t.refresh();t.configureGlobalCode(true,owner);t.configureTargetedDirty(true,owner);
+    assert.equal(cache.configureTargetedMappings(true,owner),true);
+    const pte=at=>new DataView(memory.buffer).getUint32(t.pte(at>>>12),true);
+    const live=()=>{const v=cpuViews(memory);return {cpl:v.bytes[612],regs:Array.from(v.regs),pc:v.data.getUint32(556,true),
+      flags:cache.cpu.wm.exports.get_eflags()>>>0,counter:v.data.getUint32(664,true),numeric:Buffer.from(v.bytes.slice(816,1280))};};
+    let fullFlushes=0;const full=cache.cpu.full_clear_tlb;
+    cache.cpu.full_clear_tlb=function(...args){fullFlushes++;return full.apply(this,args);};
+    const refresh=()=>{const before=live(),flushes=fullFlushes,pages=t.targetedMappingPages;t.refresh();
+      assert.deepEqual(live(),before,'mapping invalidation preserves live CPL/GPR/flags/FP/credits');
+      return {fullFlushes:fullFlushes-flushes,pages:t.targetedMappingPages-pages};};
+    const runAt=(pc,at)=>{seed(pc,at);cache.import();const run=cache.execute(cache.select());cache.publish();return run;};
+    report.targetedMappings={section,shared,copy,runs:[]};
+    try {
+      assert.equal(runAt(readPc,address).reason,8);assert.equal(engine.get(16),0x11111111);
+      const oldPhysical=pte(address)&~4095;engine.ok('unmap',address,1);const unmap=refresh();
+      assert.deepEqual(unmap,{fullFlushes:0,pages:1});assert.equal(pte(address),0);
+      engine.ok('map',occupant,1,3);put(occupant,0x22222222);engine.ok('map',address,1,3);put(address,0x33333333);
+      const remap=refresh(),newPhysical=pte(address)&~4095;assert.equal(remap.fullFlushes,0);assert.notEqual(newPhysical,oldPhysical);
+      assert.equal(runAt(readPc,address).reason,8);assert.equal(engine.get(16),0x33333333);
+      engine.ok('protect',address,1,1);const protect=refresh();assert.deepEqual(protect,{fullFlushes:0,pages:1});assert.equal(pte(address)&2,0);
+      const original=engine.ok;let fault;
+      engine.ok=function(operation,...args){if(operation==='component_cpu_publish'&&args[2]===3){fault=args;return;}return original.call(this,operation,...args);};
+      try {assert.equal(runAt(writePc,address).coreReason,3);}finally{engine.ok=original;}
+      assert.equal(fault[3],address);assert.equal(fault[5]&255,14);assert.equal(read(address),0x33333333);
+      assert.equal(pte(shared)&~4095,pte(copy)&~4095);assert.equal(pte(copy)&2,0);assert.equal(t.isCopyOnWrite(copy),true);
+      const cows=cache.cowFaults;assert.equal(runAt(writePc,copy).reason,8);assert.equal(cache.cowFaults,cows+1);
+      assert.notEqual(pte(shared)&~4095,pte(copy)&~4095);assert.equal(read(shared),0x12345678);assert.equal(read(copy),0x55667788);
+      engine.ok('protect',0x600000,1,7);const executable=refresh();assert(executable.fullFlushes>0);assert.equal(pte(0x600000)&256,0);
+      engine.ok('protect',0x600000,1,5);const global=refresh();assert(global.fullFlushes>0);assert.equal(pte(0x600000)&256,256);
+      assert.equal(runAt(readPc,address).reason,8);engine.ok('unmap',address,1);const terminalUnmap=refresh();
+      assert.deepEqual(terminalUnmap,{fullFlushes:0,pages:1});const terminal=runAt(readPc,address);
+      assert.equal(terminal.coreReason,3);assert.equal(terminal.pc,readPc);
+      report.targetedMappings={section,shared,copy,oldPhysical,newPhysical,unmap,remap,protect,executable,global,terminal,
+        readOnlyStore:{address,vector:14,publicationSuppressed:true,bytesPreserved:true},copySplit:true,fullLiveStatePreserved:true};
+      assert.equal(cache.configureTargetedMappings(false,owner),false);report.targetedMappings.restored=true;save();
+    } finally {cache.cpu.full_clear_tlb=full;}
+  } else if(portText==='budget-dirty') {
     stage='pure Budget dirty evidence stays pending until the outer boundary';
     const addresses=[0x6d0000,0xad0000],pc=0x600f00,owner={paused:true,open:false},t=cache.tables;
     for(const address of addresses){engine.ok('map',address,1,3);put(address,0);}
