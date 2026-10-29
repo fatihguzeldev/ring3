@@ -106,6 +106,46 @@ test('normal render passes reuse attachments across state snapshots and close be
   await draw();host.close();assert.equal(active,null);assert.equal(renderer.pendingPass,null);
 });
 
+test('deferred buffer uploads preserve earlier draws until submission and replace same-version packs',async t=>{
+  const {host,events}=await graphicsFixture(t);await host.consume(packet([[1,definition]]));
+  const renderer=host.sessions.get(1n),device=host.device,ref={key:'1:1:1',version:1n},item={buffer:true,type:6,version:1n,subs:[{bytes:Uint8Array.of(1,2,3,4,5,6,7,8)}]};
+  renderer.resources.items.set(ref.key,item);
+  device.queue.writeBuffer=(buffer,offset,bytes)=>{buffer.bytes??=new Uint8Array(bytes.byteLength);buffer.bytes.set(bytes,offset);events.push('write-buffer');};
+  renderer.state=()=>pipelineState();renderer.renderTargets=()=>({color:{view:{}}});renderer.program=()=>({});renderer.dynamic=()=>{};
+  renderer.textureBindings=()=>({kinds:[],entries:[]});renderer.gpuPipeline=async()=>({getBindGroupLayout:()=>({})});
+  const command=(opcode,words)=>{const bytes=new Uint8Array(words.length*4),v=new DataView(bytes.buffer);words.forEach((x,i)=>v.setUint32(i*4,x,true));return {opcode,bytes};};
+  const upload=value=>command(3,[1,0,1,1,1,0,0,0,8,8,8,1,1,8,value,0x08070605]);
+  const draw=async()=>{const values=[4,1,...Array(8).fill(0),1,4,...Array(18).fill(0)];await renderer.draw({u64:()=>1n,targets:()=>({}),version:()=>ref,u32:()=>values.shift()});assert.equal(values.length,0);return [...renderer.resources.packedStreams.values()].at(-1);};
+  assert.equal(renderer.deferredBufferUploadsEnabled,false);const baseline=await draw();events.length=0;await renderer.execute(upload(0x0c0b0a09));
+  assert.deepEqual(events.filter(x=>x==='submit'||x==='buffer-destroy'),['submit','buffer-destroy']);assert.equal(baseline.buffer.destroyed,true);
+  renderer.configureDeferredBufferUploads(true);const old=await draw();events.length=0;
+  await renderer.execute(upload(0x100f0e0d));assert.equal(old.buffer.destroyed,false);assert.equal(events.includes('submit'),false);
+  const fresh=await draw();assert.notEqual(old.buffer,fresh.buffer);
+  assert.deepEqual([...old.buffer.bytes.subarray(128,132)],[9,10,11,12]);assert.deepEqual([...fresh.buffer.bytes.subarray(128,132)],[13,14,15,16]);
+  assert.equal(renderer.deferredBufferUploads,1);assert.equal(renderer.deferredBufferRetirements,1);assert.equal(renderer.retiredBufferBytes,136);
+  assert.throws(()=>renderer.configureDeferredBufferUploads(false),/idle renderer/);renderer.flush();
+  assert.deepEqual(events.filter(x=>x==='submit'||x==='buffer-destroy'),['submit','buffer-destroy']);assert.equal(renderer.retiredBufferBytes,0);assert.equal(fresh.buffer.destroyed,false);
+  const bad=packet([[3,[1,0,1,1,1,0,0,0,8,16,4,2,1,8,0x14131211,0x18171615]]]),view=new DataView(bad);for(const at of [24,32,40,72])view.setBigUint64(at,2n,true);
+  await assert.rejects(renderer.accept(bad),/upload bounds/);assert.equal(fresh.buffer.destroyed,true);assert.equal(renderer.retiredBufferBytes,0);assert.equal(renderer.resources.packedStreams.size,0);
+});
+
+test('deferred buffer retirement is bounded and texture or retained-index uploads keep submission barriers',async t=>{
+  const {host,events,buffers}=await graphicsFixture(t);await host.consume(packet([[1,definition]]));const renderer=host.sessions.get(1n);
+  renderer.configureDeferredBufferUploads(true);events.length=0;
+  const a=host.device.createBuffer({size:32*1024*1024}),b=host.device.createBuffer({size:4});renderer.encoder();
+  renderer.retireBuffer(a,32*1024*1024);assert.equal(a.destroyed,false);renderer.retireBuffer(b,4);
+  assert.deepEqual(events.filter(x=>x==='submit'||x==='buffer-destroy'),['submit','buffer-destroy']);assert.equal(a.destroyed,true);assert.equal(b.destroyed,false);
+  assert.equal(renderer.retiredBufferBytes,4);assert.equal(renderer.deferredBufferUploadFlushes,1);renderer.flush();assert.equal(b.destroyed,true);
+  const command=words=>{const bytes=new Uint8Array(words.length*4),v=new DataView(bytes.buffer);words.forEach((x,i)=>v.setUint32(i*4,x,true));return {opcode:3,bytes};};
+  renderer.encoder();events.length=0;await renderer.execute(command([1,0,0,1,2,0,0,0,4,4,4,1,1,4,0xff123456]));
+  assert.deepEqual(events.filter(x=>x==='submit'||x==='write-texture'),['submit','write-texture']);assert.equal(renderer.deferredBufferUploads,0);
+  const ref={key:'1:2:1',version:1n};renderer.resources.items.set(ref.key,{buffer:true,type:7,format:101,version:1n,subs:[{bytes:Uint8Array.of(0,0,1,0)}]});
+  const indices=renderer.resources.retainedIndexBuffer(ref,101);renderer.encoder();events.length=0;
+  await renderer.execute(command([1,0,2,1,1,0,0,0,4,4,4,1,1,4,0x00020001]));
+  assert.deepEqual(events.filter(x=>x==='submit'||x==='write-buffer'),['submit','write-buffer']);assert.equal(renderer.deferredBufferUploads,0);assert.equal(indices.buffer.destroyed,false);
+  renderer.close();assert.equal(renderer.retiredBufferBytes,0);assert.equal(buffers.every(x=>x.destroyed),true);
+});
+
 test('batched state uploads preserve aligned draw ranges and upload each encoder before submission',async t=>{
   const {host,events}=await graphicsFixture(t);await host.consume(packet([[1,definition]]));
   const renderer=host.sessions.get(1n),device=host.device,writes=[],entries=[],state=pipelineState();

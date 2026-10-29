@@ -33,6 +33,8 @@ class DeviceRenderer {
     this.pipelineInputs=new Map();this.pipelineInputMemoEnabled=false;this.programIdentities=new WeakMap();this.nextProgramIdentity=0;
     this.pipelineInputHits=0;this.pipelineInputMisses=0;this.pipelineBuilds=0;
     this.renderPassReuseEnabled=false;this.pendingPass=null;this.pendingOutput=null;this.normalPasses=0;this.renderPassReuses=0;
+    this.deferredBufferUploadsEnabled=false;this.retiredBuffers=[];this.retiredBufferBytes=0;
+    this.deferredBufferUploads=0;this.deferredBufferRetirements=0;this.deferredBufferUploadFlushes=0;
     this.retainedIndicesEnabled=false;this.retainedIndexUses=0;
     this.stateUploadBatchEnabled=false;this.stateUploadPages=[];this.stateUploadPool=[];
     this.stateUploadBatchUses=0;this.stateUploadBatchUploads=0;this.stateUploadBatchPages=0;this.stateUploadBatchBytes=0;
@@ -48,6 +50,18 @@ class DeviceRenderer {
     require(typeof enabled==='boolean'&&!this.closed&&!this.accepting&&!this.pendingEncoder&&!this.pendingPass,'render pass changes require an idle renderer');
     this.renderPassReuseEnabled=enabled;return enabled;
   }
+  configureDeferredBufferUploads(enabled){
+    require(typeof enabled==='boolean'&&!this.closed&&!this.accepting&&!this.pendingEncoder&&!this.pendingPass&&!this.retiredBuffers.length,'buffer upload changes require an idle renderer');
+    this.deferredBufferUploadsEnabled=enabled;return enabled;
+  }
+  retireBuffer(buffer,length){
+    if(this.retiredBufferBytes+length>32*1024*1024){
+      this.deferredBufferUploadFlushes++;
+      try{this.flush();}catch(error){buffer.destroy();throw error;}
+    }
+    this.retiredBuffers.push(buffer);this.retiredBufferBytes+=length;this.deferredBufferRetirements++;
+  }
+  destroyRetiredBuffers(){for(const buffer of this.retiredBuffers)buffer.destroy();this.retiredBuffers.length=0;this.retiredBufferBytes=0;}
   endPass(){const pass=this.pendingPass;this.pendingPass=null;this.pendingOutput=null;pass?.end();}
   normalPass(output){
     if(this.renderPassReuseEnabled&&this.pendingPass&&sameSurface(this.pendingOutput.color,output.color)&&sameSurface(this.pendingOutput.depth,output.depth)){this.renderPassReuses++;return this.pendingPass;}
@@ -78,8 +92,8 @@ class DeviceRenderer {
     try{
       for(const page of pages){this.device.queue.writeBuffer(page.buffer,0,page.bytes,0,page.used);this.stateUploadBatchUploads++;this.stateUploadBatchBytes+=page.used;}
       this.device.queue.submit([encoder.finish()]);
-    }finally{this.stateUploadPages=[];}
-  }}
+    }finally{this.stateUploadPages=[];if(this.retiredBuffers.length)this.destroyRetiredBuffers();}
+  }else if(this.retiredBuffers.length)this.destroyRetiredBuffers();}
   async accept(packet,frameProbe) {
     require(!this.accepting,'graphics packet already active');this.accepting=true;
     try {
@@ -96,7 +110,7 @@ class DeviceRenderer {
     } catch(error){
       try{this.endPass();}catch(cleanup){error.cleanupFailure=cleanup.message;}throw error;
     } finally {
-      this.pendingPass=null;this.pendingOutput=null;this.pendingEncoder=null;this.stateUploadPages.length=0;this.accepting=false;
+      this.pendingPass=null;this.pendingOutput=null;this.pendingEncoder=null;this.stateUploadPages.length=0;this.accepting=false;if(this.retiredBuffers.length)this.destroyRetiredBuffers();
     }
   }
   async execute(command,frameProbe) {
@@ -104,7 +118,10 @@ class DeviceRenderer {
     switch(command.opcode){
       case 1:this.resources.create(r);break;
       case 2:this.flush();this.resources.destroy(r.version());break;
-      case 3:this.flush();this.resources.upload(r);break;
+      case 3:
+        if(this.deferredBufferUploadsEnabled&&this.resources.canDeferBufferUpload(r)){
+          this.resources.upload(r,(buffer,length)=>this.retireBuffer(buffer,length));this.deferredBufferUploads++;
+        }else{this.flush();this.resources.upload(r);}break;
       case 4:{const handle=r.u32();require(!this.shaders.has(handle),'shader handle reused while live');this.shaders.set(handle,shader(r));break;}
       case 5:require(this.shaders.delete(r.u32()),'stale shader deletion');break;
       case 6:{const id=r.u64();require(!this.states.has(id),'pipeline identity replay');this.states.set(id,pipeline(r));while(this.states.size>256)this.states.delete(this.states.keys().next().value);break;}
@@ -320,7 +337,7 @@ class DeviceRenderer {
     const entries=[{binding:0,resource:state},{binding:1,resource:{buffer:raw}},{binding:18,resource:{buffer:vertices}},...textures.entries];
     const encoder=this.encoder(),pass=encoder.beginRenderPass(this.passDescriptor(output));pass.setPipeline(gpu);pass.setBindGroup(0,this.device.createBindGroup({layout:gpu.getBindGroupLayout(0),entries}));this.dynamic(pass,p,output);pass.setIndexBuffer(d.indices,'uint32');pass.drawIndexed(d.indexCount);pass.end();this.draws++;
   }
-  close(){if(this.closed)return;this.closed=true;this.endPass();this.pendingEncoder=null;this.stateUploadPages.length=0;for(const page of this.stateUploadPool)page.buffer.destroy();this.stateUploadPool.length=0;this.resources.close();for(const p of this.patches.values())p.controls.destroy();for(const d of this.domains.values()){d.vertices.destroy();d.indices.destroy();}for(const b of this.temporary)b.destroy();this.temporary.length=0;this.patches.clear();this.domains.clear();this.states.clear();this.shaders.clear();this.pipelines.clear();this.pipelineInputs.clear();}
+  close(){if(this.closed)return;this.closed=true;this.endPass();this.pendingEncoder=null;this.stateUploadPages.length=0;this.destroyRetiredBuffers();for(const page of this.stateUploadPool)page.buffer.destroy();this.stateUploadPool.length=0;this.resources.close();for(const p of this.patches.values())p.controls.destroy();for(const d of this.domains.values()){d.vertices.destroy();d.indices.destroy();}for(const b of this.temporary)b.destroy();this.temporary.length=0;this.patches.clear();this.domains.clear();this.states.clear();this.shaders.clear();this.pipelines.clear();this.pipelineInputs.clear();}
 }
 
 export async function createGraphicsHost(canvas,{onDiagnostic=()=>{}}={}) {

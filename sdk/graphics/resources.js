@@ -35,11 +35,19 @@ export class Resources {
   get(ref) { const i=this.items.get(ref.key);require(i,`stale resource ${ref.key}`);return i; }
   surface(ref) { const item=this.get(ref),sub=item.subs[ref.subresource];require(sub&&!item.buffer,'surface subresource');return {item,sub,view:item.texture.createView({dimension:'2d',baseMipLevel:sub.info.level,mipLevelCount:1,baseArrayLayer:sub.info.face,arrayLayerCount:1})}; }
   destroy(ref) { const i=this.get(ref);this.invalidateStreams(ref.key);i.texture?.destroy();this.items.delete(ref.key);this.bytes-=i.size; }
-  upload(r) {
+  canDeferBufferUpload(r) {
+    const at=r.at;
+    try {
+      const ref=r.version(),item=this.get(ref);if(!item.buffer)return false;
+      for(const key of this.packedDependencies.get(ref.key)??[])if(this.packedStreams.get(key)?.indexFormat)return false;
+      return true;
+    } catch{return false;} finally{r.at=at;}
+  }
+  upload(r,retire=null) {
     const ref=r.version(),item=this.get(ref),[index,offset,rowPitch,slicePitch,rowBytes,rows,slices,length]=r.words(8),bytes=r.take(length),sub=item.subs[index];
     require(sub&&ref.version>=item.version&&rowBytes<=rowPitch&&rows&&slices,'upload definition');
     // uploads may share a version or fail after an earlier row has already changed.
-    this.invalidateStreams(ref.key,true);
+    this.invalidateStreams(ref.key,true,retire);
     try {
       for(let z=0;z<slices;z++)for(let y=0;y<rows;y++){
         const at=offset+z*slicePitch+y*rowPitch;require(at+rowBytes<=sub.bytes.length,'upload bounds');sub.bytes.set(bytes.subarray(z*slicePitch+y*rowPitch,z*slicePitch+y*rowPitch+rowBytes),at);
@@ -47,9 +55,9 @@ export class Resources {
       item.version=ref.version;sub.gpuDirty=false;
       if(!item.buffer)this.flushTexture(item,index);
       else this.updateRetainedIndices(ref,index,offset,rowPitch,slicePitch,rowBytes,rows,slices);
-    } catch(error){this.invalidateStreams(ref.key);throw error;}
+    } catch(error){this.invalidateStreams(ref.key,false,retire);throw error;}
   }
-  invalidateStreams(resource,keepIndices=false) { for(const key of [...(this.packedDependencies.get(resource)??[])])if(!keepIndices||!this.packedStreams.get(key)?.indexFormat)this.releaseStreams(key); }
+  invalidateStreams(resource,keepIndices=false,retire=null) { for(const key of [...(this.packedDependencies.get(resource)??[])])if(!keepIndices||!this.packedStreams.get(key)?.indexFormat)this.releaseStreams(key,retire); }
   updateRetainedIndices(ref,index,offset,rowPitch,slicePitch,rowBytes,rows,slices) {
     for(const key of [...(this.packedDependencies.get(ref.key)??[])]) {
       const cached=this.packedStreams.get(key);if(!cached?.indexFormat)continue;
@@ -63,12 +71,12 @@ export class Resources {
       }
     }
   }
-  releaseStreams(key) {
+  releaseStreams(key,retire=null) {
     const row=this.packedStreams.get(key);if(!row)return;
     // an encoder can still reference this buffer; submit it before destruction.
-    this.beforeBufferDestroy();this.packedStreams.delete(key);this.packedBytes-=row.length;
+    if(!retire)this.beforeBufferDestroy();this.packedStreams.delete(key);this.packedBytes-=row.length;
     for(const resource of row.dependencies){const keys=this.packedDependencies.get(resource);keys.delete(key);if(!keys.size)this.packedDependencies.delete(resource);}
-    row.buffer.destroy();
+    if(retire)retire(row.buffer,row.length);else row.buffer.destroy();
   }
   flushTexture(item,index,paletteIndex=0) {
     if(depthFormats.has(item.format))throw new Error('D3D8 host: CPU depth uploads not implemented');
