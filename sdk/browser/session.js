@@ -160,17 +160,23 @@ export class Session {
       if (!navigator.gpu)
         throw new Error("WebGPU is unavailable. Use a browser with WebGPU enabled on this device.");
       const { createGraphicsHost } = await import("../graphics/index.js");
+      let graphics;
       const prepareGraphics = () =>
         createGraphicsHost(this.canvas, {
           onDiagnostic: (info) => {
-            if (info.type === "present") {
+            if (info?.type === "present" || info?.type === "error") {
+              if (generation !== this.generation || !graphics || this.graphics !== graphics) return;
+              if (info.type === "error") {
+                this.fail(new Error(info.message || "graphics host failed"));
+                return;
+              }
               this.gdi.presented(info.window);
               this.frames?.present();
             }
             this.onDiagnostic(typeof info === "string" ? info : JSON.stringify(info));
           },
         });
-      const graphics = await (this.capture
+      graphics = await (this.capture
         ? this.capture.observer.scopeAsync("graphics.prepare", {}, prepareGraphics)
         : prepareGraphics());
       if (generation !== this.generation) {
@@ -181,7 +187,7 @@ export class Session {
       this.graphics = graphics;
       const audioError = await audioReady;
       if (audioError) throw audioError;
-      if (generation !== this.generation) return;
+      if (generation !== this.generation || this.failed) return;
       const worker = new Worker(new URL("../runtime/worker.js", import.meta.url), {
         type: "module",
       });

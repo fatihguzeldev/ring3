@@ -202,8 +202,11 @@ class DeviceRenderer {
     require(chain&&window,'present identity');void interval;void effect;void dirty;void rects;
     const surface=this.resources.surface(source),info=surface.sub.info;
     this.host.resize(dst?Math.max(dst[2],info.width):info.width,dst?Math.max(dst[3],info.height):info.height);
-    const timings=await this.host.blit(surface.view,src??[0,0,info.width,info.height],dst??[0,0,this.host.canvas.width,this.host.canvas.height],info,this.gamma,frameProbe);
-    this.presents++;this.host.onDiagnostic({type:'present',window,epoch:String(this.epoch),presents:this.presents,draws:this.draws,width:this.host.canvas.width,height:this.host.canvas.height,resourceBytes:this.resources.bytes,...(frameProbe?{frame_probe:{schema:1,...frameProbe,chain:String(chain),renderer_accepted:accepted,...timings}}:{})});
+    const diagnostic={type:'present',window,epoch:String(this.epoch),sequence:String(this.stream.sequence),
+      presents:++this.presents,draws:this.draws,width:this.host.canvas.width,height:this.host.canvas.height,resourceBytes:this.resources.bytes};
+    await this.host.blit(surface.view,src??[0,0,info.width,info.height],dst??[0,0,this.host.canvas.width,this.host.canvas.height],info,this.gamma,frameProbe,timings=>{
+      this.host.onDiagnostic({...diagnostic,...(frameProbe?{frame_probe:{schema:1,...frameProbe,chain:String(chain),renderer_accepted:accepted,...timings}}:{})});
+    });
   }
   async patchKernel(r){require(r.u32()===1,'patch kernel version');const source=new TextDecoder('utf-8',{fatal:true}).decode(r.take(r.count(1024*1024)));this.patchModule=await checkedShader(this.device,source,'engine patch WGSL');this.patchCapture=await this.device.createComputePipelineAsync({layout:'auto',compute:{module:this.patchModule,entryPoint:'capture'}});this.patchEvaluate=await this.device.createComputePipelineAsync({layout:'auto',compute:{module:this.patchModule,entryPoint:'evaluate'}});}
   patchGeometry(r){const words=r.words(256),streams=Array.from({length:16},()=>r.u32()?{...r.version(),stride:r.u32()}:null);return {words,streams};}
@@ -237,17 +240,42 @@ export async function createGraphicsHost(canvas,{onDiagnostic=()=>{}}={}) {
   const adapter=await navigator.gpu.requestAdapter({powerPreference:'high-performance'});require(adapter,'no WebGPU adapter');
   const device=await adapter.requestDevice({requiredLimits:{maxStorageBuffersPerShaderStage:Math.min(8,adapter.limits.maxStorageBuffersPerShaderStage),maxStorageBufferBindingSize:Math.min(128*1024*1024,adapter.limits.maxStorageBufferBindingSize)}});
   const context=canvas.getContext('webgpu');require(context,'WebGPU canvas unavailable');const format=navigator.gpu.getPreferredCanvasFormat();
-  const closedEpochs=new ClosedEpochs();let failed=null,closed=false;device.lost.then(info=>{if(closed)return;failed=new Error(`WebGPU device lost: ${info.message}`);onDiagnostic({type:'error',message:failed.message});});device.addEventListener('uncapturederror',event=>{if(closed)return;failed=event.error;onDiagnostic({type:'error',message:event.error.message});});
-  const host={device,canvas,context,format,onDiagnostic,sessions:new Map(),resize(width,height){require(width>0&&height>0&&width<=device.limits.maxTextureDimension2D&&height<=device.limits.maxTextureDimension2D,'canvas extent');if(canvas.width!==width||canvas.height!==height){canvas.width=width;canvas.height=height;}context.configure({device,format,alphaMode:'opaque'});},async blit(view,src,dst,info,gamma,frameProbe){
+  const closedEpochs=new ClosedEpochs(),pendingPresents=new Set();let failed=null,closed=false,submissionAck=false,consuming=0;
+  const fail=error=>{if(closed||failed)return;failed=error;onDiagnostic({type:'error',message:error.message});};
+  device.lost.then(info=>fail(new Error(`WebGPU device lost: ${info.message}`)));
+  device.addEventListener('uncapturederror',event=>fail(event.error));
+  const host={device,canvas,context,format,onDiagnostic,sessions:new Map(),
+    get submissionAck(){return submissionAck;},
+    configureSubmissionAck(enabled){
+      require(typeof enabled==='boolean'&&!closed&&!failed,'submission ACK mode');
+      require(!consuming&&!pendingPresents.size,'submission ACK changes require an idle drained host');
+      submissionAck=enabled;return enabled;
+    },
+    submissionStatus(){return {enabled:submissionAck,pendingPresentFences:pendingPresents.size,maximumPendingPresents:2,consuming,failed:!!failed};},
+    resize(width,height){require(width>0&&height>0&&width<=device.limits.maxTextureDimension2D&&height<=device.limits.maxTextureDimension2D,'canvas extent');if(canvas.width!==width||canvas.height!==height){canvas.width=width;canvas.height=height;}context.configure({device,format,alphaMode:'opaque'});},async blit(view,src,dst,info,gamma,frameProbe,completed){
     if(!host.blitPipeline){
       const module=await checkedShader(device,`@group(0) @binding(0) var image:texture_2d<f32>;@group(0) @binding(1) var smp:sampler;@group(0) @binding(2) var<storage,read> values:array<f32>;
       struct V{@builtin(position)p:vec4<f32>,@location(0)uv:vec2<f32>};@vertex fn vs(@builtin(vertex_index)i:u32)->V{var v:V;let x=f32((i<<1u)&2u);let y=f32(i&2u);v.p=vec4<f32>(x*2.0-1.0,1.0-y*2.0,0.0,1.0);v.uv=vec2<f32>(x,y);return v;}
       @fragment fn fs(v:V)->@location(0)vec4<f32>{let uv=mix(vec2<f32>(values[0],values[1]),vec2<f32>(values[2],values[3]),v.uv);let c=textureSample(image,smp,uv);return vec4<f32>(values[4u+u32(clamp(c.r,0.0,1.0)*255.0)],values[260u+u32(clamp(c.g,0.0,1.0)*255.0)],values[516u+u32(clamp(c.b,0.0,1.0)*255.0)],1.0);}`,'D3D8 presentation');
       host.blitPipeline=await device.createRenderPipelineAsync({layout:'auto',vertex:{module,entryPoint:'vs'},fragment:{module,entryPoint:'fs',targets:[{format}]},primitive:{topology:'triangle-list'}});
     }
+    while(pendingPresents.size>=2)await pendingPresents.values().next().value;
+    require(!closed,'graphics host closed');require(!failed,failed?.message);
     const values=new Float32Array(772);values.set([src[0]/info.width,src[1]/info.height,src[2]/info.width,src[3]/info.height]);values.set(gamma,4);
     const buffer=device.createBuffer({size:values.byteLength,usage:GPUBufferUsage.STORAGE|GPUBufferUsage.COPY_DST});device.queue.writeBuffer(buffer,0,values);
-    const encoder=device.createCommandEncoder(),pass=encoder.beginRenderPass({colorAttachments:[{view:context.getCurrentTexture().createView(),loadOp:'load',storeOp:'store'}]});pass.setPipeline(host.blitPipeline);pass.setBindGroup(0,device.createBindGroup({layout:host.blitPipeline.getBindGroupLayout(0),entries:[{binding:0,resource:view},{binding:1,resource:device.createSampler({minFilter:'linear',magFilter:'linear'})},{binding:2,resource:{buffer}}]}));pass.setViewport(dst[0],dst[1],dst[2]-dst[0],dst[3]-dst[1],0,1);pass.draw(3);pass.end();const commands=encoder.finish(),submit=frameProbe?probeStamp():null;device.queue.submit([commands]);await device.queue.onSubmittedWorkDone();const complete=frameProbe?probeStamp():null;buffer.destroy();return frameProbe?{gpu_submit:submit,gpu_complete:complete}:undefined;
-  },async consume(packet,frameProbe){require(!closed,'graphics host closed');require(!failed,failed?.message);const bytes=new Uint8Array(packet);require(bytes.length>=64,'packet header');const epoch=new DataView(bytes.buffer,bytes.byteOffset,bytes.byteLength).getBigUint64(16,true);let session=host.sessions.get(epoch);if(!session){require(!closedEpochs.has(epoch),'retired device epoch');require(host.sessions.size<64,'device count limit');session=new DeviceRenderer(host,epoch);host.sessions.set(epoch,session);}device.pushErrorScope('validation');let scope=true;try{const result=await session.accept(packet,frameProbe),error=await device.popErrorScope();scope=false;if(error)throw error;if(session.removed){session.close();host.sessions.delete(epoch);closedEpochs.add(epoch);}return result;}catch(error){if(scope)await device.popErrorScope().catch(()=>{});failed=error;onDiagnostic({type:'error',message:error.message});throw error;}},async drain(){require(!closed,'graphics host closed');require(!failed,failed?.message);await device.queue.onSubmittedWorkDone();require(!failed,failed?.message);},close(){if(closed)return;closed=true;for(const s of host.sessions.values())s.close();host.sessions.clear();closedEpochs.clear();context.unconfigure();device.destroy();}};
+    const encoder=device.createCommandEncoder(),pass=encoder.beginRenderPass({colorAttachments:[{view:context.getCurrentTexture().createView(),loadOp:'load',storeOp:'store'}]});pass.setPipeline(host.blitPipeline);pass.setBindGroup(0,device.createBindGroup({layout:host.blitPipeline.getBindGroupLayout(0),entries:[{binding:0,resource:view},{binding:1,resource:device.createSampler({minFilter:'linear',magFilter:'linear'})},{binding:2,resource:{buffer}}]}));pass.setViewport(dst[0],dst[1],dst[2]-dst[0],dst[3]-dst[1],0,1);pass.draw(3);pass.end();const commands=encoder.finish(),submit=frameProbe?probeStamp():null;
+    let completion;
+    try {
+      device.queue.submit([commands]);
+      completion=device.queue.onSubmittedWorkDone().then(()=>{
+        require(!failed,failed?.message);
+        if(!closed)completed?.(frameProbe?{gpu_submit:submit,gpu_complete:probeStamp()}:undefined);
+      }).finally(()=>buffer.destroy());
+    } catch(error){buffer.destroy();throw error;}
+    pendingPresents.add(completion);
+    void completion.then(()=>pendingPresents.delete(completion),error=>{pendingPresents.delete(completion);fail(error);});
+    if(!submissionAck||frameProbe)await completion;
+  },async consume(packet,frameProbe){require(!closed,'graphics host closed');require(!failed,failed?.message);const bytes=new Uint8Array(packet);require(bytes.length>=64,'packet header');const epoch=new DataView(bytes.buffer,bytes.byteOffset,bytes.byteLength).getBigUint64(16,true);let session=host.sessions.get(epoch);if(!session){require(!closedEpochs.has(epoch),'retired device epoch');require(host.sessions.size<64,'device count limit');session=new DeviceRenderer(host,epoch);host.sessions.set(epoch,session);}device.pushErrorScope('validation');let scope=true;consuming++;try{const result=await session.accept(packet,frameProbe),error=await device.popErrorScope();scope=false;if(error)throw error;if(session.removed){session.close();host.sessions.delete(epoch);closedEpochs.add(epoch);}return result;}catch(error){if(scope)await device.popErrorScope().catch(()=>{});fail(error);throw error;}finally{consuming--;}
+  },async drain(){require(!closed,'graphics host closed');try{await device.queue.onSubmittedWorkDone();}catch(error){fail(error);}while(pendingPresents.size)await Promise.allSettled([...pendingPresents]);require(!failed,failed?.message);},close(){if(closed)return;closed=true;for(const s of host.sessions.values())s.close();host.sessions.clear();closedEpochs.clear();context.unconfigure();device.destroy();}};
   onDiagnostic({type:'adapter',features:[...adapter.features],limits:{maxTextureDimension2D:device.limits.maxTextureDimension2D,maxStorageBufferBindingSize:device.limits.maxStorageBufferBindingSize}});return host;
 }

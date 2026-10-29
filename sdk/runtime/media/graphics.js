@@ -124,7 +124,7 @@ export class GraphicsTransport {
   status() {
     return {
       ...(this.latency ? { completionLatency: {
-        semantics: "Worker batch post to successful engine ACK; includes browser GPU work and Worker scheduling delay",
+        semantics: "Worker batch post to successful engine ACK; host consume and scheduling delay, with GPU completion tracked separately",
         ...this.latency,
         pendingAgeMs: this.pending ? performance.now() - this.pending.sentAtMs : null,
       } } : {}),

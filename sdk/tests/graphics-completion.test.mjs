@@ -26,7 +26,7 @@ function packet(commands) {
 }
 
 async function graphicsFixture(t) {
-  const fence=deferred(),mapping=deferred(),events=[],presents=[],buffers=[];
+  const fence=deferred(),mapping=deferred(),events=[],presents=[],buffers=[],errors=[];
   const globals={navigator:{gpu:{async requestAdapter(){return adapter;},getPreferredCanvasFormat(){return 'rgba8unorm';}}},
     GPUTextureUsage:{COPY_SRC:1,COPY_DST:2,TEXTURE_BINDING:4,RENDER_ATTACHMENT:8},
     GPUBufferUsage:{STORAGE:1,COPY_DST:2,COPY_SRC:4,MAP_READ:8},GPUMapMode:{READ:1}};
@@ -47,10 +47,81 @@ async function graphicsFixture(t) {
   };
   const adapter={features:[],limits:device.limits,async requestDevice(){return device;}};
   const context={configure(){},unconfigure(){},getCurrentTexture(){return {createView(){return {};}};}};
-  const host=await createGraphicsHost({width:1,height:1,getContext(){return context;}},{onDiagnostic:value=>{if(value.type==='present')presents.push(value);}});
+  const host=await createGraphicsHost({width:1,height:1,getContext(){return context;}},{onDiagnostic:value=>{if(value.type==='present')presents.push(value);if(value.type==='error')errors.push(value);}});
   t.after(()=>{fence.resolve();mapping.resolve();host.close();});
-  return {host,fence,mapping,events,presents,buffers};
+  return {host,fence,mapping,events,presents,buffers,errors};
 }
+
+test('submit ACK returns before Present completion while its fence owns metrics and uniforms',async t=>{
+  const {host,fence,presents,buffers}=await graphicsFixture(t);
+  assert.equal(host.submissionAck,false);assert.equal(host.configureSubmissionAck(true),true);
+  let accepted=false;const work=host.consume(packet([[1,definition],[11,present]])).then(result=>{accepted=true;return result;});
+  await turn();assert.equal(accepted,true);assert.equal(presents.length,0);assert.equal(buffers[0].destroyed,false);
+  const renderer=host.sessions.get(1n);renderer.draws=90;renderer.resources.bytes=777;
+  host.canvas.width=9;host.canvas.height=8;
+  assert.equal(host.submissionStatus().pendingPresentFences,1);
+  assert.throws(()=>host.configureSubmissionAck(false),/idle|drain/);
+  let drained=false;const draining=host.drain().then(()=>{drained=true;});
+  await turn();assert.equal(drained,false);fence.resolve();await work;await draining;
+  assert.equal(presents.length,1);assert.equal(buffers[0].destroyed,true);
+  assert.equal(presents[0].draws,0);assert.equal(presents[0].resourceBytes,4);
+  assert.equal(presents[0].width,1);assert.equal(presents[0].height,1);
+  assert.equal(host.submissionStatus().pendingPresentFences,0);assert.equal(host.configureSubmissionAck(false),false);
+});
+
+test('submit ACK bounds unfinished Presents at two and snapshots every completed frame',async t=>{
+  const {host,fence,presents,events}=await graphicsFixture(t);host.configureSubmissionAck(true);
+  let accepted=false;const work=host.consume(packet([[1,definition],[11,present],[11,present],[11,present]])).then(()=>{accepted=true;});
+  await turn();assert.equal(accepted,false);assert.equal(host.submissionStatus().pendingPresentFences,2);
+  assert.equal(events.filter(value=>value==='submit').length,2);assert.equal(presents.length,0);
+  fence.resolve();await work;await host.drain();
+  assert.deepEqual(presents.map(value=>value.presents),[1,2,3]);
+  assert.equal(presents.every(value=>value.width===1&&value.height===1&&value.epoch==='1'),true);
+});
+
+test('a frame-probed Present cannot bypass two unfinished submit-ACK Presents',async t=>{
+  const {host,fence}=await graphicsFixture(t);host.configureSubmissionAck(true);
+  await host.consume(packet([[1,definition],[11,present],[11,present]]));
+  const next=packet([[11,present]]),view=new DataView(next);
+  view.setBigUint64(24,2n,true);for(const at of [32,40,72])view.setBigUint64(at,4n,true);
+  let accepted=false;const work=host.consume(next,{proof_id:'bounded-probe'}).then(()=>{accepted=true;});
+  await turn();assert.equal(accepted,false);assert.equal(host.submissionStatus().pendingPresentFences,2);
+  fence.resolve();await work;await host.drain();
+});
+
+test('concurrent cold device Presents recheck the global cap after async pipeline creation',async t=>{
+  const {host,fence}=await graphicsFixture(t);host.configureSubmissionAck(true);
+  const works=[1,2,3].map(epoch=>{
+    const resource=definition.slice(),frame=present.slice();resource[0]=epoch;frame[6]=epoch;
+    const bytes=packet([[1,resource],[11,frame]]);new DataView(bytes).setBigUint64(16,BigInt(epoch),true);
+    return host.consume(bytes);
+  });
+  await turn();assert.equal(host.submissionStatus().pendingPresentFences,2);
+  fence.resolve();await Promise.all(works);await host.drain();
+});
+
+test('submit ACK fence rejection fails drain without emitting a completed Present',async t=>{
+  const {host,fence,presents,buffers,errors}=await graphicsFixture(t);host.configureSubmissionAck(true);
+  await host.consume(packet([[1,definition],[11,present]]));
+  fence.reject(new Error('late GPU failure'));await turn();
+  assert.equal(presents.length,0);assert.equal(buffers[0].destroyed,true);assert.equal(errors.length,1);
+  await assert.rejects(host.drain(),/late GPU failure/);
+});
+
+test('forced close suppresses late Present diagnostics while retaining fence cleanup',async t=>{
+  const {host,fence,presents,buffers}=await graphicsFixture(t);host.configureSubmissionAck(true);
+  await host.consume(packet([[1,definition],[11,present]]));host.close();fence.resolve();await turn();
+  assert.equal(presents.length,0);assert.equal(buffers[0].destroyed,true);
+});
+
+test('device retirement preserves its submitted Present completion while the host stays open',async t=>{
+  const {host,fence,presents,buffers}=await graphicsFixture(t);host.configureSubmissionAck(true);
+  await host.consume(packet([[1,definition],[11,present],[13,[1,0,3]]]));
+  assert.equal(host.sessions.has(1n),false);assert.equal(presents.length,0);
+  fence.resolve();await host.drain();await host.drain();
+  assert.equal(presents.length,1);assert.equal(presents[0].epoch,'1');assert.equal(presents[0].presents,1);
+  assert.equal(buffers[0].destroyed,true);
+});
 
 test('non-Present acceptance does not wait for GPU completion but explicit drain does',async t=>{
   const {host,fence,events}=await graphicsFixture(t);
@@ -86,6 +157,7 @@ test('Present completes only after its own GPU fence without a second packet fen
 
 test('readback waits for mapped bytes and preserves its receipt without a packet fence',async t=>{
   const {host,fence,mapping,events}=await graphicsFixture(t);
+  host.configureSubmissionAck(true);
   let settled=false;
   const work=host.consume(packet([[1,definition],[9,clear],[14,readback]])).then(value=>{settled=true;return value;});
   try {
