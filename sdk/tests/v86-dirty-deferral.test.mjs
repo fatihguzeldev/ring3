@@ -375,6 +375,16 @@ function wasmPortFixture() {
   return {...f,bridgeEvents,counts(value){Object.assign(counts,value);}};
 }
 
+test('a runtime without the optional Wasm port bridge executes and closes through its ordinary owner',()=>{
+  const f=wasmPortFixture(),c=f.cache;c.portBridge=undefined;c.portBridgeBound=false;
+  assert.equal(c.wasmPortsSupported,false);
+  assert.throws(()=>c.configureWasmPorts(true,{paused:true,open:false}),/unsupported/);
+  const d=new DataView(c.memory.buffer);
+  c.cpu.main_loop=()=>{c.traps.pending=f.trap();d.setUint32(664,7,true);};
+  assert.equal(c.execute().work,7);c.portGates=false;c.close();
+  assert.equal(c.closed,true);assert.equal(c.tables.released,1);assert.deepEqual(f.bridgeEvents,[]);
+});
+
 test('Wasm port configuration is closed-owner opt-in and disabled policy leaves the original IO path untouched',()=>{
   const f=wasmPortFixture(),c=f.cache,owner={paused:true,open:false};
   for(const invalid of [undefined,{paused:false,open:false},{paused:true,open:true}])

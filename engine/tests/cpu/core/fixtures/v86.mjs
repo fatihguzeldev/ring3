@@ -28,7 +28,10 @@ const save = () => writeFileSync(reportPath, JSON.stringify(report, (_key, value
   typeof value === 'bigint' ? String(value) : value, 2) + '\n');
 let runtime, engine, cache, stage = 'prepare';
 try {
-  runtime = await prepareV86({wasmUrl: 'data:application/wasm;base64,' + cpuBytes.toString('base64'), sha256: hash(cpuBytes)});
+  runtime = await prepareV86({wasmUrl: 'data:application/wasm;base64,' + cpuBytes.toString('base64'), sha256: hash(cpuBytes),wasmPorts:portText==='wasm-ports'});
+  report.wasmPortBridgeInstalled=!!runtime.portBridge;
+  assert.equal(report.wasmPortBridgeInstalled,portText==='wasm-ports','the Wasm IO import shim requires explicit boot opt-in');
+  if(portText!=='wasm-ports')assert.equal(runtime.portBridgeFallback,undefined);
   const memory = runtime.memory;
   const prefix = Buffer.from(new Uint8Array(memory.buffer, 0, 4096));
   const needed = 805306368 / 65536 - memory.buffer.byteLength / 65536;

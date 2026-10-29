@@ -29,8 +29,10 @@ export async function prepareV86(options={}, {signal}={}) {
       // ring3 supplies process time and devices; the cpu's machine timers stay inactive.
       imports.env.run_hardware_timers=()=>0;
       portBridgeOriginalIO=imports.env.io_port_write8;
-      portBridgeFallback=(port,value)=>portCache?portCache.forwardPortIO(portBridgeOriginalIO,port,value):portBridgeOriginalIO(port,value);
-      portBridge=createPortBridge(portBridgeFallback);imports.env.io_port_write8=portBridge.write8;
+      if(options.wasmPorts===true) {
+        portBridgeFallback=(port,value)=>portCache?portCache.forwardPortIO(portBridgeOriginalIO,port,value):portBridgeOriginalIO(port,value);
+        portBridge=createPortBridge(portBridgeFallback);imports.env.io_port_write8=portBridge.write8;
+      }
       return (await WebAssembly.instantiate(module,imports)).exports;
     }});
   await new Promise((resolve,reject)=>{
@@ -64,14 +66,14 @@ export async function prepareV86(options={}, {signal}={}) {
       if(engine.memory!==runtime.memory)throw new Error('v86 and Ring3 must share one Wasm memory');
       const cache=new V86CodeCache(engine,execution,cpu,runtime);
       cache.portBridge=portBridge;
-      try {cache.portBridgeBound=portBridge.bind(cache)===true;}
+      try {cache.portBridgeBound=portBridge?.bind(cache)===true;}
       catch(error){try{cache.close();}catch(cleanup){error.cleanupFailure=cleanup.message;}throw error;}
       portCache=cache;
       attached=true;return cache;
     },
     counters:()=>({generatedModules:generated,finalizedModules:finalized,generatedModuleBytes:generatedBytes}),
     jitConfig,
-    dispose() {if(disposed)return;disposed=true;portBridge.close();portCache=null;emulator.destroy();},
+    dispose() {if(disposed)return;disposed=true;portBridge?.close();portCache=null;emulator.destroy();},
   };
   return runtime;
 }
