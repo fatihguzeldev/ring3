@@ -15,8 +15,8 @@ mod component_cpu;
 pub(crate) use component_cpu::{
     component_cpu_ack_mappings, component_cpu_attach, component_cpu_collect_dirty,
     component_cpu_dirty, component_cpu_gate, component_cpu_publish, component_cpu_release,
-    component_cpu_set_gate_mode, component_cpu_try_complete_gate, component_cpu_try_inline_gate,
-    component_cpu_view, component_cpu_write_fault,
+    component_cpu_set_gate_mode, component_cpu_try_complete_gate, component_cpu_try_direct_gate,
+    component_cpu_try_inline_gate, component_cpu_view, component_cpu_write_fault,
 };
 
 mod clock;

@@ -3,6 +3,8 @@
 pub(super) mod avx;
 pub(super) mod context;
 pub(super) mod core;
+#[cfg(feature = "external-cpu")]
+mod direct_gates;
 pub(super) mod events;
 pub(super) mod far;
 pub(super) mod integer;

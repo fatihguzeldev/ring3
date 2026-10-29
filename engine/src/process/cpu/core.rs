@@ -125,6 +125,17 @@ impl EngineInstance {
 
     #[cfg(feature = "external-cpu")]
     pub(in crate::process) fn external_cpu_can_defer_gate(&self, pc: u32, id: u32) -> bool {
+        self.external_cpu_deferred_frame(pc, id, None).is_some()
+    }
+
+    #[cfg(feature = "external-cpu")]
+    #[inline(always)]
+    pub(super) fn external_cpu_deferred_frame(
+        &self,
+        pc: u32,
+        id: u32,
+        local_state: Option<crate::cpu::x86::State32>,
+    ) -> Option<crate::windows::CallFrame32> {
         use crate::{
             abi::{
                 arena::STATE_OFFSET,
@@ -146,7 +157,7 @@ impl EngineInstance {
                     && matches!(gate.slot, 37 | 42 | 46 | 50 | 61 | 63 | 70 | 71 | 83 | 85)
             })
         {
-            return false;
+            return None;
         }
         if !self.external_cpu_memory_pinned
             || self.guard_core_entry().is_err()
@@ -159,16 +170,17 @@ impl EngineInstance {
             || self.module_windows_reply.is_some()
             || self.d3d8_reply.is_some()
         {
-            return false;
+            return None;
         }
-        let Ok(state) = decode_state(&self.arena()[STATE_OFFSET..STATE_OFFSET + STATE_SIZE]) else {
-            return false;
+        let state = match local_state {
+            Some(state) => state,
+            None => decode_state(&self.arena()[STATE_OFFSET..STATE_OFFSET + STATE_SIZE]).ok()?,
         };
         if state.eip != pc {
-            return false;
+            return None;
         }
         let Ok(memory) = self.memory() else {
-            return false;
+            return None;
         };
         let Ok(frame) = CallFrame32::capture(
             memory,
@@ -180,26 +192,29 @@ impl EngineInstance {
                 gate.map_or(0, |gate| u32::from(gate.method().stack_words))
             },
         ) else {
-            return false;
+            return None;
         };
         if Self::prepare_completed_call(frame.complete(0)).is_err() {
-            return false;
+            return None;
         }
         if getter {
             // getlasterror republishes the same TEB value, so no guest RAM write occurs.
-            return self.module_teb_address().is_none_or(|teb| {
-                teb.checked_add(0x34).is_some_and(|address| {
-                    memory
-                        .check_span(GuestAddress(address), 4, Access::Read)
-                        .is_ok()
+            return self
+                .module_teb_address()
+                .is_none_or(|teb| {
+                    teb.checked_add(0x34).is_some_and(|address| {
+                        memory
+                            .check_span(GuestAddress(address), 4, Access::Read)
+                            .is_ok()
+                    })
                 })
-            });
+                .then_some(frame);
         }
         if setter || tls_getter {
             let argument = frame.arguments()[0];
             if tls_getter {
                 if argument >= 1088 {
-                    return false;
+                    return None;
                 }
                 if self.threads.current_teb().is_some_and(|teb| {
                     let offset = if argument < 64 {
@@ -210,24 +225,27 @@ impl EngineInstance {
                     teb.checked_add(offset).is_none()
                 }) || self.get_windows_tls(argument).is_err()
                 {
-                    return false;
+                    return None;
                 }
             }
             let target = if setter { argument } else { 0 };
-            return self.module_teb_address().is_none_or(|teb| {
-                let Some(address) = teb.checked_add(0x34).map(GuestAddress) else {
-                    return false;
-                };
-                let mut current = [0; 4];
-                if memory.read(address, &mut current).is_err() {
-                    return false;
-                }
-                if setter && u32::from_le_bytes(current) == target {
-                    return memory.check_span(address, 4, Access::Write).is_ok();
-                }
-                memory.external_write_is_stable(address, 4)
-                    && memory.ensure_transaction_versions(1).is_ok()
-            });
+            return self
+                .module_teb_address()
+                .is_none_or(|teb| {
+                    let Some(address) = teb.checked_add(0x34).map(GuestAddress) else {
+                        return false;
+                    };
+                    let mut current = [0; 4];
+                    if memory.read(address, &mut current).is_err() {
+                        return false;
+                    }
+                    if setter && u32::from_le_bytes(current) == target {
+                        return memory.check_span(address, 4, Access::Write).is_ok();
+                    }
+                    memory.external_write_is_stable(address, 4)
+                        && memory.ensure_transaction_versions(1).is_ok()
+                })
+                .then_some(frame);
         }
         let gate = gate.unwrap();
         let args = frame.arguments();
@@ -241,20 +259,23 @@ impl EngineInstance {
                 .check_span(GuestAddress(address), length, Access::Read)
                 .is_err()
         }) {
-            return false;
+            return None;
         }
-        self.d3d8.as_ref().is_some_and(|runtime| {
-            if matches!(gate.slot, 61 | 83 | 85) {
-                runtime.external_cpu_binding_gate_safe(
-                    memory,
-                    GuestAddress(args[0]),
-                    gate.slot,
-                    args,
-                )
-            } else {
-                runtime.external_cpu_scalar_gate_safe(memory, GuestAddress(args[0]))
-            }
-        })
+        self.d3d8
+            .as_ref()
+            .is_some_and(|runtime| {
+                if matches!(gate.slot, 61 | 83 | 85) {
+                    runtime.external_cpu_binding_gate_safe(
+                        memory,
+                        GuestAddress(args[0]),
+                        gate.slot,
+                        args,
+                    )
+                } else {
+                    runtime.external_cpu_scalar_gate_safe(memory, GuestAddress(args[0]))
+                }
+            })
+            .then_some(frame)
     }
 
     pub(in crate::process) fn prepare_core_exit(

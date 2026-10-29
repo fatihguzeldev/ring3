@@ -71,6 +71,86 @@ fn prepare(engine: &mut EngineInstance, device: GuestAddress, slot: u8) -> u32 {
     .id()
 }
 
+#[test]
+fn external_direct_gate_d3d8_facade_matches_original_scalar_dispatch() {
+    for slot in [37, 42, 46, 50, 63] {
+        let (mut direct, device) = setup();
+        let (mut original, original_device) = setup();
+        assert_eq!(device, original_device);
+        for engine in [&mut direct, &mut original] {
+            engine
+                .configure_user32(
+                    Default::default(),
+                    PageRange::new(GuestAddress(0x3000_0000), 16).unwrap(),
+                )
+                .unwrap();
+        }
+        let id = prepare(&mut direct, device, slot);
+        if slot == 37 {
+            direct
+                .memory
+                .as_mut()
+                .unwrap()
+                .write(GuestAddress(DATA + 8), &2u32.to_le_bytes())
+                .unwrap();
+        }
+        let state = crate::abi::x86::decode_state(&direct.arena()[..STATE_SIZE]).unwrap();
+        let frame = crate::windows::CallFrame32::capture(
+            direct.memory().unwrap(),
+            state,
+            crate::windows::CallingConvention32::Stdcall,
+            u32::from(MethodGate::from_id(id).unwrap().method().stack_words),
+        )
+        .unwrap();
+        assert!(direct.external_cpu_can_defer_gate(PC, id));
+        let (generation, token) = super::transport::capture_gate(
+            &mut original,
+            MethodGate::from_id(id).unwrap(),
+            frame.arguments(),
+        );
+        original
+            .complete_windows_call(91, generation, token)
+            .unwrap();
+        let expected = crate::abi::x86::decode_state(&original.arena()[..STATE_SIZE])
+            .unwrap()
+            .registers[0];
+        let arena = direct.arena().to_vec();
+        let version = direct.memory().unwrap().transaction_version();
+        let epoch = direct.core_epoch;
+        let call_token = direct.call_token;
+        assert_eq!(
+            direct
+                .execute_external_direct_windows_gate(id, frame)
+                .unwrap(),
+            expected
+        );
+        assert_eq!(expected, 0, "valid scalar setter slot {slot}");
+        assert_eq!(
+            direct
+                .d3d8
+                .as_ref()
+                .unwrap()
+                .device(device)
+                .unwrap()
+                .state()
+                .snapshot(),
+            original
+                .d3d8
+                .as_ref()
+                .unwrap()
+                .device(original_device)
+                .unwrap()
+                .state()
+                .snapshot()
+        );
+        assert_eq!(direct.arena(), arena);
+        assert_eq!(direct.memory().unwrap().transaction_version(), version);
+        assert_eq!(direct.core_epoch, epoch);
+        assert_eq!(direct.call_token, call_token);
+        assert!(direct.pending_call.is_none());
+    }
+}
+
 fn prepare_draw(slot: u8, fragmented: bool) -> (EngineInstance, GuestAddress, u32) {
     let (mut engine, device) = setup();
     if fragmented {

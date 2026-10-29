@@ -78,6 +78,40 @@ impl D3D8Reply32 {
 }
 
 impl EngineInstance {
+    #[cfg(feature = "external-cpu")]
+    pub(in crate::process) fn execute_external_direct_d3d8_gate(
+        &mut self,
+        id: u32,
+        frame: CallFrame32,
+    ) -> Result<u32, HostError> {
+        let Some(gate) = MethodGate::from_id(id).filter(|gate| {
+            gate.interface == InterfaceKind::Device && matches!(gate.slot, 37 | 42 | 46 | 50 | 63)
+        }) else {
+            return Err(HostError::Call(CallError::InvalidRequest));
+        };
+        let windows = self
+            .user32
+            .as_ref()
+            .map(super::super::user32::User32Context32::windows);
+        let runtime = self
+            .d3d8
+            .as_mut()
+            .ok_or(HostError::D3D8(D3D8Error32::NotConfigured))?;
+        let memory = self.memory.as_mut().ok_or(HostError::Closed)?;
+        let mut setup = FpuSetup32::NotReached;
+        let result = runtime.method_call(memory, windows, gate, frame.arguments(), 0, &mut setup);
+        if setup != FpuSetup32::NotReached {
+            return Err(HostError::Infrastructure);
+        }
+        match result {
+            Ok(value) => Ok(value),
+            Err(error @ (DispatchError32::Api(_) | DispatchError32::Device(_))) => {
+                Ok(dispatch_hresult(error).0)
+            }
+            Err(_) => Err(HostError::Infrastructure),
+        }
+    }
+
     pub(in crate::process) fn d3d8_provider_owns_token(&self, token: u32) -> bool {
         self.d3d8_reply.is_some_and(|reply| reply.token == token)
     }

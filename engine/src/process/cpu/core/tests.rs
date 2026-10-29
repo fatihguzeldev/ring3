@@ -291,6 +291,181 @@ fn prepare_external_fast_gate(engine: &mut EngineInstance, id: u32) {
 }
 
 #[cfg(feature = "external-cpu")]
+fn direct_result(engine: &EngineInstance) -> [u32; 4] {
+    let packet = &engine.arena()[TRANSFER_OFFSET..TRANSFER_OFFSET + 32];
+    crate::abi::header::validate(packet, *b"R3IF", 32).unwrap();
+    std::array::from_fn(|index| crate::abi::header::read_u32(packet, 16 + index * 4))
+}
+
+#[cfg(feature = "external-cpu")]
+#[test]
+fn external_direct_gate_getter_uses_scalar_frame_without_publishing_cpu_state() {
+    let mut engine = fixture();
+    call(&mut engine, WindowsApi32::SetLastError, &[0xf1234567]);
+    prepare_external_fast_gate(&mut engine, WindowsApi32::GetLastError.id());
+    engine.set_external_cpu_gate_mode(1).unwrap();
+    let pc = state(&engine).eip;
+    let esp = state(&engine).registers[4];
+    let mut canonical = state(&engine);
+    canonical.eip = 0x401123;
+    canonical.registers[0] = 0xabcdef01;
+    encode_state_current(
+        &canonical,
+        &mut engine.arena.as_mut().get_mut()[..STATE_SIZE],
+    )
+    .unwrap();
+    let before = engine.arena().to_vec();
+    let epoch = engine.core_epoch;
+    let token = engine.call_token;
+    let version = engine.memory().unwrap().transaction_version();
+    assert!(
+        engine
+            .try_direct_external_cpu_gate(pc, esp, 0x778899aa)
+            .unwrap()
+    );
+    assert_eq!(
+        direct_result(&engine),
+        [
+            WindowsApi32::GetLastError.id(),
+            0xf1234567,
+            0x401000,
+            esp + 4
+        ]
+    );
+    assert_eq!(
+        &engine.arena()[..TRANSFER_OFFSET],
+        &before[..TRANSFER_OFFSET]
+    );
+    assert_eq!(
+        &engine.arena()[TRANSFER_OFFSET + 32..],
+        &before[TRANSFER_OFFSET + 32..]
+    );
+    assert_eq!(engine.core_epoch, epoch);
+    assert_eq!(engine.call_token, token);
+    assert_eq!(engine.memory().unwrap().transaction_version(), version);
+    assert!(engine.pending_call.is_none());
+}
+
+#[cfg(feature = "external-cpu")]
+#[test]
+fn external_direct_gate_setter_and_tls_preserve_original_teb_and_void_result_semantics() {
+    let mut engine = fixture();
+    let index = engine.allocate_windows_tls().unwrap();
+    engine.set_windows_tls(index, 0x55aa7788).unwrap();
+    for (id, argument, eax, expected, error) in [
+        (
+            WindowsApi32::SetLastError.id(),
+            0xf1234567,
+            0xdecafbad,
+            0xdecafbad,
+            0xf1234567,
+        ),
+        (
+            crate::windows::thread::ThreadApi32::TlsGetValue.id(),
+            index,
+            0x98765432,
+            0x55aa7788,
+            0,
+        ),
+    ] {
+        prepare_external_fast_gate(&mut engine, id);
+        engine.set_external_cpu_gate_mode(1).unwrap();
+        let pc = state(&engine).eip;
+        let esp = state(&engine).registers[4];
+        engine
+            .memory
+            .as_mut()
+            .unwrap()
+            .write(GuestAddress(esp + 4), &argument.to_le_bytes())
+            .unwrap();
+        let before = engine.arena().to_vec();
+        let version = engine.memory().unwrap().transaction_version();
+        let epoch = engine.core_epoch;
+        let token = engine.call_token;
+        assert!(engine.try_direct_external_cpu_gate(pc, esp, eax).unwrap());
+        assert_eq!(direct_result(&engine), [id, expected, 0x401000, esp + 8]);
+        assert_eq!(
+            &engine.arena()[..TRANSFER_OFFSET],
+            &before[..TRANSFER_OFFSET]
+        );
+        assert_eq!(
+            &engine.arena()[TRANSFER_OFFSET + 32..],
+            &before[TRANSFER_OFFSET + 32..]
+        );
+        let mut last_error = [0; 4];
+        engine
+            .memory()
+            .unwrap()
+            .read(
+                GuestAddress(engine.module_teb_address().unwrap() + 0x34),
+                &mut last_error,
+            )
+            .unwrap();
+        assert_eq!(u32::from_le_bytes(last_error), error);
+        assert_eq!(engine.memory().unwrap().transaction_version(), version + 1);
+        assert_eq!(engine.core_epoch, epoch);
+        assert_eq!(engine.call_token, token);
+        assert!(engine.pending_call.is_none());
+    }
+}
+
+#[cfg(feature = "external-cpu")]
+#[test]
+fn external_direct_gate_decline_leaves_all_authoritative_state_untouched() {
+    for (id, port, offset, guarded, captured) in [
+        (WindowsApi32::GetLastError.id(), false, 0, false, false),
+        (
+            crate::windows::process::ProcessApi32::GetCurrentThreadId.id(),
+            true,
+            0,
+            false,
+            false,
+        ),
+        (WindowsApi32::GetLastError.id(), true, 1, false, false),
+        (WindowsApi32::GetLastError.id(), true, 0, true, false),
+        (WindowsApi32::GetLastError.id(), true, 0, false, true),
+    ] {
+        let mut engine = fixture();
+        prepare_external_fast_gate(&mut engine, id);
+        if port {
+            engine.set_external_cpu_gate_mode(1).unwrap();
+        }
+        if guarded {
+            let page = crate::memory::PageRange::new(
+                GuestAddress(engine.module_teb_address().unwrap() & !4095),
+                1,
+            )
+            .unwrap();
+            engine
+                .memory
+                .as_mut()
+                .unwrap()
+                .protect(page, crate::memory::Permissions::READ_WRITE.with_guard())
+                .unwrap();
+        }
+        if captured {
+            engine.capture_core_windows_call().unwrap();
+        }
+        let pc = state(&engine).eip + offset;
+        let esp = state(&engine).registers[4];
+        let arena = engine.arena().to_vec();
+        let epoch = engine.core_epoch;
+        let token = engine.call_token;
+        let version = engine.memory().unwrap().transaction_version();
+        assert!(
+            !engine
+                .try_direct_external_cpu_gate(pc, esp, 0x12345678)
+                .unwrap()
+        );
+        assert_eq!(engine.arena(), arena);
+        assert_eq!(engine.core_epoch, epoch);
+        assert_eq!(engine.call_token, token);
+        assert_eq!(engine.memory().unwrap().transaction_version(), version);
+        assert_eq!(engine.pending_call.is_some(), captured);
+    }
+}
+
+#[cfg(feature = "external-cpu")]
 #[test]
 fn external_inline_gate_publishes_zero_work_and_completes_original_getter_once() {
     let mut engine = fixture();

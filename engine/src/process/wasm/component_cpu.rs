@@ -194,6 +194,25 @@ pub(crate) fn component_cpu_try_inline_gate(low: u32, high: u32, pc: u32) -> u32
     }
 }
 
+pub(crate) fn component_cpu_try_direct_gate(
+    low: u32,
+    high: u32,
+    pc: u32,
+    esp: u32,
+    eax: u32,
+) -> u32 {
+    let mut completed = false;
+    let result = access(low, high, true, |instance| {
+        completed = instance.try_direct_external_cpu_gate(pc, esp, eax)?;
+        Ok(())
+    });
+    if result == 0 && !completed {
+        256
+    } else {
+        result
+    }
+}
+
 pub(crate) fn component_cpu_publish(
     low: u32,
     high: u32,

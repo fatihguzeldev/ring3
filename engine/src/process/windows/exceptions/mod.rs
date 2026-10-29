@@ -46,6 +46,11 @@ pub(in crate::process) struct ExceptionRuntime32 {
     next: u64,
 }
 impl ExceptionRuntime32 {
+    #[cfg(feature = "external-cpu")]
+    pub(in crate::process) fn has_deliveries(&self) -> bool {
+        !self.deliveries.is_empty()
+    }
+
     pub(in crate::process) fn new() -> Result<Self, crate::windows::exceptions::ExceptionError32> {
         Ok(Self {
             handlers: HandlerRegistry32::new(1024)?,
