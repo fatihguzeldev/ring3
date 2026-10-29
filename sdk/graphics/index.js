@@ -24,7 +24,7 @@ class DeviceRenderer {
   constructor(host,epoch) {
     this.host=host;this.device=host.device;this.epoch=epoch;this.stream=new PacketStream();this.pendingEncoder=null;this.accepting=false;this.resources=new Resources(this.device,()=>this.flush());
     this.shaders=new Map();this.states=new Map();this.pipelines=new Map();this.domains=new Map();this.patches=new Map();this.temporary=[];
-    this.pipelineInputs=new Map();this.pipelineInputMemoEnabled=true;this.programIdentities=new WeakMap();this.nextProgramIdentity=0;
+    this.pipelineInputs=new Map();this.pipelineInputMemoEnabled=false;this.programIdentities=new WeakMap();this.nextProgramIdentity=0;
     this.pipelineInputHits=0;this.pipelineInputMisses=0;this.pipelineBuilds=0;
     this.draws=0;this.presents=0;this.removed=false;this.gamma=new Float32Array(3*256);
     for(let c=0;c<3;c++)for(let i=0;i<256;i++)this.gamma[c*256+i]=i/255;

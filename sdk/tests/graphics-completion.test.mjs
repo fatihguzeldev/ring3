@@ -64,6 +64,7 @@ function pipelineState() {
 async function pipelineFixture(t) {
   const f=await graphicsFixture(t);await f.host.consume(packet([[1,definition]]));
   const renderer=f.host.sessions.get(1n),targets={color:{item:{gpuFormat:'rgba8unorm'}}};
+  renderer.pipelineInputMemoEnabled=true;
   return {...f,renderer,targets,run:(state,kind='triangle-list',kinds=Array(8).fill(null),patch=false,output=targets)=>renderer.gpuPipeline(state,kind,output,kinds,patch)};
 }
 
