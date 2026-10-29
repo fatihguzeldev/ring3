@@ -307,7 +307,15 @@ try {
       assert.equal(read(dataAddress+8),22);
       engine.ok('protect',0x600000,1,7);
       upload(0x6003c0,[0xc7,0x05,...u32(writer+1),...u32(33),0xb8,...u32(code),0xff,0xe0]);
-      engine.ok('protect',0x600000,1,5);cache.tables.refresh();flushes.length=0;
+      engine.ok('protect',0x600000,1,5);cache.tables.refresh();
+      const smcWarmBefore=runtime.counters().finalizedModules;
+      for(let i=0;i<48;i++) {
+        runAt(code);await new Promise(resolve=>setTimeout(resolve,2));
+        if(runtime.counters().finalizedModules>smcWarmBefore)break;
+      }
+      const smcWarmFinalized=runtime.counters().finalizedModules;
+      assert(smcWarmFinalized>smcWarmBefore,'global RX code is compiled again after all writer setup invalidations');
+      assert.equal(read(dataAddress+8),22);flushes.length=0;
       runAt(0x6003c0);assert.equal(read(dataAddress+8),33,'guest RW alias SMC cannot reuse stale global RX code');
       assert.equal(pte(code)&256,256);assert(!flushes.includes('full'),'guest SMC is handled by v86 without a host full flush');
       engine.ok('protect',code,1,1);cache.tables.refresh();assert.equal(pte(code)&256,0);
@@ -315,7 +323,8 @@ try {
       assert.equal(nativeCall(0xa0086,[code]),1);cache.tables.refresh();assert.equal(pte(code),0);
       const rebound=nativeCall(0xa0085,[section,0x24,0,0,4096,code]);assert.equal(rebound,code);
       runAt(rebound);assert.equal(read(dataAddress+8),33);assert.equal(pte(rebound)&256,256);
-      report.globalCode.alias={section,writer,code,rebound,hostWrite:22,guestSmc:33,finalizedModules:runtime.counters().finalizedModules};
+      report.globalCode.alias={section,writer,code,rebound,hostWrite:22,guestSmc:33,smcWarmBefore,smcWarmFinalized,
+        noHostMutationBetweenWarmAndGuestSmc:true,finalizedModules:runtime.counters().finalizedModules};
       cache.tables.configureGlobalCode(false,owner);assert.equal(new DataView(memory.buffer).getUint32(596,true),cr4);
       assert.equal(pte(0x600000)&256,0);report.globalCode.restored=true;save();
     } finally {cache.cpu.full_clear_tlb=full;cache.cpu.clear_tlb=partial;}
