@@ -11,7 +11,7 @@ import {image as moduleImage} from '../../../loader/modules/wasm/fixtures/runtim
 
 const [enginePath, reportPath, permissionText = '1', portText = ''] = process.argv.slice(2);
 assert(enginePath && reportPath, 'usage: v86.mjs imported-engine.wasm fresh-report.json');
-assert(['', 'port', 'inline', 'direct', 'direct-bindings', 'direct-state-inputs', 'wasm-ports', 'guest-ret', 'global', 'overlap', 'simd', 'targeted-dirty'].includes(portText));
+assert(['', 'port', 'inline', 'direct', 'direct-bindings', 'direct-state-inputs', 'wasm-ports', 'guest-ret', 'global', 'overlap', 'simd', 'targeted-dirty', 'relaxed-fpu'].includes(portText));
 const targetedMode=portText==='targeted-dirty';
 const deniedPermission = Number(permissionText);
 assert([0,1].includes(deniedPermission));
@@ -174,6 +174,38 @@ try {
   const vector = Array.from({length: 4}, (_, i) => read(0x601030 + i * 4));
   assert.deepEqual(vector, [6,8,10,12], 'actual SSE integer vector addition');
   report.numeric = {binary64Words: [0,0x40000000], vector};
+  if(portText==='relaxed-fpu') {
+    stage='relaxed arithmetic across native full-bank calls and strict restoration';
+    const start=0x600120,out=0x601060,fp=engine.base+4236,ex=cache.cpu.wm.exports;
+    upload(start,[0xdb,0xe3,0xd9,0xe8,0xd9,0xe8,0xde,0xc1,0xb8,...u32(gate),0xff,0xd0,
+      0xd9,0xe8,0xde,0xc1,0xb8,...u32(gate),0xff,0xd0,0xdd,0x1d,...u32(out),0xb8,...u32(gate),0xff,0xe0]);
+    assert.equal(cache.relaxedFpu,false);assert.equal(ex.get_relaxed_fpu(),0);
+    cache.configureRelaxedFpu(true,{paused:true,open:cache.open});
+    new DataView(memory.buffer).setUint32(engine.base+48,start,true);
+    new DataView(memory.buffer).setUint32(engine.base+32,0x601800,true);
+    report.relaxedFpu={controlWord:0x37f,boundaries:[],scope:'experimental f64 arithmetic; no general x87 precision or exception equivalence claim'};
+    for(const [index,mantissa] of [0x8000000000000000n,0xc000000000000000n].entries()) {
+      cache.import();const run=cache.execute(cache.select());cache.publish();
+      assert.equal(run.reason,8);assert.equal(run.detail,0x10001);
+      const d=new DataView(memory.buffer),slot=cpuViews(memory).bytes[1032]&7;
+      assert.equal(d.getUint16(1160+slot*16,true),0x7ffe,'actual live result is tagged f64');
+      assert.equal(d.getUint16(fp+16,true),0x37f,'FNINIT control word survives the transport');
+      assert.equal(d.getBigUint64(fp+40+slot*10,true),mantissa);
+      assert.equal(d.getUint16(fp+48+slot*10,true),0x4000,'native arena contains canonical 80-bit 2 or 3');
+      const before=banks();engine.ok('core_capture_windows_call');
+      const token=engine.resultView(112).getUint32(16,true);engine.ok('core_complete_windows_call',token);
+      assert.equal(engine.get(48),start+(index?26:15));assert.deepEqual(banks(),before);
+      report.relaxedFpu.boundaries.push({run,slot,mantissa:String(mantissa),canonicalExponent:0x4000,nativeBanksPreserved:true});
+    }
+    cache.configureRelaxedFpu(false,{paused:true,open:cache.open});
+    assert.equal(ex.get_relaxed_fpu(),0);assert.equal(cache.stats().fpuMode,'strict');
+    const live=cpuViews(memory),slot=live.bytes[1032]&7;
+    assert.equal(live.data.getUint16(1160+slot*16,true),0x4000);
+    assert.equal(live.data.getBigUint64(1152+slot*16,true),0xc000000000000000n);
+    const strict=cache.execute(cache.select());cache.publish();assert.equal(strict.reason,8);
+    assert.equal(read(out),0);assert.equal(read(out+4),0x40080000,'strict follow-on stores preserved binary64 3');
+    report.relaxedFpu.strictRestored=true;report.relaxedFpu.binary64Words=[0,0x40080000];
+  }
   stage = 'memory policies on actual v86 page walks';
   const dataAddress=0x680000;
   engine.ok('map',dataAddress,1,3);
