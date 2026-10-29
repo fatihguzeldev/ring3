@@ -5,13 +5,13 @@ import {readEngine} from '../../../support/wasm/engine.mjs';
 import {Engine, KEY, view} from '../../../../../sdk/runtime/engine.js';
 import {Files} from '../../../../../sdk/runtime/files.js';
 import {prepareV86} from '../../../../../sdk/runtime/v86/index.js';
-import {DIRECTORY} from '../../../../../sdk/runtime/v86/layout.js';
+import {DIRECTORY,PARK} from '../../../../../sdk/runtime/v86/layout.js';
 import {cpuViews, exportState} from '../../../../../sdk/runtime/v86/state.js';
 import {image as moduleImage} from '../../../loader/modules/wasm/fixtures/runtime/images.mjs';
 
 const [enginePath, reportPath, permissionText = '1', portText = ''] = process.argv.slice(2);
 assert(enginePath && reportPath, 'usage: v86.mjs imported-engine.wasm fresh-report.json');
-assert(['', 'port', 'inline', 'direct', 'direct-bindings', 'global', 'simd'].includes(portText));
+assert(['', 'port', 'inline', 'direct', 'direct-bindings', 'guest-ret', 'global', 'simd'].includes(portText));
 const deniedPermission = Number(permissionText);
 assert([0,1].includes(deniedPermission));
 const hash = bytes => createHash('sha256').update(bytes).digest('hex');
@@ -356,8 +356,8 @@ try {
       assert.equal(new DataView(memory.buffer).getUint32(cache.tables.ram+DIRECTORY+(dense>>>22)*4,true)&32,0);
       report.densePteValidation.push({lane,before,after:version(),scannedPtes:cache.tables.lastDirtyScanCount});save();
     }
-  } else if(portText==='inline' || portText==='direct' || portText==='direct-bindings') {
-    const directMode=portText!=='inline',bindingMode=portText==='direct-bindings';
+  } else if(portText==='inline' || portText==='direct' || portText==='direct-bindings' || portText==='guest-ret') {
+    const directMode=portText!=='inline',bindingMode=portText==='direct-bindings',guestReturnMode=portText==='guest-ret';
     stage=directMode?'direct scalar API continuation':'inline native API continuation';
     engine.ok('protect',0x601000,1,3);
     const entries=new Map();
@@ -376,6 +376,7 @@ try {
     if(bindingMode)assert.equal(directOperation,'component_cpu_try_direct_gate_mask');
     let allow=true,clockCalls=0,bankExports=0,bankTagReads=0,stateFlagUpdates=0;
     cache.inlineOwner={canContinue:()=>allow,observeClock(){clockCalls++;engine.ok('observe_cpu_clock',0,0);return 0n;}};
+    if(guestReturnMode){cache.tables.refresh();cache.tables.configureGlobalCode(true,{paused:true,open:cache.open});}
     assert.equal(cache.configurePortGates(true,{paused:true,open:cache.open}),true);
     const seed=pc=>{
       const registers=[0x11223344,0,0xe1,0x3456789a,stack,0x456789ab,0x56789abc,0x6789abcd];
@@ -406,9 +407,9 @@ try {
     invoke(ids.slow);program.push(0xeb,0xfe);upload(programPc,program);
     cache.budget=100002;
     const inlineReport=report[directMode?'direct':'inline']={tlsIndex,programPc,afterGet,afterSlow,atomicSupported,
-      directMode,bindingMode,directOperation,requestedMask:bindingMode?0x7ff:0xff,
+      directMode,bindingMode,guestReturnMode,directOperation,requestedMask:bindingMode?0x7ff:0xff,
       bindingCoverage:'mask selection and existing scalar continuation only; no D3D device is provisioned by this fixture',
-      authoredLoopPrefixInstructions:40001,authoredFirstOuterInstructions:40018,runs:[],
+      authoredLoopPrefixInstructions:40001,authoredFirstOuterInstructions:40018+(guestReturnMode?1:0),runs:[],
       semantics:directMode?'direct calls preserve canonical State/Exit/banks/R3WK and return scalars; only the completed outer main_loop is published and charged':'all intermediate gate publications carry zero credits; only completed outer main_loop deltas are charged'};
     const reset=()=>{nativeCall(ids.set,[initialError]);for(let index=0;index<5;index++)put(output+index*4,0);seed(programPc);};
     const workPacket=()=>engine.get(4604);
@@ -453,7 +454,8 @@ try {
             assert.equal(result.getUint32(0,true),0x46493352);assert.equal(result.getUint32(4,true),0x10001);
             assert.equal(result.getUint32(8,true),32);assert.equal(result.getUint32(12,true),0);
             directResults.push({id:result.getUint32(16,true),eax:result.getUint32(20,true),
-              pc:result.getUint32(24,true),esp:result.getUint32(28,true),canonicalUnchanged:true,bankExports:0,clockObservations:0});
+              pc:result.getUint32(24,true),esp:result.getUint32(28,true),canonicalUnchanged:true,bankExports:0,clockObservations:0,
+              stack:guestReturnMode?new Error('registered API thunk continuation').stack:undefined});
           }
         }
         if(operation==='component_cpu_try_inline_gate') {
@@ -480,6 +482,7 @@ try {
       const row={label,run,publications,atomicCalls,directCalls,directMasks,directResults,continuations,bankExports:bankExports-exportsBefore,beforeCounter:counter,delta,inlineCompletions:after.inlineCompletions-before.inlineCompletions,
         directCompletions:(after.directCompletions??0)-(before.directCompletions??0),directDeclines:(after.directDeclines??0)-(before.directDeclines??0),
         directBindingCompletions:(after.directBindingCompletions??0)-(before.directBindingCompletions??0),
+        guestReturnCompletions:(after.guestReturnCompletions??0)-(before.guestReturnCompletions??0),
         runs:after.runs-before.runs,regions:after.regions-before.regions,gates:after.gates-before.gates,workPacket:workPacket(),clockCalls};
       assert.equal(run.work,delta);assert.equal(workPacket(),delta);
       assert.equal(after.work-before.work,delta);assert.equal(after.retired-before.retired,run.retired);
@@ -508,7 +511,8 @@ try {
         assert.deepEqual(row.directMasks,directOperation==='component_cpu_try_direct_gate_mask'?Array(4).fill(bindingMode?0x7ff:0xff):[]);
         assert.deepEqual(row.directResults.map(result=>result.id),[ids.get,ids.set,ids.tlsGet]);
       } else if(atomicSupported){assert.deepEqual(row.atomicCalls,[0,0,0,256]);assert.equal(row.publications.filter(p=>p.source==='js-publication').length,1);}
-      assert.equal(row.delta,40018);assert.equal(row.run.retired,40018);
+      assert.equal(row.delta,40018+(guestReturnMode?1:0));assert.equal(row.run.retired,40018+(guestReturnMode?1:0));
+      if(guestReturnMode)assert.equal(row.guestReturnCompletions,1);
       assert.equal(engine.get(32),stack-4);assert.equal(engine.get(52),0x646);
       assert.deepEqual([read(output),read(output+4),read(output+8)],[initialError,entries.get(ids.set),tlsValue]);
       assert.equal(read(0x7f000034),0,'successful actual TLS getter clears LastError');
@@ -517,6 +521,11 @@ try {
     cache.configureInlineGates(true,{paused:true,open:cache.open});
     if(directMode)cache.configureDirectGates(true,{paused:true,open:cache.open});
     if(bindingMode)cache.configureDirectBindings(true,{paused:true,open:cache.open});
+    if(guestReturnMode) {
+      assert.equal(cache.guestReturnsSupported,true);cache.configureGuestReturns(true,{paused:true,open:cache.open});
+      assert.equal(cache.gateMode().mode,2);assert(cache.gateMode().guestRetSites>0);
+      assert.deepEqual(Array.from({length:5},(_,i)=>cache.readCodeByte(entries.get(ids.get)+i)),[0xe6,0xe1,0xc2,0,0]);
+    }
     const wm=cache.cpu.wm,originalExports=wm.exports,exportDescriptor=Object.getOwnPropertyDescriptor(wm,'exports');
     const observedExports={...originalExports,fpu_load_status_word(...args){bankExports++;return originalExports.fpu_load_status_word(...args);},
       fpu_load_tag_word(...args){bankTagReads++;return originalExports.fpu_load_tag_word(...args);}};
@@ -548,16 +557,44 @@ try {
       assert.equal(optOut.delta,40004);assert.equal(clockCalls,clocks);assert.equal(optOut.publications.length,1);
       assert.equal(optOut.bankExports,1);if(atomicSupported)assert.deepEqual(optOut.atomicCalls,[]);
       allow=true;
-      stage='completed inline deadline yields returned state';reset();const completed=cache.inlineCompletions;
-      cache.inlineOwner.canContinue=()=>cache.inlineCompletions===completed;
+      stage='completed inline deadline yields returned state';reset();let deadlineChecks=0;
+      cache.inlineOwner.canContinue=()=>++deadlineChecks<(directMode?2:3);
       const yielded=execute('deadline after successful completion');
       assert.equal(yielded.run.inlineYield,true);assert.equal(yielded.run.coreReason,2);assert.equal(yielded.delta,40004);
       assert.equal(yielded.inlineCompletions,1);assert.equal(engine.get(48),afterGet);
+      assert.equal(yielded.guestReturnCompletions,0,'a completed deadline yield uses manual R3IF return');
       assert.equal(yielded.bankExports,directMode?1:2,'returned-state Budget yield exports completed state exactly once for direct mode');
       assert.equal(engine.get(16),initialError);assert.equal(engine.get(32),stack);assert.equal(read(output),0);
       cache.inlineOwner.canContinue=()=>true;const resumed=execute('resume after completed deadline yield');
       assert.equal(resumed.run.detail,ids.slow);assert.equal(resumed.inlineCompletions,2);
       assert.equal(yielded.delta+resumed.delta,40018);
+      if(guestReturnMode) {
+        const getEntry=entries.get(ids.get),d=new DataView(memory.buffer),physical=d.getUint32(cache.tables.pte(getEntry>>>12),true)&~4095;
+        const physicalEntry=physical+(getEntry&4095);
+        inlineReport.registeredThunkWitness={entry:getEntry,physicalEntry,
+          generatedCallback:/at g[0-9a-f]+@t/.test(warmed.directResults[0].stack),stack:warmed.directResults[0].stack,
+          generatedAtThunkEntry:new RegExp(`at g${physicalEntry.toString(16).padStart(8,'0')}@t`).test(warmed.directResults[0].stack),
+          actualGuestRetCredits:1,warmups:inlineReport.warmupCount};
+        stage='intentional CPU park boundary before owned guest RET';reset();
+        const pendingJit=ex.get_jit_config(0);let parked;
+        try {
+          ex.set_jit_config(0,1);ex.set_park_eip(getEntry+2);parked=execute('intentional park before RET');
+          assert.equal(parked.run.coreReason,2);assert.equal(parked.run.pc,getEntry+2);assert.equal(parked.delta,40004);
+          const mode=cache.gateMode(),bytes=Array.from({length:5},(_,i)=>cache.readCodeByte(getEntry+i));
+          assert.equal(mode.pendingRet,1);assert.equal(mode.mode,2);
+          assert.throws(()=>cache.configureGuestReturns(false,{paused:true,open:cache.open}),error=>error.status===12);
+          assert.equal(cache.guestReturns,true);assert.equal(cache.portGateMode,2);
+          assert.deepEqual(Array.from({length:5},(_,i)=>cache.readCodeByte(getEntry+i)),bytes);
+          inlineReport.pendingRet={boundary:'intentional interpreter set_park_eip boundary, not an exact natural JIT instruction budget',pc:parked.run.pc,mode,bytes,busyPreserved:true};
+        } finally {ex.set_park_eip(PARK);}
+        const continued=execute('resume owned RET exactly once');
+        assert.equal(continued.run.detail,ids.slow);assert.equal(parked.delta+continued.delta,40019);
+        assert.equal(continued.directResults.some(result=>result.id===ids.get),false,'completed getter cannot replay on RET resume');
+        assert.equal(cache.gateMode().pendingRet,0);
+        ex.set_jit_config(0,pendingJit);
+        cache.configureGuestReturns(false,{paused:true,open:cache.open});assert.equal(cache.gateMode().mode,1);
+        cache.configureGuestReturns(true,{paused:true,open:cache.open});
+      }
       stage='captured inline Busy is terminal';reset();const status=engine.status,before=cache.stats();let captures=0,failure;
       const completionOperation=directMode?directOperation:atomicSupported?'component_cpu_try_inline_gate':'component_cpu_try_complete_gate';
       engine.status=function(operation,...args) {
@@ -578,6 +615,11 @@ try {
       assert.equal(captures,1);assert.equal(cache.stats().runs,before.runs);assert.equal(read(output+16),0);
       assert.equal(cache.stats().inlineFailed,true);inlineReport.busy={poisoned:true,captures,message:failure.message,
         operation:completionOperation,injection:directMode?'test-only full live-state export and zero Gate publication plus real capture, then simulated ABI Busy; direct handler not executed':atomicSupported?'explicit zero Gate publication plus real capture, then simulated ABI Busy; handler not executed':'real capture then simulated ABI Busy; handler not executed'};
+      if(guestReturnMode) {
+        report.stateOwnershipControlsPassed=true;stage='final registered API thunk JIT acceptance';
+        assert.equal(inlineReport.registeredThunkWitness.generatedAtThunkEntry,true,
+          'the registered API OUT must run in its own compiled physical thunk entry');
+      }
     } finally {ex.set_jit_config(0,oldJit);Error.stackTraceLimit=oldStackLimit;
       if(flagsDescriptor)Object.defineProperty(cache.cpu,'update_state_flags',flagsDescriptor);else delete cache.cpu.update_state_flags;
       if(exportDescriptor)Object.defineProperty(wm,'exports',exportDescriptor);else delete wm.exports;}
