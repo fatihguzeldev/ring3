@@ -102,12 +102,20 @@ impl EngineInstance {
                 ready(1, None)
             }
             Api::ReleaseMutex => {
+                let prepared = self
+                    .synchronization
+                    .as_ref()
+                    .unwrap()
+                    .context()
+                    .prepare_release_mutex(args[0])
+                    .map_err(HostError::Synchronization)?;
+                let (owner, _) = prepared.owner_depth();
                 self.synchronization
                     .as_mut()
                     .unwrap()
                     .context_mut()
-                    .release_mutex(args[0])
-                    .map_err(HostError::Synchronization)?;
+                    .commit_release_mutex(prepared);
+                self.request_windows_thread_wake(owner);
                 ready(1, None)
             }
             Api::ReleaseSemaphore => {

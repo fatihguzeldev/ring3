@@ -25,6 +25,19 @@ impl EngineInstance {
             .then_some(self.threads.schedule_required)
             .flatten()
     }
+    pub(in crate::process::windows) fn request_windows_thread_wake(&mut self, thread: u32) {
+        if thread != 0
+            && thread != self.threads.current_id()
+            && self.threads.schedule_required.is_none()
+            && self.threads.threads.iter().any(|record| {
+                record.id == thread
+                    && record.state == ThreadState32::Waiting
+                    && record.suspend_count == 0
+            })
+        {
+            self.threads.schedule_required = Some(thread);
+        }
+    }
     fn windows_thread_eligible(&self, index: usize) -> bool {
         let thread = &self.threads.threads[index];
         if thread.suspend_count != 0
