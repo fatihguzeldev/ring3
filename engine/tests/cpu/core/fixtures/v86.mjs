@@ -11,7 +11,8 @@ import {image as moduleImage} from '../../../loader/modules/wasm/fixtures/runtim
 
 const [enginePath, reportPath, permissionText = '1', portText = ''] = process.argv.slice(2);
 assert(enginePath && reportPath, 'usage: v86.mjs imported-engine.wasm fresh-report.json');
-assert(['', 'port', 'inline', 'direct', 'direct-bindings', 'direct-state-inputs', 'wasm-ports', 'guest-ret', 'global', 'overlap', 'simd', 'targeted-dirty', 'relaxed-fpu'].includes(portText));
+assert(['', 'port', 'inline', 'direct', 'direct-bindings', 'direct-state-inputs', 'wasm-ports', 'guest-ret', 'global', 'overlap', 'simd', 'targeted-dirty', 'relaxed-fpu', 'relaxed-fpu-boot'].includes(portText));
+const relaxedBoot=portText==='relaxed-fpu-boot';
 const targetedMode=portText==='targeted-dirty';
 const deniedPermission = Number(permissionText);
 assert([0,1].includes(deniedPermission));
@@ -28,7 +29,7 @@ const save = () => writeFileSync(reportPath, JSON.stringify(report, (_key, value
   typeof value === 'bigint' ? String(value) : value, 2) + '\n');
 let runtime, engine, cache, stage = 'prepare';
 try {
-  runtime = await prepareV86({wasmUrl: 'data:application/wasm;base64,' + cpuBytes.toString('base64'), sha256: hash(cpuBytes),wasmPorts:portText==='wasm-ports'});
+  runtime = await prepareV86({wasmUrl: 'data:application/wasm;base64,' + cpuBytes.toString('base64'), sha256: hash(cpuBytes),wasmPorts:portText==='wasm-ports',relaxedFpu:relaxedBoot});
   report.wasmPortBridgeInstalled=!!runtime.portBridge;
   assert.equal(report.wasmPortBridgeInstalled,portText==='wasm-ports','the Wasm IO import shim requires explicit boot opt-in');
   if(portText!=='wasm-ports')assert.equal(runtime.portBridgeFallback,undefined);
@@ -83,6 +84,10 @@ try {
   const init = {token: initializer.getBigUint64(24, true), returnPc: initializer.getUint32(44, true), id: initializer.getUint32(48, true)};
   stage = 'attach while DLL initializer is pending';
   cache = await runtime.attach(engine, {budget: 1000});
+  if(relaxedBoot) {
+    assert.equal(runtime.relaxedFpu,true);assert.equal(cache.relaxedFpu,true);assert.equal(cache.cpu.wm.exports.get_relaxed_fpu(),1);
+    report.relaxedBoot={initialMode:1,initialControl:new DataView(memory.buffer).getUint16(engine.base+4252,true)};
+  }
   if(targetedMode) {
     assert.equal(cache.tables.targetedDirtySupported,true);
     cache.tables.configureTargetedDirty(true,{paused:true,open:cache.open});
@@ -174,7 +179,12 @@ try {
   const vector = Array.from({length: 4}, (_, i) => read(0x601030 + i * 4));
   assert.deepEqual(vector, [6,8,10,12], 'actual SSE integer vector addition');
   report.numeric = {binary64Words: [0,0x40000000], vector};
-  if(portText==='relaxed-fpu') {
+  if(relaxedBoot) {
+    assert.equal(cache.relaxedFpu,true);assert.equal(cache.cpu.wm.exports.get_relaxed_fpu(),1);
+    report.relaxedBoot.nativeCalls=report.calls.length;report.relaxedBoot.initializer=report.initializer;
+    report.relaxedBoot.numeric=report.numeric;cache.configureRelaxedFpu(false,{paused:true,open:cache.open});
+  }
+  if(portText==='relaxed-fpu' || relaxedBoot) {
     stage='relaxed arithmetic across native full-bank calls and strict restoration';
     const start=0x600120,out=0x601060,fp=engine.base+4236,ex=cache.cpu.wm.exports;
     upload(start,[0xdb,0xe3,0xd9,0xe8,0xd9,0xe8,0xde,0xc1,0xb8,...u32(gate),0xff,0xd0,
@@ -205,6 +215,25 @@ try {
     const strict=cache.execute(cache.select());cache.publish();assert.equal(strict.reason,8);
     assert.equal(read(out),0);assert.equal(read(out+4),0x40080000,'strict follow-on stores preserved binary64 3');
     report.relaxedFpu.strictRestored=true;report.relaxedFpu.binary64Words=[0,0x40080000];
+    const warm=0x600180,input=0x601070,budget=cache.budget,jit=ex.get_jit_config(0),stats=ex.get_fpu_relaxed_stats();
+    put(input,0);put(input+4,0x3ff00000);
+    upload(warm,[0xdb,0xe3,0xb9,...u32(20000),0xdd,0x05,...u32(input),0xdd,0x05,...u32(input),
+      0xde,0xc1,0xdd,0x1d,...u32(out),0x49,0x75,0xe9,0xb8,...u32(gate),0xff,0xe0]);
+    const loop=async()=>{
+      new DataView(memory.buffer).setUint32(engine.base+48,warm,true);cache.import();let run;
+      for(let n=0;n<4;n++){run=cache.execute(cache.select());cache.publish();if(run.reason===8)break;assert([1,2,6].includes(run.coreReason));await new Promise(resolve=>setTimeout(resolve,2));}
+      assert.equal(run.reason,8);assert.equal(read(out),0);assert.equal(read(out+4),0x40000000);return run;
+    };
+    try {
+      cache.budget=100002;cache.configureRelaxedFpu(true,{paused:true,open:cache.open});ex.set_fpu_relaxed_stats(1);
+      const before=ex.profiler_fpu_relaxed_hit_get();ex.set_jit_config(0,1);await loop();assert.equal(ex.profiler_fpu_relaxed_hit_get(),before);
+      ex.set_jit_config(0,0);const modules=runtime.counters().finalizedModules;let warmRuns=0;
+      for(;warmRuns<4 && ex.profiler_fpu_relaxed_hit_get()===before;warmRuns++){await loop();await new Promise(resolve=>setTimeout(resolve,2));}
+      const hits=ex.profiler_fpu_relaxed_hit_get()-before;assert(hits>0,'generated relaxed FPU fast path actually executed');assert(runtime.counters().finalizedModules>modules);
+      cache.configureRelaxedFpu(false,{paused:true,open:cache.open});const strictRun=await loop();
+      report.relaxedFpu.jit={warmRuns,hits,finalizedModules:runtime.counters().finalizedModules,strictRun,binary64Words:[0,0x40000000]};
+    } finally {if(cache.relaxedFpu)cache.configureRelaxedFpu(false,{paused:true,open:cache.open});ex.set_fpu_relaxed_stats(stats);ex.set_jit_config(0,jit);cache.budget=budget;}
+    assert.equal(ex.get_fpu_relaxed_stats(),stats);assert.equal(ex.get_relaxed_fpu(),0);
   }
   stage = 'memory policies on actual v86 page walks';
   const dataAddress=0x680000;
