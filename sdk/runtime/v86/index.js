@@ -3,6 +3,7 @@ import {KEY} from '../engine.js';
 import {CPU_SHA256,PHYSICAL_BYTES,PARK,SHIPPING_JIT,CODEGEN_SWITCHES,BACKING_BASE,PAGE} from './layout.js';
 import {PageTables} from './memory.js';
 import {Traps} from './traps.js';
+import {createPortBridge} from './ports.js';
 import {cpuViews,importState,exportState,rememberStateBanks,forgetStateBanks,validateSegmentSelectors} from './state.js';
 
 const INLINE_GATE_IDS=new Set([0x10001,0x10002,0xf000b,0x40225,0x4022a,0x4022e,0x40232,0x4023f]);
@@ -22,10 +23,14 @@ export async function prepareV86(options={}, {signal}={}) {
   if(hash!==expected || hash!==CPU_SHA256)throw new Error(`unsupported v86 CPU hash ${hash}`);
   const module=await WebAssembly.compile(bytes);
   signal?.throwIfAborted();
+  let portBridge,portCache=null,portBridgeOriginalIO,portBridgeFallback;
   const emulator=new V86({autostart:false,memory_size:memorySize,log_level:0,
     wasm_fn:async imports=>{
       // ring3 supplies process time and devices; the cpu's machine timers stay inactive.
       imports.env.run_hardware_timers=()=>0;
+      portBridgeOriginalIO=imports.env.io_port_write8;
+      portBridgeFallback=(port,value)=>portCache?portCache.forwardPortIO(portBridgeOriginalIO,port,value):portBridgeOriginalIO(port,value);
+      portBridge=createPortBridge(portBridgeFallback);imports.env.io_port_write8=portBridge.write8;
       return (await WebAssembly.instantiate(module,imports)).exports;
     }});
   await new Promise((resolve,reject)=>{
@@ -52,17 +57,21 @@ export async function prepareV86(options={}, {signal}={}) {
   let generated=0,generatedBytes=0,finalized=0,attached=false,disposed=false;
   cpu.test_hook_did_generate_wasm=encoded=>{generated++;generatedBytes+=encoded.byteLength;};
   cpu.test_hook_did_finalize_wasm=()=>{finalized++;};
-  const runtime={cpu,memory:cpu.wasm_memory,hash,
+  const runtime={cpu,memory:cpu.wasm_memory,hash,portBridge,portBridgeOriginalIO,portBridgeFallback,
     async attach(engine,execution={}) {
       if(attached || disposed)throw new Error('v86 runtime cannot attach twice');
       signal?.throwIfAborted();
       if(engine.memory!==runtime.memory)throw new Error('v86 and Ring3 must share one Wasm memory');
       const cache=new V86CodeCache(engine,execution,cpu,runtime);
+      cache.portBridge=portBridge;
+      try {cache.portBridgeBound=portBridge.bind(cache)===true;}
+      catch(error){try{cache.close();}catch(cleanup){error.cleanupFailure=cleanup.message;}throw error;}
+      portCache=cache;
       attached=true;return cache;
     },
     counters:()=>({generatedModules:generated,finalizedModules:finalized,generatedModuleBytes:generatedBytes}),
     jitConfig,
-    dispose() {if(disposed)return;disposed=true;emulator.destroy();},
+    dispose() {if(disposed)return;disposed=true;portBridge.close();portCache=null;emulator.destroy();},
   };
   return runtime;
 }
@@ -90,6 +99,8 @@ export class V86CodeCache {
     this.directStateInputs=false;this.directStateInputCompletions=0;
     this.guestReturns=false;this.guestReturnCompletions=0;
     this.graphicsOverlap=false;
+    this.portBridge=null;this.portBridgeBound=false;this.wasmPorts=false;this.wasmPortsActive=false;
+    this.wasmPortCompletions=0;this.wasmPortDeclines=0;this.wasmPortCheckpoints=0;this.portBridgeDeclinedPc=null;
     this.executionPolicyInitialized=false;
   }
   initializeExecutionPolicy() {
@@ -120,6 +131,37 @@ export class V86CodeCache {
   get pc() {return this.engine.get(48);}
   get guestReturnsSupported() {return this.tables.guestReturnsSupported===true;}
   get directStateInputsSupported() {return this.tables.directStateInputsSupported===true && typeof this.engine.api.component_cpu_try_direct_gate_mask==='function';}
+  get wasmPortsSupported() {return this.portBridgeBound===true && this.tables.dirtyGateFlagsSupported===true && typeof this.engine.api.component_cpu_try_direct_gate_mask==='function';}
+  configureWasmPorts(enabled,owner) {
+    if(owner?.paused!==true || owner?.open!==false || this.open || this.closed || typeof enabled!=='boolean')
+      throw new Error('v86 Wasm port changes require a closed paused owner');
+    if(this.inlineFailure)throw this.inlineFailure;
+    if(enabled && !this.wasmPortsSupported)throw new Error('native v86 Wasm ports are unsupported');
+    this.publish();this.harvestPortBridge();this.portBridge?.disarm();this.wasmPortsActive=false;
+    this.wasmPorts=enabled;return enabled;
+  }
+  canUseWasmPorts() {
+    const owner=this.inlineOwner;
+    return this.wasmPorts && this.wasmPortsSupported && !this.closed && !this.inlineFailure &&
+      this.portGates && this.portGateMode===1 && !this.guestReturns && this.inlineGates && this.directGates && this.deferDirty &&
+      !!owner?.canContinue() && (typeof owner.canBridge!=='function' || owner.canBridge());
+  }
+  harvestPortBridge() {
+    if(!this.portBridgeBound)return null;
+    const result=this.portBridge.harvest(),count=result.completed;
+    this.wasmPortCompletions+=count;this.wasmPortDeclines+=result.declined;this.wasmPortCheckpoints+=result.checkpoints;
+    this.directCompletions+=count;this.inlineCompletions+=count;this.gates+=count;this.portGateCalls+=count;
+    this.deferredDirtyPublications+=count;this.directDeclines+=result.declined;
+    this.directBindingCompletions+=result.bindings;this.directStateInputCompletions+=result.stateInputs;
+    return result;
+  }
+  forwardPortIO(original,port,value) {
+    if(!this.wasmPortsActive)return original(port,value);
+    const result=this.harvestPortBridge(),previous=this.portBridgeDeclinedPc;
+    this.portBridgeDeclinedPc=result.declinedPc;
+    if(!this.canUseWasmPorts()){this.portBridge.disarm();this.wasmPortsActive=false;}
+    try {return original(port,value);}finally{this.portBridgeDeclinedPc=previous;}
+  }
   readCodeByte(address) {
     const {memory,tables}=this,page=address>>>12,buffer=memory.buffer;
     let views=this.codeByteViews;
@@ -151,10 +193,21 @@ export class V86CodeCache {
     for(let attempt=0;attempt<8;attempt++) {
       const before=cpuViews(this.memory).data.getUint32(664,true);
       new DataView(this.memory.buffer).setUint32(hp,this.budget,true);
+      let bridgeRun=false;
       this.open=true;
-      try {cpu.main_loop();} catch(error) {
-        if(!this.traps.isPortFault?.(error))throw error;
-      } finally {this.open=false;}
+      try {
+        if(this.canUseWasmPorts()) {
+          this.dirtyPending=true;this.wasmPortsActive=true;bridgeRun=true;
+          if(this.portBridge.arm((this.directBindings?0x7ff:0xff)|(this.directStateInputs?0x1800:0))!==true)
+            throw new Error('v86 Wasm port bridge failed to arm');
+        }
+        cpu.main_loop();
+      } catch(error) {
+        if(!this.traps.isPortFault?.(error)){if(bridgeRun)this.inlineFailure??=error;throw error;}
+      } finally {
+        try {if(bridgeRun)this.harvestPortBridge();}
+        finally {if(bridgeRun){this.portBridge.disarm();this.wasmPortsActive=false;}this.open=false;}
+      }
       const delta=(cpuViews(this.memory).data.getUint32(664,true)-before)>>>0;
       trap=this.traps.pending;
       if(!delta && !trap)throw new Error(`v86 made no progress at0x${cpuViews(this.memory).data.getUint32(556,true).toString(16)}`);
@@ -217,6 +270,7 @@ export class V86CodeCache {
   }
   tryInlineGate(trap) {
     if(this.inlineFailure)throw this.inlineFailure;
+    if(this.portBridgeDeclinedPc===trap.pc)return false;
     const owner=this.inlineOwner,h=this.engine;
     if(!this.inlineGates || !this.portGates || !this.deferDirty ||
         this.tables.dirtyGateFlagsSupported!==true || !owner?.canContinue())return false;
@@ -420,6 +474,8 @@ export class V86CodeCache {
       portGateMode:this.portGateMode,portGatePatchedCount:this.portGatePatchedCount,
       guestReturns:this.guestReturns,guestReturnsSupported:this.guestReturnsSupported,guestReturnCompletions:this.guestReturnCompletions,
       graphicsOverlap:this.graphicsOverlap,
+      wasmPorts:this.wasmPorts,wasmPortsSupported:this.wasmPortsSupported,
+      wasmPortCompletions:this.wasmPortCompletions,wasmPortDeclines:this.wasmPortDeclines,wasmPortCheckpoints:this.wasmPortCheckpoints,
       inlineGates:this.inlineGates,inlineCompletions:this.inlineCompletions,inlineYields:this.inlineYields,
       directGates:this.directGates,directCompletions:this.directCompletions,directDeclines:this.directDeclines,
       directBindings:this.directBindings,directBindingCompletions:this.directBindingCompletions,
@@ -434,8 +490,10 @@ export class V86CodeCache {
   close() {
     if(this.closed)return;
     if(this.open)throw new Error('cannot close an active v86 adapter');
+    this.harvestPortBridge();this.portBridge?.disarm();this.wasmPortsActive=false;
     this.publish();
     if(this.portGateModeTouched || this.portGates)this.applyPortGates(false);
+    this.portBridge?.close();this.portBridgeBound=false;this.wasmPorts=false;
     forgetStateBanks(this.cpu);
     this.tables.release();this.closed=true;this.imported=false;
   }

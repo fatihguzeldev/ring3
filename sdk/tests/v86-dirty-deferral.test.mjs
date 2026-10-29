@@ -364,6 +364,60 @@ test('a declined state input call publishes old guest writes before normal fallb
   assert.equal(c.directDeclines,1);assert.equal(c.directStateInputCompletions,0);assert.equal(f.completions(),0);
 });
 
+function wasmPortFixture() {
+  const f=directFixture({masked:true,bindings:true}),c=f.cache,bridgeEvents=[];
+  let counts={completed:0,declined:0,bindings:0,stateInputs:0,checkpoints:0,declinedPc:null};
+  const bridge={arm(mask){bridgeEvents.push(['arm',mask]);return true;},
+    harvest(){bridgeEvents.push('harvest');const result=counts;counts={completed:0,declined:0,bindings:0,stateInputs:0,checkpoints:0,declinedPc:null};return result;},
+    disarm(){bridgeEvents.push('disarm');return false;},close(){bridgeEvents.push('close');}};
+  Object.assign(c,{portBridge:bridge,portBridgeBound:true,wasmPorts:false,wasmPortsActive:false,
+    wasmPortCompletions:0,wasmPortDeclines:0,wasmPortCheckpoints:0,portBridgeDeclinedPc:null,portGateCalls:0});
+  return {...f,bridgeEvents,counts(value){Object.assign(counts,value);}};
+}
+
+test('Wasm port configuration is closed-owner opt-in and disabled policy leaves the original IO path untouched',()=>{
+  const f=wasmPortFixture(),c=f.cache,owner={paused:true,open:false};
+  for(const invalid of [undefined,{paused:false,open:false},{paused:true,open:true}])
+    assert.throws(()=>c.configureWasmPorts(true,invalid),/paused/);
+  let original=0;assert.equal(c.forwardPortIO(()=>++original,0xe1,0),1);assert.deepEqual(f.bridgeEvents,[]);
+  c.dirtyPending=true;assert.equal(c.configureWasmPorts(true,owner),true);assert.equal(c.tables.calls,1);
+  assert.equal(c.canUseWasmPorts(),true);c.inlineOwner.canBridge=()=>false;assert.equal(c.canUseWasmPorts(),false);
+  c.inlineOwner.canBridge=()=>true;c.guestReturns=true;assert.equal(c.canUseWasmPorts(),false);
+  c.guestReturns=false;assert.equal(c.configureWasmPorts(false,owner),false);c.portBridgeBound=false;
+  assert.throws(()=>c.configureWasmPorts(true,owner),/unsupported/);assert.equal(c.wasmPorts,false);
+});
+
+test('Wasm port fallback harvests once before JS policy and suppresses only its same-PC native retry',()=>{
+  const f=wasmPortFixture(),c=f.cache;c.wasmPorts=true;c.wasmPortsActive=true;
+  f.counts({completed:7,bindings:2,declined:1,checkpoints:1,declinedPc:0x1000});
+  const result=c.forwardPortIO(()=>{
+    assert.equal(c.directCompletions,7);assert.equal(c.inlineCompletions,7);assert.equal(c.directDeclines,1);
+    assert.equal(c.tryInlineGate(f.trap()),false);assert.equal(f.directCalls.length,0);return 19;
+  },0xe1,0);
+  assert.equal(result,19);assert.equal(c.portBridgeDeclinedPc,null);c.harvestPortBridge();
+  assert.equal(c.wasmPortCompletions,7);assert.equal(c.wasmPortDeclines,1);assert.equal(c.wasmPortCheckpoints,1);
+  assert.equal(c.directBindingCompletions,2);assert.equal(c.gates,7);assert.equal(c.portGateCalls,7);
+});
+
+test('Wasm port execution arms after marking dirty evidence and harvests final progress without double credits',()=>{
+  const f=wasmPortFixture(),c=f.cache,d=new DataView(c.memory.buffer);c.wasmPorts=true;
+  c.cpu.main_loop=()=>{assert.equal(c.dirtyPending,true);assert.equal(c.wasmPortsActive,true);
+    f.counts({completed:3,bindings:1});c.traps.pending=f.trap();d.setUint32(664,11,true);};
+  const run=c.execute();assert.equal(run.work,11);assert.equal(c.work,11);assert.equal(c.runs,1);
+  assert.equal(c.wasmPortCompletions,3);assert.equal(c.directCompletions,3);assert.equal(c.gates,4);
+  assert.equal(c.wasmPortsActive,false);assert.deepEqual(f.bridgeEvents,[['arm',0x7ff],'harvest','disarm']);
+});
+
+test('unexpected Wasm port traps poison retries and restore the fallback table before backing release',()=>{
+  const f=wasmPortFixture(),c=f.cache,failure=new WebAssembly.RuntimeError('native gate trap');c.wasmPorts=true;
+  c.cpu.main_loop=()=>{f.counts({completed:2});throw failure;};
+  assert.throws(()=>c.execute(),error=>error===failure);assert.equal(c.inlineFailure,failure);
+  assert.equal(c.dirtyPending,true);assert.equal(c.wasmPortCompletions,2);assert.equal(c.open,false);
+  for(const operation of ['import','select','execute'])assert.throws(()=>V86CodeCache.prototype[operation].call(c),error=>error===failure);
+  c.portGates=false;c.tables.release=()=>f.bridgeEvents.push('release');c.close();
+  assert(f.bridgeEvents.indexOf('close')<f.bridgeEvents.indexOf('release'));assert.equal(c.closed,true);
+});
+
 test('owned guest RET continuations change EAX only for the exact nine neutral APIs',()=>{
   for(const recordId of [0x10001,0x40225,0x4022a,0x4022e,0x40232,0x4023f,0x4023d,0x40253,0x40255]) {
     const f=directFixture({masked:true,bindings:true,guestReturns:true,recordId}),v=cpuViews(f.cache.memory);
@@ -385,7 +439,7 @@ test('TEB writers and completed deadline yields keep manual returns even in gues
 });
 
 test('guest RET mode changes commit SDK state only after successful native ownership validation',()=>{
-  const f=directFixture(),c=f.cache;c.guestReturns=false;c.tables.guestReturnsSupported=true;
+  const f=wasmPortFixture(),c=f.cache;c.guestReturns=false;c.tables.guestReturnsSupported=true;
   c.tables.refresh=()=>{};c.cpu.full_clear_tlb=()=>{};c.traps.configurePortGates=()=>{};
   c.engine.api.component_cpu_set_gate_mode=()=>{};
   c.engine.api.component_cpu_gate_mode=()=>{};
@@ -405,8 +459,11 @@ test('guest RET mode changes commit SDK state only after successful native owner
   busy=true;
   assert.throws(()=>c.configureGuestReturns(false,owner),error=>error.status===12);
   assert.equal(c.guestReturns,true);assert.equal(c.portGateMode,2);assert.equal(c.portGatePatchedCount,12);
+  assert.throws(()=>c.close(),error=>error.status===12);
+  assert.equal(f.bridgeEvents.includes('close'),false);assert.equal(c.portBridgeBound,true);assert.equal(c.closed,false);
   busy=false;assert.equal(c.configureGuestReturns(false,owner),false);assert.equal(c.portGateMode,1);
   c.tables.guestReturnsSupported=false;assert.throws(()=>c.configureGuestReturns(true,owner),/unsupported/);
+  c.close();assert.equal(f.bridgeEvents.filter(value=>value==='close').length,1);assert.equal(c.portBridgeBound,false);
 });
 
 function overlapFixture() {

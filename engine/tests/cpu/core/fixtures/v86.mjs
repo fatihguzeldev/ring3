@@ -11,7 +11,7 @@ import {image as moduleImage} from '../../../loader/modules/wasm/fixtures/runtim
 
 const [enginePath, reportPath, permissionText = '1', portText = ''] = process.argv.slice(2);
 assert(enginePath && reportPath, 'usage: v86.mjs imported-engine.wasm fresh-report.json');
-assert(['', 'port', 'inline', 'direct', 'direct-bindings', 'direct-state-inputs', 'guest-ret', 'global', 'overlap', 'simd', 'targeted-dirty'].includes(portText));
+assert(['', 'port', 'inline', 'direct', 'direct-bindings', 'direct-state-inputs', 'wasm-ports', 'guest-ret', 'global', 'overlap', 'simd', 'targeted-dirty'].includes(portText));
 const targetedMode=portText==='targeted-dirty';
 const deniedPermission = Number(permissionText);
 assert([0,1].includes(deniedPermission));
@@ -424,8 +424,8 @@ try {
       assert.equal(new DataView(memory.buffer).getUint32(cache.tables.ram+DIRECTORY+(dense>>>22)*4,true)&32,0);
       report.densePteValidation.push({lane,before,after:version(),scannedPtes:cache.tables.lastDirtyScanCount});save();
     }
-  } else if(portText==='inline' || portText==='direct' || portText==='direct-bindings' || portText==='direct-state-inputs' || portText==='guest-ret') {
-    const directMode=portText!=='inline',stateInputsMode=portText==='direct-state-inputs',bindingMode=portText==='direct-bindings'||stateInputsMode,guestReturnMode=portText==='guest-ret';
+  } else if(portText==='inline' || portText==='direct' || portText==='direct-bindings' || portText==='direct-state-inputs' || portText==='wasm-ports' || portText==='guest-ret') {
+    const directMode=portText!=='inline',stateInputsMode=portText==='direct-state-inputs',wasmMode=portText==='wasm-ports',bindingMode=portText==='direct-bindings'||stateInputsMode||wasmMode,guestReturnMode=portText==='guest-ret';
     const requestedMask=(bindingMode?0x7ff:0xff)|(stateInputsMode?0x1800:0);
     stage=directMode?'direct scalar API continuation':'inline native API continuation';
     engine.ok('protect',0x601000,1,3);
@@ -481,9 +481,10 @@ try {
       dense.push((loop-dense.length-1)&255,0xb8,...u32(entries.get(ids.slow)),0xff,0xd0,0xeb,0xfe);
       upload(densePc,dense);
     }
+    if(wasmMode)upload(densePc,[0xb9,...u32(18),0xb8,...u32(entries.get(ids.get)),0xff,0xd0,0x49,0x75,0xf6,0xb8,...u32(entries.get(ids.slow)),0xff,0xd0]);
     cache.budget=100002;
     const inlineReport=report[directMode?'direct':'inline']={tlsIndex,programPc,afterGet,afterSlow,atomicSupported,
-      directMode,bindingMode,stateInputsMode,guestReturnMode,directOperation,requestedMask,
+      directMode,bindingMode,stateInputsMode,wasmMode,guestReturnMode,directOperation,requestedMask,
       bindingCoverage:'mask selection and existing scalar continuation only; no D3D device is provisioned by this fixture',
       stateInputCoverage:stateInputsMode?'mask13 ABI and unchanged scalar GPR/bank/work/noReplay flow only; positive SetViewport/SetLight dispatch belongs to native controls and game counters':undefined,
       authoredLoopPrefixInstructions:40001,authoredFirstOuterInstructions:40018+(guestReturnMode?1:0),runs:[],
@@ -560,6 +561,9 @@ try {
         directCompletions:(after.directCompletions??0)-(before.directCompletions??0),directDeclines:(after.directDeclines??0)-(before.directDeclines??0),
         directBindingCompletions:(after.directBindingCompletions??0)-(before.directBindingCompletions??0),
         directStateInputCompletions:(after.directStateInputCompletions??0)-(before.directStateInputCompletions??0),
+        wasmPortCompletions:(after.wasmPortCompletions??0)-(before.wasmPortCompletions??0),
+        wasmPortDeclines:(after.wasmPortDeclines??0)-(before.wasmPortDeclines??0),
+        wasmPortCheckpoints:(after.wasmPortCheckpoints??0)-(before.wasmPortCheckpoints??0),
         guestReturnCompletions:(after.guestReturnCompletions??0)-(before.guestReturnCompletions??0),
         runs:after.runs-before.runs,regions:after.regions-before.regions,gates:after.gates-before.gates,workPacket:workPacket(),clockCalls};
       assert.equal(run.work,delta);assert.equal(workPacket(),delta);
@@ -583,12 +587,13 @@ try {
       assert.equal(row.gates,4);assert.equal(row.publications.length,directMode?1:4);
       assert.equal(row.bankExports,directMode?1:4,'direct successful calls skip banks and the slow fallback exports exactly once');
       if(directMode) {
-        assert.deepEqual(row.directCalls,[0,0,0,256]);assert.deepEqual(row.atomicCalls,[]);
+        assert.deepEqual(row.directCalls,wasmMode?[0]:[0,0,0,256]);assert.deepEqual(row.atomicCalls,[]);
         assert.equal(row.directCompletions,3);assert.equal(row.directDeclines,1);assert.equal(clockCalls,0);
         assert.equal(row.directBindingCompletions,0);
         assert.equal(row.directStateInputCompletions,0);
-        assert.deepEqual(row.directMasks,directOperation==='component_cpu_try_direct_gate_mask'?Array(4).fill(requestedMask):[]);
-        assert.deepEqual(row.directResults.map(result=>result.id),[ids.get,ids.set,ids.tlsGet]);
+        assert.deepEqual(row.directMasks,directOperation==='component_cpu_try_direct_gate_mask'?Array(wasmMode?1:4).fill(requestedMask):[]);
+        assert.deepEqual(row.directResults.map(result=>result.id),wasmMode?[ids.get]:[ids.get,ids.set,ids.tlsGet]);
+        if(wasmMode){assert.equal(row.wasmPortCompletions,2);assert.equal(row.wasmPortDeclines,1);assert.equal(row.wasmPortCheckpoints,1);}
       } else if(atomicSupported){assert.deepEqual(row.atomicCalls,[0,0,0,256]);assert.equal(row.publications.filter(p=>p.source==='js-publication').length,1);}
       assert.equal(row.delta,40018+(guestReturnMode?1:0));assert.equal(row.run.retired,40018+(guestReturnMode?1:0));
       if(guestReturnMode)assert.equal(row.guestReturnCompletions,1);
@@ -601,6 +606,7 @@ try {
     if(directMode)cache.configureDirectGates(true,{paused:true,open:cache.open});
     if(bindingMode)cache.configureDirectBindings(true,{paused:true,open:cache.open});
     if(stateInputsMode){assert.equal(cache.directStateInputsSupported,true);cache.configureDirectStateInputs(true,{paused:true,open:cache.open});}
+    if(wasmMode){assert.equal(cache.wasmPortsSupported,true);cache.configureWasmPorts(true,{paused:true,open:cache.open});}
     if(guestReturnMode) {
       assert.equal(cache.guestReturnsSupported,true);cache.configureGuestReturns(true,{paused:true,open:cache.open});
       assert.equal(cache.gateMode().mode,2);assert(cache.gateMode().guestRetSites>0);
@@ -615,6 +621,16 @@ try {
     const ex=wm.exports,oldJit=ex.get_jit_config(0),oldStackLimit=Error.stackTraceLimit;
     Error.stackTraceLimit=64;
     try {
+      if(wasmMode) {
+        stage='actual Wasm port first-JS and eight-call cadence';reset();seed(densePc);
+        const cadence=execute('eighteen getter cadence');assert.equal(cadence.delta,94);
+        assert.equal(cadence.directCompletions,18);assert.equal(cadence.directDeclines,1);
+        assert.equal(cadence.wasmPortCompletions,15);assert.equal(cadence.wasmPortDeclines,1);assert.equal(cadence.wasmPortCheckpoints,3);
+        assert.deepEqual(cadence.directCalls,[0,0,0]);assert.equal(cadence.gates,19);assert.equal(cadence.bankExports,1);
+        inlineReport.wasmPortOwnership={rawNativeImport:cache.portBridge.binding.native===engine.api.component_cpu_try_direct_gate_mask,
+          sameMemory:cache.portBridge.binding.memory===memory,tableBound:cache.portBridge.dispatch.table.get(0)===cache.portBridge.binding.write8};
+        assert(Object.values(inlineReport.wasmPortOwnership).every(Boolean));
+      }
       stage='cold inline work aggregate';ex.set_jit_config(0,1);reset();checkChain(execute('cold'));
       ex.set_jit_config(0,0);
       inlineReport.jitBefore=runtime.counters();
@@ -665,7 +681,7 @@ try {
       assert.equal(optOut.bankExports,1);if(atomicSupported)assert.deepEqual(optOut.atomicCalls,[]);
       allow=true;
       stage='completed inline deadline yields returned state';reset();let deadlineChecks=0;
-      cache.inlineOwner.canContinue=()=>++deadlineChecks<(directMode?2:3);
+      cache.inlineOwner.canContinue=()=>++deadlineChecks<(wasmMode?4:directMode?2:3);
       const yielded=execute('deadline after successful completion');
       assert.equal(yielded.run.inlineYield,true);assert.equal(yielded.run.coreReason,2);assert.equal(yielded.delta,40004);
       assert.equal(yielded.inlineCompletions,1);assert.equal(engine.get(48),afterGet);

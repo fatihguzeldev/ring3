@@ -147,6 +147,8 @@ export class Session {
           !this.callDiagnostics && !this.frameProbe && !globalThis.__r3PhaseWindow &&
           !this.stack().length && !this.needsSchedule && performance.now()<this.inlineQuantumDeadline,
         observeClock:()=>this.observeClock(),
+        canBridge:()=>!this.measurements && !this.callDiagnostics && !this.frameProbe &&
+          !globalThis.__r3PhaseWindow && !globalThis.__r3GateCensus && !globalThis.__r3BindingGatePolicy,
       };
       if(typeof this.code.initializeExecutionPolicy==='function')this.code.initializeExecutionPolicy();
     }
