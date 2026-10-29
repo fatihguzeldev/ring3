@@ -1,0 +1,33 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Ring3 / v86 authored CPU comparison</title>
+<style>body{font:16px system-ui;max-width:1100px;margin:32px auto;background:#15171a;color:#eee}button{padding:12px;margin:8px}pre{white-space:pre-wrap;overflow-wrap:anywhere}textarea{width:100%;height:240px}</style>
+<h1>Ring3 / v86 authored CPU comparison</h1>
+<p>Same authored kernel, full result checks. No game, OS, Windows HLE or graphics. v86 uses its shipping relaxed numeric policy; the dyadic inputs have exact common results.</p>
+<button id="pilot">Validate N=3</button><button id="run">Compare N=131072</button>
+<button id="featurePilot">Validate feature-off N=3</button><button id="featureRun">Compare feature-off N=131072</button><p id="status">Ready</p><pre id="summary"></pre><script type="application/json" id="raw"></script>
+<script type="module">
+import {V86} from '../reference/v86-bottleship/build/libv86.mjs';
+import {makeKernel,hex} from './kernels-v1.mjs';
+import {runKernel} from './v86-core-v1.mjs';
+import {createRing3} from './ring3-core-v2.mjs';
+const $=id=>document.getElementById(id),sha=async bytes=>hex(new Uint8Array(await crypto.subtle.digest('SHA-256',bytes)));
+const median=a=>{const b=a.slice().sort((x,y)=>x-y),m=b.length>>1;return b.length%2?b[m]:(b[m-1]+b[m])/2};
+let report;
+function publish(){ $('raw').textContent=JSON.stringify(report,(_key,value)=>typeof value==='bigint'?String(value):value);$('summary').textContent=JSON.stringify(report.cases.map(c=>({kind:c.kind,cw:c.cw,order:c.order,ring3_ms:c.ring3_median_ms,v86_ms:c.v86_median_ms,ratio:c.ratio,jit_during_timed:c.v86?.summary?.jitFinalizationsDuringMeasured,status:c.status})),null,2); }
+async function peer(k,warmups,rounds){let emulator;try{
+ await new Promise((ready,reject)=>{emulator=new V86({autostart:false,memory_size:4<<20,wasm_path:new URL('../reference/v86-bottleship/build/v86.wasm',location.href).href,log_level:0});const t=setTimeout(()=>reject(Error('v86 initialization timeout')),30000);emulator.add_listener('emulator-loaded',()=>{clearTimeout(t);ready()})});
+ return await runKernel(emulator,k,{warmups,rounds,precision:'relaxed',profile:'shipping',onRecord:r=>{report.current_v86=r;publish()}});
+}finally{if(emulator){await emulator.stop();await emulator.destroy()}}}
+async function compare(N,featureOff=false){for(const b of document.querySelectorAll('button'))b.disabled=true;report={schema:1,status:'RUNNING',featureOff,N,warmups:4,rounds:4,userAgent:navigator.userAgent,platform:navigator.platform,crossOriginIsolated,started:new Date().toISOString(),cases:[],limits:['same browser authored compute; no game FPS extrapolation','v86 OUT/JMP wrapper boundary adds fixed work; Ring3 dispatcher clock excludes begin/finish','common dyadic FP outputs checked; v86 full x87 state parity not established','v86 core CPL0 versus Ring3 user context; same unprivileged bytes','sequential arms with alternating case order; no simultaneous heavy runtime']};publish();
+ try{const bytes=await(await fetch(featureOff?'./ring3-feature-off-e08a-v1.wasm':'/engine.wasm')).arrayBuffer();report.engine_sha256=await sha(bytes);if(report.engine_sha256!==(featureOff?'797758907be77d2feab6eddd06b48be347edef6bcac38b12673d280a0878cdd8':'d606b40863d163f0ba2eab36d2b866bf11c084046a2906351a7431fe7d05a96b'))throw Error('Ring3 artifact hash differs');const module=await WebAssembly.compile(bytes);
+ const configurations=[['integer',127],['call-ret',127],['fp',127],['fp',639],['fp',895]];
+ for(let i=0;i<configurations.length;i++){const [kind,cw]=configurations[i],k=makeKernel(kind,N,cw),c={kind,cw,retired:k.retired,kernel_sha256:await sha(k.kernelBytes),order:i%2?'v86,ring3':'ring3,v86',status:'RUNNING'};report.cases.push(c);$('status').textContent=`Running ${kind}, CW ${cw}, N ${N}`;publish();
+ const own=async()=>{const ctx=await createRing3(module,k,{mode:'compiled'});c.ring3={warmups:[],runs:[],units:ctx.units,dispatcher:ctx.dispatcher};try{for(let n=0;n<report.warmups;n++)c.ring3.warmups.push(ctx.run());for(let n=0;n<report.rounds;n++)c.ring3.runs.push(ctx.run())}catch(e){c.ring3.failed=ctx.lastRun;throw e}finally{ctx.close()}c.ring3_median_ms=median(c.ring3.runs.map(r=>r.dispatch_ms));};
+ const other=async()=>{c.v86=await peer(k,report.warmups,report.rounds);c.v86_median_ms=median(c.v86.summary.elapsedMs)};
+ if(i%2){await other();await own()}else{await own();await other()}c.ratio=c.ring3_median_ms/c.v86_median_ms;c.status='PASS';delete report.current_v86;publish();await new Promise(requestAnimationFrame);
+ }report.status='PASS';$('status').textContent='Complete: all result checks passed';
+ }catch(e){report.status='FAIL';report.error=String(e.stack??e);$('status').textContent='Failed: '+e.message}finally{report.finished=new Date().toISOString();publish();for(const b of document.querySelectorAll('button'))b.disabled=false}
+}
+$('pilot').onclick=()=>compare(3);$('run').onclick=()=>compare(131072);$('featurePilot').onclick=()=>compare(3,true);$('featureRun').onclick=()=>compare(131072,true);
+</script>
