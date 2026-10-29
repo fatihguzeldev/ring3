@@ -249,7 +249,7 @@ impl AddressSpace {
         &mut self,
         epoch: u64,
         tables: &mut crate::abi::external_memory::ExternalMemory,
-    ) -> Result<[u8; 88], MemoryError> {
+    ) -> Result<[u8; 96], MemoryError> {
         if !tables.is_cpu_page_tables_for(self.backing.as_ptr() as usize) {
             return Err(MemoryError::InvalidRange);
         }
@@ -260,7 +260,7 @@ impl AddressSpace {
         &mut self,
         epoch: u64,
         tables: &mut [u8],
-    ) -> Result<[u8; 88], MemoryError> {
+    ) -> Result<[u8; 96], MemoryError> {
         if tables.len() != TABLE_BYTES
             || epoch != self.external_mapping_epoch
             || self
@@ -282,7 +282,7 @@ impl AddressSpace {
             self.publish_external_dirty(&collector.slots)?;
             collector.clear_observed(tables, &observation);
             let reset_access = observation.accessed.iter().any(|&bits| bits != 0);
-            let mut bytes = [0; 88];
+            let mut bytes = [0; 96];
             crate::abi::header::write(&mut bytes, *b"R3DC");
             for (offset, value) in [
                 (16, collector.slots.as_ptr() as usize as u32),
@@ -293,6 +293,9 @@ impl AddressSpace {
                 (36, observation.directories),
                 (72, self.capacity_pages()),
                 (76, self.versions.as_ptr() as usize as u32),
+                // borrowed offsets remain valid until the next collection or release.
+                (88, collector.dirty_ptes.as_ptr() as usize as u32),
+                (92, collector.dirty_ptes.len() as u32),
             ] {
                 put(&mut bytes, offset, value);
             }
@@ -556,7 +559,7 @@ mod tests {
             .collect_external_dirty(memory.external_mapping_epoch, &mut bytes)
             .unwrap();
         assert_eq!(&result[..4], b"R3DC");
-        assert_eq!(word(&result, 8), 88);
+        assert_eq!(word(&result, 8), 96);
         assert_eq!(word(&result, 20), 1, "physical aliases publish one slot");
         assert_eq!(word(&result, 24), 1);
         assert_eq!(word(&result, 28), 1);
@@ -577,6 +580,75 @@ mod tests {
         assert_eq!(word(&bytes, 4) & 32, 0);
         assert_eq!(word(&bytes, pte(PRIVATE_PAGE)), private_before);
         assert_ne!(word(&bytes, (PRIVATE_PAGE >> 10) * 4) & 32, 0);
+    }
+
+    #[test]
+    fn external_dirty_collect_reports_every_dirty_alias_until_next_collection() {
+        let mut memory = AddressSpace::new(3).unwrap();
+        let shared = memory.allocate_shared_pages(1, &[7]).unwrap();
+        for address in [0x1000, 0x400000] {
+            memory
+                .map_shared_pages(range(address), &shared, 0, Permissions::READ_WRITE, false)
+                .unwrap();
+        }
+        memory
+            .map_zeroed(range(0x2000), Permissions::READ_WRITE)
+            .unwrap();
+        track(&mut memory);
+        let mut bytes = tables(&memory);
+        access(&mut bytes, 1, true);
+        access(&mut bytes, 1024, true);
+        access(&mut bytes, 2, false);
+        let first = memory
+            .collect_external_dirty(memory.external_mapping_epoch, &mut bytes)
+            .unwrap();
+        assert_eq!(first.len(), 96);
+        assert_eq!(word(&first, 8), 96);
+        assert_eq!(word(&first, 20), 1, "physical aliases still publish once");
+        assert_eq!(word(&first, 92), 2, "every cleared D bit needs its own VA");
+        let collector = memory.external_dirty.as_ref().unwrap();
+        assert_eq!(
+            word(&first, 88),
+            collector.dirty_ptes.as_ptr() as usize as u32
+        );
+        assert_eq!(collector.dirty_ptes, [pte(1) as u32, pte(1024) as u32]);
+        assert_eq!(word(&bytes, pte(1)) & 64, 0);
+        assert_eq!(word(&bytes, pte(1024)) & 64, 0);
+        assert_eq!(word(&bytes, 0) & 32, 0);
+        assert_eq!(word(&bytes, 4) & 32, 0);
+        assert_ne!(word(&memory.external_descriptor(), 108) & 128, 0);
+        assert_eq!(
+            memory.external_dirty.as_ref().unwrap().dirty_ptes,
+            [pte(1) as u32, pte(1024) as u32],
+            "a descriptor read does not consume the borrowed list"
+        );
+        access(&mut bytes, 1024, true);
+        let rearmed = memory
+            .collect_external_dirty(memory.external_mapping_epoch, &mut bytes)
+            .unwrap();
+        assert_eq!(word(&rearmed, 88), word(&first, 88));
+        assert_eq!(word(&rearmed, 92), 1);
+        assert_eq!(
+            memory.external_dirty.as_ref().unwrap().dirty_ptes,
+            [pte(1024) as u32]
+        );
+        access(&mut bytes, 2, false);
+        let readonly = memory
+            .collect_external_dirty(memory.external_mapping_epoch, &mut bytes)
+            .unwrap();
+        assert_eq!(word(&readonly, 88), word(&first, 88));
+        assert_eq!(
+            word(&readonly, 92),
+            0,
+            "read-only evidence needs no VA invalidation"
+        );
+        assert_eq!(word(&readonly, 24), 1);
+        assert_eq!(
+            word(&readonly, 28),
+            1,
+            "legacy blanket-flush contract is unchanged"
+        );
+        assert_eq!(word(&readonly, 20), 0);
     }
 
     #[test]
@@ -711,8 +783,8 @@ mod tests {
         let result = memory
             .collect_external_dirty(memory.external_mapping_epoch, &mut bytes)
             .unwrap();
-        assert_eq!(result.len(), 88);
-        assert_eq!(word(&result, 8), 88);
+        assert_eq!(result.len(), 96);
+        assert_eq!(word(&result, 8), 96);
         let before = u64::from_le_bytes(result.get(80..88).unwrap().try_into().unwrap());
         let after = u64::from_le_bytes(result[56..64].try_into().unwrap());
         assert_eq!(

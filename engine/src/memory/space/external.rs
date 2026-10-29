@@ -267,14 +267,14 @@ impl AddressSpace {
         ] {
             bytes[offset..offset + 8].copy_from_slice(&value.to_le_bytes());
         }
-        // collector, epochs, gate flags, global RX PTEs and guest RET support precede attach.
-        bytes[108..112].copy_from_slice(&126u32.to_le_bytes());
+        // collector, epochs, gates, global RX and borrowed dirty VAs precede attach.
+        bytes[108..112].copy_from_slice(&254u32.to_le_bytes());
         if let Some(changes) = self.external_mapping_changes.as_ref() {
             for (offset, value) in [
                 (96, changes.pages.as_ptr() as u32),
                 (100, changes.pages.len() as u32),
                 (104, GUEST_PAGES as u32),
-                (108, 127),
+                (108, 255),
             ] {
                 bytes[offset..offset + 4].copy_from_slice(&value.to_le_bytes());
             }
