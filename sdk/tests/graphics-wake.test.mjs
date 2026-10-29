@@ -19,6 +19,118 @@ function transportFixture() {
   return {engine,transport,media,calls,controller};
 }
 
+function nativeQueueFixture(specifications) {
+  const controller=new AbortController(),calls=[],messages=[];
+  const packet=(sequence,sealed=false)=>({sequence:BigInt(sequence),sealed,bytes:new Uint8Array(64).fill(sequence)});
+  const devices=specifications.map(({epoch,retired=false,packets=[]})=>({epoch:BigInt(epoch),retired,
+    packets:packets.map(([sequence,sealed])=>packet(sequence,sealed))}));
+  const number=(low,high)=>BigInt(low)|(BigInt(high)<<32n);
+  let copied=new Uint8Array(),failure;
+  const engine={signal:controller.signal,
+    media(operation,...args) {
+      calls.push([operation,...args]);if(failure)throw failure;
+      if(operation==='d3d8_device') {
+        const device=devices[args[0]];
+        return device?{epoch:device.epoch,values:[device.epoch*4096n,1n,BigInt(device.retired),0n]}:{epoch:0n,values:[]};
+      }
+      const epoch=number(args[0],args[1]),device=devices.find(row=>row.epoch===epoch);
+      assert.ok(device,'native inventory epoch is still live');
+      if(operation==='d3d8_seal_batch') {
+        if(device.packets.length)device.packets[0].sealed=true;
+        else if(device.retired)devices.splice(devices.indexOf(device),1);
+      } else assert.equal(operation,'d3d8_batch_info');
+      const current=device.packets[0];
+      return {epoch,values:current?.sealed?[current.sequence,BigInt(current.bytes.length)]:[0n,0n]};
+    },
+    ok(operation,...args) {
+      calls.push([operation,...args]);const device=devices.find(row=>row.epoch===number(args[0],args[1]));
+      assert.ok(device);const current=device.packets[0];assert.ok(current?.sealed);
+      assert.equal(number(args[2],args[3]),current.sequence);
+      if(operation==='d3d8_read_batch')copied=current.bytes.slice(args[4],args[4]+args[5]);
+      else {assert.equal(operation,'d3d8_acknowledge_batch');device.packets.shift();}
+    },
+    take(length) {assert.equal(copied.length,length);return copied;},
+  };
+  const transport=new GraphicsTransport(engine,message=>messages.push(message));
+  return {transport,controller,calls,messages,devices,packet,
+    acknowledge(){assert.ok(transport.pending);return transport.complete({...transport.pending});},
+    fail(error){failure=error;}};
+}
+
+test('deferred sealing holds normal partial packets but always forwards native sealed fragments',async()=>{
+  const f=nativeQueueFixture([{epoch:7,packets:[[1,false]]}]),t=f.transport;
+  const initial=t.deferredSealing;t.deferredSealing=true;
+  await t.output();assert.equal(f.messages.length,0);
+  assert.equal(f.calls.some(([operation])=>operation==='d3d8_seal_batch'),false);
+  assert.equal(initial,false);
+  f.devices[0].packets[0].sealed=true;await t.output();
+  assert.equal(f.messages.length,1);assert.equal(t.pending.epoch,7n);
+  assert.deepEqual([...new Uint8Array(f.messages[0].packet)],Array(64).fill(1));
+  assert.equal(f.acknowledge(),true);assert.equal(t.pending,null);
+  assert.throws(()=>t.configureDeferredSealing(false,{paused:false,open:false}),/paused|owner/);
+  assert.equal(t.configureDeferredSealing(false,{paused:true,open:false}),false);
+  f.devices[0].packets.push(f.packet(2));await t.output();assert.equal(f.messages.length,2);
+  assert.equal(f.acknowledge(),true);
+  t.configureDeferredSealing(true,{paused:true,open:false});t.probe=()=>({batch(){return null;}});
+  f.devices[0].packets.push(f.packet(3));await t.output();assert.equal(f.messages.length,3);
+  assert.equal(f.acknowledge(),true,'active probes retain eager sealing');
+});
+
+test('sticky flush visits multiple devices fairly and retires queues without losing later demand',async()=>{
+  const f=nativeQueueFixture([{epoch:7,packets:[[1,false]]},{epoch:8,packets:[[1,false]]},
+    {epoch:9,retired:true,packets:[[1,false]]}]),t=f.transport;
+  t.deferredSealing=true;await t.output();assert.equal(t.pending.epoch,9n);
+  assert.deepEqual(f.calls.filter(([operation])=>operation==='d3d8_seal_batch').map(([,low])=>low),[9]);
+  t.requestFlush();f.acknowledge();
+  for(const epoch of [7n,8n]) {
+    await t.output();assert.equal(t.pending.epoch,epoch);assert.equal(t.forceDemand,true);
+    const count=f.messages.length;await t.output();assert.equal(f.messages.length,count);
+    f.acknowledge();assert.equal(t.forceDemand,true,'an ACK alone cannot discard the remaining inventory demand');
+  }
+  await t.output();assert.equal(t.pending,null);assert.equal(t.forceDemand,false);
+  assert.deepEqual(f.devices.map(row=>row.epoch),[7n,8n]);
+  assert.deepEqual(f.messages.map(message=>message.requestId),[1,2,3]);
+  assert.equal(f.calls.filter(([operation])=>operation==='d3d8_acknowledge_batch').length,3);
+});
+
+test('forced native drain advances an ACK chain while guest execution stays paused', {timeout:1000},async()=>{
+  const f=nativeQueueFixture([{epoch:7,packets:[[1,false],[2,true]]},{epoch:8,packets:[[1,false]]}]),t=f.transport;
+  t.deferredSealing=true;let drained=false;
+  const boundary=t.drain(),draining=boundary.then(()=>{drained=true;});
+  assert.equal(t.drain(),boundary,'pause and healthy stop share one native tail boundary');
+  assert.throws(()=>t.configureDeferredSealing(false,{paused:true,open:false}),/drained|owner/);
+  for(const [index,epoch] of [7n,8n,7n].entries()) {
+    await new Promise(resolve=>setImmediate(resolve));
+    assert.equal(drained,false);assert.equal(t.pending.epoch,epoch);assert.equal(f.messages.length,index+1);
+    assert.equal(f.acknowledge(),true);
+  }
+  await draining;assert.equal(drained,true);assert.equal(t.pending,null);assert.equal(t.forceDemand,false);
+  assert.equal(f.devices.every(row=>row.packets.length===0),true);
+  assert.deepEqual(f.calls.filter(([operation])=>operation==='d3d8_acknowledge_batch').map(([,low,,sequence])=>[low,sequence]),[[7,1],[8,1],[7,2]]);
+});
+
+test('native drain rejects abort and output failure without publishing a false clean boundary', {timeout:1000},async testContext=>{
+  const f=nativeQueueFixture([{epoch:7,packets:[[1,false]]}]),t=f.transport;
+  t.deferredSealing=true;const stopped=new Error('owner stopped');
+  const draining=t.drain(),rejected=assert.rejects(draining,error=>error===stopped);
+  await new Promise(resolve=>setImmediate(resolve));assert.ok(t.pending);
+  const pending={...t.pending};f.controller.abort(stopped);await rejected;
+  assert.deepEqual(t.pending,pending);assert.equal(f.calls.some(([operation])=>operation==='d3d8_acknowledge_batch'),false);
+  const broken=nativeQueueFixture([{epoch:7,packets:[[1,false]]}]),failure=new Error('native inventory failed');
+  broken.transport.deferredSealing=true;broken.fail(failure);
+  await assert.rejects(broken.transport.drain(),error=>error===failure);
+  assert.equal(broken.messages.length,0);assert.equal(broken.devices[0].packets[0].sealed,false);
+  const wrong=nativeQueueFixture([{epoch:7,packets:[[1,false]]}]),bad=wrong.transport.drain();
+  const invalid=assert.rejects(bad,/identity mismatch/);
+  assert.throws(()=>wrong.transport.complete({...wrong.transport.pending,epoch:8n}),/identity mismatch/);
+  await invalid;assert.ok(wrong.transport.pending);
+  let deadline;
+  testContext.mock.method(globalThis,'setTimeout',(callback,milliseconds)=>{assert.equal(milliseconds,5000);deadline=callback;return 0;});
+  const silent=nativeQueueFixture([{epoch:7,packets:[[1,false]]}]),lost=silent.transport.drain();
+  const timeout=assert.rejects(lost,/drain timed out/);deadline();await timeout;
+  assert.ok(silent.transport.pending);assert.equal(silent.transport.sealing.drainsCompleted,0);
+});
+
 async function workerFixture(t) {
   const timers=new Map(),messages=[],previousSelf=globalThis.self,previousPost=globalThis.postMessage;
   let nextTimer=1,owner,started;
