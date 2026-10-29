@@ -6,9 +6,9 @@ import {BACKING_BASE,DIRECTORY,TABLES,PRIVATE_VA} from '../runtime/v86/layout.js
 
 const PAGE=4096, CODE=0x100, DATA=0x200;
 
-function world({journal=false,nativeDirty=false,nativeDirtyEpoch=false,dirtyGateFlags=false,preciseExecutable=false}={}) {
+function world({journal=false,nativeDirty=false,nativeDirtyEpoch=false,dirtyGateFlags=false,preciseExecutable=false,globalCode=false}={}) {
   const memory=new WebAssembly.Memory({initial:512}),data=new DataView(memory.buffer);
-  const capabilities=(nativeDirty?2:0)|(nativeDirtyEpoch?4:0)|(dirtyGateFlags?8:0)|(preciseExecutable?16:0);
+  const capabilities=(nativeDirty?2:0)|(nativeDirtyEpoch?4:0)|(dirtyGateFlags?8:0)|(preciseExecutable?16:0)|(globalCode?32:0);
   const info={backing:16*1024*1024,length:16*PAGE,maps:8*1024*1024,permissions:12*1024*1024,
     guestPages:1<<20,capacity:16,mapped:2,mappingVersions:13*1024*1024,
     physicalVersions:21*1024*1024,privateSlots:0,executableViews:27*1024*1024,
@@ -44,8 +44,9 @@ function world({journal=false,nativeDirty=false,nativeDirtyEpoch=false,dirtyGate
   }
   map(CODE,0,5);map(DATA,1,3);content(0,1n);content(1,1n);
   data.setUint32(info.executableViews,1,true);
-  const compiled=new Map(),cpu={mem8:{byteOffset:0,length:160*1024*1024},clears:0,tlbClears:0,
-    jit_clear_cache(){this.clears++;compiled.clear();},full_clear_tlb(){this.tlbClears++;}};
+  const flushes=[],compiled=new Map(),cpu={mem8:{byteOffset:0,length:160*1024*1024},clears:0,tlbClears:0,nonGlobalClears:0,
+    jit_clear_cache(){flushes.push('jit');this.clears++;compiled.clear();},full_clear_tlb(){flushes.push('full');this.tlbClears++;},
+    clear_tlb(){flushes.push('non-global');this.nonGlobalClears++;}};
   const engine={memory,base:0,
     ok(operation,...args) {
       if(operation==='component_cpu_attach') {tracking=journal;info.mappingChangeFlags=(journal?1:0)|capabilities;return;}
@@ -127,7 +128,7 @@ function world({journal=false,nativeDirty=false,nativeDirtyEpoch=false,dirtyGate
     resultView(length){return new DataView(memory.buffer,140,length);},
     request(bytes){requests.push(bytes);new Uint8Array(memory.buffer,140,bytes.length).set(bytes);},
   };
-  return {memory,data,info,rows,cpu,engine,compiled,map,content,changeMapping,write,
+  return {memory,data,info,rows,cpu,engine,compiled,map,content,changeMapping,write,flushes,
     pending,acks,ackAttempts,dirtyPublications,nativeCollections,requests,hooks,enqueue};
 }
 
@@ -137,6 +138,43 @@ test('data-only mapping retains an already generated v86 code module',()=>{
   f.changeMapping(DATA+1,2,3);f.content(2,f.info.transaction);
   tables.refresh();
   assert.equal(f.compiled.get(CODE),generated,'unrelated data mapping must retain generated code');
+});
+
+test('global code is guarded opt-in and marks only canonical RX pages without COW',()=>{
+  const f=world({journal:true,nativeDirty:true,globalCode:true});
+  f.info.privateSlots=23*1024*1024;f.map(CODE+1,2,5);f.data.setUint32(f.info.privateSlots+(CODE+1)*4,1,true);
+  f.map(CODE+2,3,7);f.map(CODE+3,4,1);
+  const tables=new PageTables(f.engine,f.cpu),owner={paused:true,open:false};
+  assert.equal(tables.globalCode,false);assert.equal(f.data.getUint32(596,true),0x600);
+  for(const invalid of [undefined,{paused:false,open:false},{paused:true,open:true}])
+    assert.throws(()=>tables.configureGlobalCode(true,invalid),/paused/);
+  const before=f.cpu.tlbClears;
+  assert.equal(tables.configureGlobalCode(true,owner),true);
+  assert.equal(f.cpu.tlbClears,before+2);assert.equal(f.data.getUint32(596,true),0x680);
+  for(const page of [CODE,CODE+1,CODE+2,CODE+3,DATA])
+    assert.equal(!!(f.data.getUint32(tables.pte(page),true)&256),page===CODE);
+  f.changeMapping(DATA+1,5,5);tables.refresh();assert(f.data.getUint32(tables.pte(DATA+1),true)&256);
+  f.changeMapping(CODE,0,7);tables.refresh();assert.equal(f.data.getUint32(tables.pte(CODE),true)&256,0);
+  assert.equal(tables.configureGlobalCode(false,owner),false);assert.equal(f.data.getUint32(596,true),0x600);
+  assert(tables.pages.every(row=>!(f.data.getUint32(row.pte,true)&256)));
+  const old=world(),legacy=new PageTables(old.engine,old.cpu);
+  assert.throws(()=>legacy.configureGlobalCode(true,owner),/unsupported/);
+});
+
+test('global code keeps dirty resets non-global but mapping and host code changes fully invalidate before JIT',()=>{
+  const f=world({journal:true,nativeDirty:true,nativeDirtyEpoch:true,preciseExecutable:true,globalCode:true});
+  const tables=new PageTables(f.engine,f.cpu);tables.configureGlobalCode(true,{paused:true,open:false});f.flushes.length=0;
+  f.data.setUint32(DIRECTORY, f.data.getUint32(DIRECTORY,true)|32,true);
+  assert.equal(tables.publishDirty(),0);assert.deepEqual(f.flushes,['non-global']);
+  assert.equal(f.data.getUint32(DIRECTORY,true)&32,0);
+  f.data.setUint32(DIRECTORY,f.data.getUint32(DIRECTORY,true)|32,true);
+  f.data.setUint32(tables.pte(DATA),f.data.getUint32(tables.pte(DATA),true)|64,true);
+  assert.equal(tables.publishDirty(),1);assert.equal(f.data.getUint32(tables.pte(DATA),true)&64,0);
+  assert.equal(f.data.getUint32(tables.pte(CODE),true)&256,256);assert.deepEqual(f.flushes,['non-global','non-global']);
+  f.flushes.length=0;f.write(0);tables.refresh();assert.deepEqual(f.flushes,['full','jit']);
+  f.flushes.length=0;f.changeMapping(DATA,1,1);tables.refresh();assert.equal(f.flushes[0],'full');
+  f.flushes.length=0;f.hooks.collectResult=(data,at)=>data.setUint32(at,0,true);
+  assert.throws(()=>tables.publishDirty(),/header/);assert.deepEqual(f.flushes,['full']);
 });
 
 test('data-only protect retains an already generated v86 code module',()=>{

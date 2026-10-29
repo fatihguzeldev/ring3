@@ -10,13 +10,15 @@ export class PageTables {
     this.mappingEpoch=null;this.codeVersion=null;this.identity=null;
     this.policy={selectiveCode:options.selectiveCode??true,incrementalSync:options.incrementalSync??true};
     this.codeValidity=new CodeValidity(engine.memory);
-    this.rowsByPage=new Map();this.dirty=new DirtyPages(engine.memory,this.ram,()=>cpu.full_clear_tlb());
+    this.globalCode=false;
+    this.rowsByPage=new Map();this.dirty=new DirtyPages(engine.memory,this.ram,()=>this.flushDirtyTlb());
     this.lastMappingScanCount=0;this.lastMappingFullRebuild=false;
     this.lastDirtyScanCount=0;this.lastDirtyDirectoryCount=0;
     const info=this.descriptor();
     this.nativeDirtySupported=(info.mappingChangeFlags&2)!==0;
     this.nativeDirtyEpochSupported=(info.mappingChangeFlags&4)!==0;
     this.dirtyGateFlagsSupported=(info.mappingChangeFlags&8)!==0;
+    this.globalCodeSupported=(info.mappingChangeFlags&32)!==0 && typeof cpu.clear_tlb==='function';
     this.nativeDirty=options.nativeDirty??this.nativeDirtySupported;
     if(typeof this.nativeDirty!=='boolean' || (this.nativeDirty && !this.nativeDirtySupported))
       throw new Error('unsupported v86 native dirty collector');
@@ -46,6 +48,23 @@ export class PageTables {
     try {this.release();}catch(cleanup){error.cleanupFailure=cleanup.message;}
   }
   pte(page) {return this.ram+TABLES+page*4;}
+  flushDirtyTlb() {
+    if(this.globalCode)this.cpu.clear_tlb();else this.cpu.full_clear_tlb();
+  }
+  configureGlobalCode(enabled,owner) {
+    if(owner?.paused!==true || owner?.open!==false || !this.ownsPin || typeof enabled!=='boolean')
+      throw new Error('v86 global code changes require a closed paused owner');
+    if(enabled && !this.globalCodeSupported)throw new Error('native v86 global code is unsupported');
+    if(enabled===this.globalCode)return enabled;
+    this.publishDirty();this.cpu.full_clear_tlb();
+    const d=new DataView(this.engine.memory.buffer);
+    for(const row of this.pages) {
+      const value=d.getUint32(row.pte,true),global=enabled && (row.permission&7)===5 && !row.cow;
+      d.setUint32(row.pte,(value&~256)|(global?256:0),true);
+    }
+    d.setUint32(596,(d.getUint32(596,true)&~128)|(enabled?128:0),true);
+    this.globalCode=enabled;this.cpu.full_clear_tlb();return enabled;
+  }
   configureDirty(nativeDirty,owner) {
     if(owner?.paused!==true || owner?.open!==false)
       throw new Error('v86 dirty collector changes require a closed paused owner');
@@ -88,10 +107,10 @@ export class PageTables {
     if(this.identity!==null && this.identity!==info.identity)throw new Error('v86 backing identity changed');
     this.identity=info.identity;
     this.physicalVersions=info.physicalVersions;this.guestPages=info.guestPages;
-    if(!this.policy.selectiveCode && this.codeVersion!==null && this.codeVersion!==info.code)this.cpu.jit_clear_cache();
+    if(!this.policy.selectiveCode && this.codeVersion!==null && this.codeVersion!==info.code){this.cpu.full_clear_tlb();this.cpu.jit_clear_cache();}
     this.codeVersion=info.code;
     if(this.mappingEpoch===info.mapping) {
-      if(this.policy.selectiveCode && this.codeValidity.refresh(info,this.pages).invalidate)this.cpu.jit_clear_cache();
+      if(this.policy.selectiveCode && this.codeValidity.refresh(info,this.pages).invalidate){this.cpu.full_clear_tlb();this.cpu.jit_clear_cache();}
       return;
     }
     if(info.backing!==this.ram+BACKING_BASE)throw new Error('v86 backing detached unexpectedly');
@@ -124,7 +143,8 @@ export class PageTables {
       const permission=rights[page],physical=BACKING_BASE+(mapped-1)*PAGE,pte=this.pte(page);
       if(mapped>info.capacity)throw new Error('invalid Ring3 physical slot');
       const writable=(permission&2)!==0 && !privateSlots?.[page];
-      d.setUint32(pte,physical|((permission&7)?5:0)|(writable?2:0),true);
+      const global=this.globalCode && (permission&7)===5 && !privateSlots?.[page];
+      d.setUint32(pte,physical|((permission&7)?5:0)|(writable?2:0)|(global?256:0),true);
       if(old)Object.assign(old,{slot:mapped-1,permission,cow:!!privateSlots?.[page]});
       else {
         const row={page,pte,slot:mapped-1,permission,cow:!!privateSlots?.[page],index:this.pages.length};
@@ -158,7 +178,7 @@ export class PageTables {
         const value=d.getUint32(row.pte,true);
         if(value&64){dirty.add(row.slot);d.setUint32(row.pte,value&~64,true);}
       }
-      if(dirty.size)this.cpu.full_clear_tlb();
+      if(dirty.size)this.flushDirtyTlb();
       result={slots:[...dirty],scannedPtes:this.pages.length,scannedDirectories:0};
     }
     const {slots,scannedPtes,scannedDirectories}=result;
@@ -194,7 +214,7 @@ export class PageTables {
           ((resetAccess || count) && !flushRequired) || scannedPtes>this.guestPages || scannedDirectories>1024)
         throw new Error('invalid v86 native dirty result bounds or identity');
       const slots=new Uint32Array(buffer,pointer,count);
-      if(flushRequired){this.cpu.full_clear_tlb();flushed=true;}
+      if(flushRequired){this.flushDirtyTlb();flushed=!this.globalCode;}
       this.lastDirtyScanCount=scannedPtes;this.lastDirtyDirectoryCount=scannedDirectories;
       if(count) {
         if(this.policy.selectiveCode)this.codeValidity.acknowledgeGuestWrites(info,slots);
