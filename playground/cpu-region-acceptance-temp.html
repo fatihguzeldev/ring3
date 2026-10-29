@@ -1,0 +1,21 @@
+<!doctype html><meta charset="utf-8"><title>Ring3 region CPU acceptance</title>
+<style>body{margin:0;background:#111;color:white}#status{position:absolute;top:510px;white-space:pre-wrap}</style>
+<div id="display"></div><pre id="status"></pre><script id="ring3-report" type="application/json">{}</script>
+<script type="module">
+import {createSession} from '/sdk/index.js';
+const report=window.profileReport={events:[],startedAt:performance.timeOrigin+performance.now()};
+const save=()=>{document.querySelector('#ring3-report').textContent=JSON.stringify(report,(_k,v)=>typeof v==='bigint'?String(v):v);};
+const session=createSession({container:document.querySelector('#display'),
+onStatus(status){report.status=status;if(status.engineHash)report.engineHash=status.engineHash;document.querySelector('#status').textContent=JSON.stringify(status,(_k,v)=>typeof v==='bigint'?String(v):v);save();},
+onDiagnostic(message,detail){report.events.push({at:performance.timeOrigin+performance.now(),message,detail});if(report.events.length>120)report.events.shift();window.dispatchEvent(new CustomEvent('ring3-diagnostic',{detail:{message,detail}}));save();},
+onAudioStats(audio){report.audio=audio;}});
+window.playground=Object.freeze({session});
+session.setVolume(0,true);
+const game=await fetch('/api/game').then(r=>r.json());report.game=game;
+const query=new URLSearchParams(location.search),backend=query.get('backend')??'core';
+try{await session.launch({executable:game.selectedExecutable,engineUrl:query.get('engine')??game.engineUrl,backend,
+...(backend==='v86'?{v86:{wasmUrl:query.get('v86')??undefined,sha256:query.get('cpuSha256')??undefined,relaxedFpu:query.get('relaxedFpu')==='1',...(query.get('fastPreset')==='1'?{fastPreset:true}:{}),...(query.get('wasmPorts')==='1'?{wasmPorts:true}:{})}}:{}),
+commandLine:'"'+game.selectedExecutable+'" -skipstartup',observability:{level:'off'},frameProbe:false});session.focus();}
+catch(error){report.error=String(error);save();}
+if(query.get('autoPause')!=='0')setTimeout(()=>{if(session.status().state==='running')void session.pause();},1200000);
+</script>
