@@ -8,6 +8,7 @@ const PRIVATE_PAGE: usize = 0xff000000usize >> 12;
 pub(super) struct Collector {
     occupied: Box<[u32]>,
     occupied_words: [u32; 1024],
+    writable: Box<[u32]>,
     expected: Box<[u32]>,
     directory_counts: [u16; 1024],
     directories: [u32; 32],
@@ -68,6 +69,7 @@ impl Collector {
         let mut collector = Self {
             occupied: filled(GUEST_PAGES / 32, 0)?.into_boxed_slice(),
             occupied_words: [0; 1024],
+            writable: filled(GUEST_PAGES / 32, 0)?.into_boxed_slice(),
             expected: filled(GUEST_PAGES, 0)?.into_boxed_slice(),
             directory_counts: [0; 1024],
             directories: [0; 32],
@@ -121,6 +123,11 @@ impl Collector {
             0
         };
         let bit = 1u32 << (page % 32);
+        if mapped && writable {
+            self.writable[page / 32] |= bit;
+        } else {
+            self.writable[page / 32] &= !bit;
+        }
         let present = self.occupied[page / 32] & bit != 0;
         if present == mapped {
             return;
@@ -176,7 +183,11 @@ impl Collector {
                 while words != 0 {
                     let index = directory * 32 + words.trailing_zeros() as usize;
                     words &= words - 1;
-                    let mut pages = self.occupied[index];
+                    let mut pages = if TRUSTED_CLEAN {
+                        self.writable[index]
+                    } else {
+                        self.occupied[index]
+                    };
                     while pages != 0 {
                         let within = pages.trailing_zeros() as usize;
                         let page = index * 32 + within;
@@ -777,12 +788,14 @@ mod tests {
         memory
             .map_zeroed(range(0x1000), Permissions::READ_WRITE)
             .unwrap();
-        memory.map_zeroed(range(0x2000), Permissions::READ).unwrap();
+        memory
+            .map_zeroed(range(0x400000), Permissions::READ)
+            .unwrap();
         track(&mut memory);
         let mut bytes = tables(&memory);
         for dirty in [false, true, false, true] {
             access(&mut bytes, 1, dirty);
-            access(&mut bytes, 2, false);
+            access(&mut bytes, 1024, false);
             let before = memory.transaction_version();
             let result = memory
                 .collect_external_dirty_mode(memory.external_mapping_epoch, &mut bytes, true)
@@ -790,14 +803,15 @@ mod tests {
             assert_eq!(word(&result, 20), u32::from(dirty));
             assert_eq!(word(&result, 24), 1);
             assert_eq!(word(&result, 28), 1);
-            assert_eq!(word(&result, 32), 2);
-            assert_eq!(word(&result, 36), 1);
+            assert_eq!(word(&result, 32), 1);
+            assert_eq!(word(&result, 36), 2);
             assert_eq!(word(&bytes, 0) & 32, 0);
+            assert_eq!(word(&bytes, 4) & 32, 0);
             assert_eq!(word(&bytes, pte(1)) & 64, 0);
             assert_eq!(memory.transaction_version() > before, dirty);
         }
-        access(&mut bytes, 2, false);
-        put(&mut bytes, pte(2), word(&tables(&memory), pte(2)) ^ 2);
+        access(&mut bytes, 1024, false);
+        put(&mut bytes, pte(1024), word(&tables(&memory), pte(1024)) ^ 2);
         assert_eq!(
             memory.collect_external_dirty(memory.external_mapping_epoch, &mut bytes),
             Err(MemoryError::InvalidRange)
@@ -807,6 +821,55 @@ mod tests {
             .unwrap();
         assert_eq!(word(&result, 20), 0);
         assert_eq!(word(&result, 28), 1);
+    }
+
+    #[test]
+    fn external_dirty_collect_trusted_writable_tracks_same_presence_protect_and_cow() {
+        let mut memory = AddressSpace::new(4).unwrap();
+        memory
+            .map_zeroed(range(0x1000), Permissions::READ_WRITE)
+            .unwrap();
+        let shared = memory.allocate_shared_pages(1, &[7]).unwrap();
+        memory
+            .map_shared_pages(range(0x2000), &shared, 0, Permissions::READ_WRITE, true)
+            .unwrap();
+        track(&mut memory);
+        for (permissions, scanned) in [
+            (Permissions::READ_WRITE, 1),
+            (Permissions::READ, 0),
+            (Permissions::READ_WRITE, 1),
+        ] {
+            if memory.permissions_at(GuestAddress(0x1000)).unwrap() != permissions {
+                memory.protect(range(0x1000), permissions).unwrap();
+                memory
+                    .acknowledge_external_mappings(memory.external_mapping_epoch, 1)
+                    .unwrap();
+            }
+            let mut bytes = tables(&memory);
+            access(&mut bytes, 1, false);
+            access(&mut bytes, 2, false);
+            let before = memory.transaction_version();
+            let result = memory
+                .collect_external_dirty_mode(memory.external_mapping_epoch, &mut bytes, true)
+                .unwrap();
+            assert_eq!(word(&result, 32), scanned);
+            assert_eq!(word(&result, 28), 1);
+            assert_eq!(word(&bytes, 0) & 32, 0);
+            assert_eq!(memory.transaction_version(), before);
+        }
+        memory.external_write_fault(0x2000).unwrap();
+        memory
+            .acknowledge_external_mappings(memory.external_mapping_epoch, 1)
+            .unwrap();
+        let mut bytes = tables(&memory);
+        access(&mut bytes, 1, true);
+        access(&mut bytes, 2, true);
+        let result = memory
+            .collect_external_dirty_mode(memory.external_mapping_epoch, &mut bytes, true)
+            .unwrap();
+        assert_eq!(word(&result, 20), 2);
+        assert_eq!(word(&result, 32), 2);
+        assert_eq!(word(&result, 92), 2);
     }
 
     #[test]

@@ -48,6 +48,7 @@ function world({journal=false,nativeDirty=false,nativeDirtyEpoch=false,dirtyGate
   const flushes=[],compiled=new Map(),cpu={mem8:{byteOffset:0,length:160*1024*1024},clears:0,tlbClears:0,nonGlobalClears:0,
     jit_clear_cache(){flushes.push('jit');this.clears++;compiled.clear();},full_clear_tlb(){flushes.push('full');this.tlbClears++;},
     clear_tlb(){flushes.push('non-global');this.nonGlobalClears++;}};
+  cpu.wasm_memory=memory;cpu.cr=new Int32Array(memory.buffer,580,8);
   cpu.cpl=new Uint8Array(memory.buffer,612,1);cpu.cpl[0]=3;cpu.invalidatedPages=[];
   cpu.wm={exports:{instr16_0F01_7_mem(address){assert.equal(cpu.cpl[0],0);cpu.invalidatedPages.push(address>>>0);if(cpu.invalidateFailure)throw cpu.invalidateFailure;}}};
   const engine={memory,base:0,api:trustedExport?{component_cpu_collect_dirty_trusted(){}}:{},
@@ -696,6 +697,10 @@ test('trusted clean PTE collection is explicit and retains native read/write rea
 test('trusted clean PTE capability rejects old hosts and malformed output retains safety flush',()=>{
   const owner={paused:true,open:false},old=world({journal:true,nativeDirty:true}),legacy=new PageTables(old.engine,old.cpu);
   assert.throws(()=>legacy.configureTrustedCleanPtes(true,owner),/unsupported/);assert.equal(old.nativeCollections.length,0);
+  for(const change of [f=>f.cpu.cr[0]&=~0x10000,f=>f.cpu.wasm_memory=new WebAssembly.Memory({initial:1})]) {
+    const f=world({journal:true,nativeDirty:true,nativeDirtyEpoch:true,dirtyVirtualPages:true,trustedExport:true}),t=new PageTables(f.engine,f.cpu);change(f);
+    assert.throws(()=>t.configureTrustedCleanPtes(true,owner),/pinned.*write protection/);assert.equal(f.nativeCollections.length,0);assert.equal(t.trustedCleanPtes,false);
+  }
   const f=world({journal:true,nativeDirty:true,nativeDirtyEpoch:true,dirtyVirtualPages:true,trustedExport:true}),t=new PageTables(f.engine,f.cpu);
   t.configureTrustedCleanPtes(true,owner);f.data.setUint32(DIRECTORY,f.data.getUint32(DIRECTORY,true)|32,true);
   f.hooks.collectResult=(d,at)=>d.setUint32(at,0,true);const clears=f.cpu.tlbClears;

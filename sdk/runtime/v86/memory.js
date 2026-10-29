@@ -135,6 +135,9 @@ export class PageTables {
       throw new Error('v86 trusted PTE changes require a closed paused owner');
     if(enabled && (!this.trustedCleanPtesSupported || !this.nativeDirty || !this.policy.incrementalSync))
       throw new Error('native v86 trusted clean PTE collection is unsupported');
+    if(enabled && (this.cpu.wasm_memory!==this.engine.memory || !this.cpu.cr ||
+        (this.cpu.cr[0]&0x80010000)!==(0x80010000|0)))
+      throw new Error('trusted clean PTE collection requires pinned paging with write protection');
     if(enabled===this.trustedCleanPtes)return enabled;
     this.publishDirty();this.trustedCleanPtes=enabled;return enabled;
   }
