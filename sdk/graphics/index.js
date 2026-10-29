@@ -32,7 +32,7 @@ class DeviceRenderer {
     this.pipelineInputs=new Map();this.pipelineInputMemoEnabled=false;this.programIdentities=new WeakMap();this.nextProgramIdentity=0;
     this.pipelineInputHits=0;this.pipelineInputMisses=0;this.pipelineBuilds=0;
     this.retainedIndicesEnabled=false;this.retainedIndexUses=0;
-    this.stateUploadBatchEnabled=false;this.stateUploadPages=[];
+    this.stateUploadBatchEnabled=false;this.stateUploadPages=[];this.stateUploadPool=[];
     this.stateUploadBatchUses=0;this.stateUploadBatchUploads=0;this.stateUploadBatchPages=0;this.stateUploadBatchBytes=0;
     this.draws=0;this.presents=0;this.removed=false;this.gamma=new Float32Array(3*256);
     for(let c=0;c<3;c++)for(let i=0;i<256;i++)this.gamma[c*256+i]=i/255;
@@ -48,17 +48,25 @@ class DeviceRenderer {
     require(bytes.byteLength<=capacity,'state upload exceeds storage page');
     let page=this.stateUploadPages.at(-1),offset=page?align(page.used,alignment):0;
     if(!page||offset+bytes.byteLength>capacity){
-      const data=new Uint8Array(capacity),buffer=this.device.createBuffer({size:capacity,usage:GPUBufferUsage.STORAGE|GPUBufferUsage.COPY_DST});
-      page={bytes:data,buffer,used:0};this.stateUploadPages.push(page);this.temporary.push(buffer);this.stateUploadBatchPages++;offset=0;
+      const index=this.stateUploadPages.length;page=this.stateUploadPool[index];
+      if(!page){
+        const data=new Uint8Array(capacity),buffer=this.device.createBuffer({size:capacity,usage:GPUBufferUsage.STORAGE|GPUBufferUsage.COPY_DST});
+        page={bytes:data,buffer,used:0};
+        if(index<8)this.stateUploadPool.push(page);else this.temporary.push(buffer);
+        this.stateUploadBatchPages++;
+      }
+      page.used=0;this.stateUploadPages.push(page);offset=0;
     }
     page.bytes.set(bytes,offset);page.used=offset+bytes.byteLength;this.stateUploadBatchUses++;
     return {buffer:page.buffer,offset,size:bytes.byteLength};
   }
   encoder(){return this.pendingEncoder??=this.device.createCommandEncoder();}
   flush(){const encoder=this.pendingEncoder;if(encoder){
-    const pages=this.stateUploadPages;this.pendingEncoder=null;this.stateUploadPages=[];
-    for(const page of pages){this.device.queue.writeBuffer(page.buffer,0,page.bytes,0,page.used);this.stateUploadBatchUploads++;this.stateUploadBatchBytes+=page.used;}
-    this.device.queue.submit([encoder.finish()]);
+    const pages=this.stateUploadPages;this.pendingEncoder=null;
+    try{
+      for(const page of pages){this.device.queue.writeBuffer(page.buffer,0,page.bytes,0,page.used);this.stateUploadBatchUploads++;this.stateUploadBatchBytes+=page.used;}
+      this.device.queue.submit([encoder.finish()]);
+    }finally{this.stateUploadPages=[];}
   }}
   async accept(packet,frameProbe) {
     require(!this.accepting,'graphics packet already active');this.accepting=true;
@@ -293,7 +301,7 @@ class DeviceRenderer {
     const entries=[{binding:0,resource:state},{binding:1,resource:{buffer:raw}},{binding:18,resource:{buffer:vertices}},...textures.entries];
     const encoder=this.encoder(),pass=encoder.beginRenderPass(this.passDescriptor(output));pass.setPipeline(gpu);pass.setBindGroup(0,this.device.createBindGroup({layout:gpu.getBindGroupLayout(0),entries}));this.dynamic(pass,p,output);pass.setIndexBuffer(d.indices,'uint32');pass.drawIndexed(d.indexCount);pass.end();this.draws++;
   }
-  close(){if(this.closed)return;this.closed=true;this.pendingEncoder=null;this.stateUploadPages.length=0;this.resources.close();for(const p of this.patches.values())p.controls.destroy();for(const d of this.domains.values()){d.vertices.destroy();d.indices.destroy();}for(const b of this.temporary)b.destroy();this.temporary.length=0;this.patches.clear();this.domains.clear();this.states.clear();this.shaders.clear();this.pipelines.clear();this.pipelineInputs.clear();}
+  close(){if(this.closed)return;this.closed=true;this.pendingEncoder=null;this.stateUploadPages.length=0;for(const page of this.stateUploadPool)page.buffer.destroy();this.stateUploadPool.length=0;this.resources.close();for(const p of this.patches.values())p.controls.destroy();for(const d of this.domains.values()){d.vertices.destroy();d.indices.destroy();}for(const b of this.temporary)b.destroy();this.temporary.length=0;this.patches.clear();this.domains.clear();this.states.clear();this.shaders.clear();this.pipelines.clear();this.pipelineInputs.clear();}
 }
 
 export async function createGraphicsHost(canvas,{onDiagnostic=()=>{}}={}) {

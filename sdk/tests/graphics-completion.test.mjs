@@ -98,13 +98,16 @@ test('batched state uploads preserve aligned draw ranges and upload each encoder
   }
   assert.deepEqual(events.filter(value=>value==='state-upload'||value==='submit'),['state-upload','state-upload','submit']);
   await draw(4);renderer.flush();
-  assert.notEqual(entries[3].buffer,entries[0].buffer,'a later encoder cannot overwrite previously submitted state pages');
-  assert.deepEqual([renderer.stateUploadBatchUses,renderer.stateUploadBatchUploads,renderer.stateUploadBatchPages],[4,3,3]);
+  assert.equal(entries[3].buffer,entries[0].buffer,'a later encoder reuses the page after the previous submission');
+  assert.equal(new DataView(writes[0].bytes.buffer).getFloat32(0,true),1,'earlier queued upload owns its original byte snapshot');
+  assert.equal(new DataView(writes[2].bytes.buffer).getFloat32(0,true),4);
+  assert.deepEqual(events.filter(value=>value==='state-upload'||value==='submit'),['state-upload','state-upload','submit','state-upload','submit']);
+  assert.deepEqual([renderer.stateUploadBatchUses,renderer.stateUploadBatchUploads,renderer.stateUploadBatchPages],[4,3,2]);
   renderer.configureStateUploadBatch(false);host.close();
   assert.equal(writes.every(row=>row.buffer.destroyed),true);
 });
 
-test('failed packets discard unsubmitted state staging and close releases its temporary GPU pages',async t=>{
+test('failed packets discard unsubmitted state staging and close releases its GPU pages',async t=>{
   const {host,events}=await graphicsFixture(t);await host.consume(packet([[1,definition]]));
   const renderer=host.sessions.get(1n);renderer.configureStateUploadBatch(true);
   renderer.execute=async()=>{renderer.stateBinding(new Uint8Array(18768));renderer.encoder();throw Error('staged command failure');};
@@ -113,8 +116,25 @@ test('failed packets discard unsubmitted state staging and close releases its te
   await assert.rejects(host.consume(next),/staged command failure/);
   assert.equal(renderer.pendingEncoder,null);assert.equal(renderer.stateUploadPages.length,0);
   assert.equal(events.includes('submit'),false);assert.equal(events.includes('write-buffer'),false);
-  const pages=renderer.temporary.slice();assert.equal(pages.length,1);
-  host.close();assert.equal(pages[0].destroyed,true);
+  const pages=renderer.stateUploadPool.slice();assert.equal(pages.length,1);assert.equal(renderer.temporary.length,0);
+  host.close();assert.equal(pages[0].buffer.destroyed,true);
+});
+
+test('state upload pooling keeps eight pages and releases overflow through normal packet cleanup',async t=>{
+  const {host}=await graphicsFixture(t);await host.consume(packet([[1,definition]]));
+  const renderer=host.sessions.get(1n);renderer.configureStateUploadBatch(true);
+  host.device.limits.maxStorageBufferBindingSize=18768;
+  const bindings=Array.from({length:9},()=>renderer.stateBinding(new Uint8Array(18768)));
+  assert.equal(new Set(bindings.map(row=>row.buffer)).size,9,'one encoder never aliases its own state ranges');
+  assert.equal(renderer.stateUploadPool.length,8);assert.equal(renderer.temporary.length,1);
+  renderer.encoder();renderer.flush();
+  const overflow=bindings[8].buffer,another=definition.slice();another[2]=1;
+  const next=packet([[1,another]]),view=new DataView(next);
+  for(const at of [24,32,40,72])view.setBigUint64(at,2n,true);
+  await host.consume(next);
+  assert.equal(overflow.destroyed,true);assert.equal(renderer.temporary.length,0);
+  assert.equal(renderer.stateUploadPool.every(page=>!page.buffer.destroyed),true);
+  host.close();assert.equal(bindings.every(row=>row.buffer.destroyed),true);
 });
 
 test('retained ordinary list indices preserve draw subsets and base vertices while other paths stay transient',async t=>{
