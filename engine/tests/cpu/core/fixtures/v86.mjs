@@ -11,7 +11,8 @@ import {image as moduleImage} from '../../../loader/modules/wasm/fixtures/runtim
 
 const [enginePath, reportPath, permissionText = '1', portText = ''] = process.argv.slice(2);
 assert(enginePath && reportPath, 'usage: v86.mjs imported-engine.wasm fresh-report.json');
-assert(['', 'port', 'inline', 'direct', 'direct-bindings', 'guest-ret', 'global', 'overlap', 'simd'].includes(portText));
+assert(['', 'port', 'inline', 'direct', 'direct-bindings', 'guest-ret', 'global', 'overlap', 'simd', 'targeted-dirty'].includes(portText));
+const targetedMode=portText==='targeted-dirty';
 const deniedPermission = Number(permissionText);
 assert([0,1].includes(deniedPermission));
 const hash = bytes => createHash('sha256').update(bytes).digest('hex');
@@ -79,6 +80,10 @@ try {
   const init = {token: initializer.getBigUint64(24, true), returnPc: initializer.getUint32(44, true), id: initializer.getUint32(48, true)};
   stage = 'attach while DLL initializer is pending';
   cache = await runtime.attach(engine, {budget: 1000});
+  if(targetedMode) {
+    assert.equal(cache.tables.targetedDirtySupported,true);
+    cache.tables.configureTargetedDirty(true,{paused:true,open:cache.open});
+  }
   let initRun;
   for (let count = 0; count < 100; count++) {
     initRun = cache.execute(cache.select()); cache.publish();
@@ -212,7 +217,8 @@ try {
       if(incrementalSync)assert.equal(observations[0].accessedAfter,false,'partitioned read-only collection resets access');
       if(incrementalSync) {
         const first=order.indexOf('cpu'),second=order.indexOf('cpu',first+1);
-        assert(order.slice(first+1,second).includes('flush'),'read-only A-bit reset flushes before the next actual CPU batch');
+        assert.equal(order.slice(first+1,second).includes('flush'),!(targetedMode&&nativeDirty),
+          'targeted native read-only A-bit reset retains translations; other policies flush');
       }
       assert.equal(read(dataAddress),0x76543210);
       report.memoryPolicies.push({selectiveCode,incrementalSync,nativeDirty,observations,order});
@@ -241,6 +247,58 @@ try {
     assert.equal(read(dataAddress),3,'same-VA remap executes new canonical bytes');
     report.hostCodeInvalidation={clears,finalizedModules:cache.stats().v86.finalizedModules};
   } finally {cache.cpu.jit_clear_cache=clear;}
+  if(targetedMode) {
+    stage='targeted dirty all-VA alias rearm';new Files(engine,{files:[]},'').configure();
+    const gates=new Map();
+    for(let start=0,total=1;start<total;) {
+      engine.ok('module_gates_page',start,128);const d=engine.resultView(4096);
+      total=d.getUint32(16,true);const count=d.getUint32(24,true);assert(count>0);
+      for(let i=0;i<count;i++)gates.set(d.getUint32(36+i*8,true),d.getUint32(32+i*8,true));start+=count;
+    }
+    cache.configurePortGates(true,{paused:true,open:cache.open});
+    const nativeCall=(id,args)=>{
+      put(0x601800,0x600380);args.forEach((value,i)=>put(0x601804+i*4,value));
+      const d=new DataView(memory.buffer);d.setUint32(engine.base+32,0x601800,true);d.setUint32(engine.base+48,gates.get(id),true);
+      cache.import();const run=cache.execute(cache.select());cache.publish();assert.equal(run.detail,id);
+      engine.ok('core_capture_windows_call');const token=engine.resultView(112).getUint32(16,true);
+      engine.ok('core_complete_windows_call',token);return engine.get(16);
+    };
+    const section=nativeCall(0xa0081,[0xffffffff,0,4,0,4096,0]),a=nativeCall(0xa0084,[section,2,0,0,4096]),b=nativeCall(0xa0084,[section,2,0,0,4096]);
+    assert(section&&a&&b&&a!==b);
+    const readPc=0x600e00,writePc=0x600e40;
+    upload(readPc,[0xa1,...u32(a),0xa1,...u32(b),0xb8,...u32(gate),0xff,0xe0]);
+    upload(writePc,[0xc7,0x05,...u32(a),...u32(0x11111111),0xc7,0x05,...u32(b),...u32(0x22222222),0xb8,...u32(gate),0xff,0xe0]);
+    cache.tables.refresh();
+    const pte=address=>new DataView(memory.buffer).getUint32(cache.tables.pte(address>>>12),true);
+    assert.equal(pte(a)&~4095,pte(b)&~4095,'real RW views share one physical page');
+    const live=()=>{const v=cpuViews(memory);return {cpl:v.bytes[612],flags:cache.cpu.wm.exports.get_eflags()>>>0,
+      counter:v.data.getUint32(664,true),registers:Array.from(v.regs),
+      fp:Buffer.concat([Buffer.from(v.bytes.subarray(816,1128)),Buffer.from(v.bytes.subarray(1152,1280))])};};
+    const beforePages=cache.tables.targetedDirtyPages,original=engine.ok,receipts=[];
+    engine.ok=function(operation,...args){const value=original.call(this,operation,...args);
+      if(operation==='component_cpu_collect_dirty') {
+        const d=this.resultView(96);assert.equal(d.getUint32(8,true),96);
+        receipts.push({physicalSlots:d.getUint32(20,true),resetAccess:d.getUint32(24,true),
+          pages:Array.from(new Uint32Array(memory.buffer,d.getUint32(88,true),d.getUint32(92,true)),offset=>(offset-4096)/4)});
+      }return value;};
+    report.targetedDirty={section,a,b,physicalPage:pte(a)&~4095,runs:[]};
+    try {
+      for(const pc of [readPc,writePc,writePc,readPc,writePc]) {
+        const d=new DataView(memory.buffer);d.setUint32(engine.base+48,pc,true);d.setUint32(engine.base+52,0x246,true);
+        cache.import();const run=cache.execute(cache.select());assert.equal(run.reason,8);
+        const before=live(),start=receipts.length;assert.equal(before.cpl,3);assert.equal(cache.dirtyPending,true);
+        cache.publish();assert.deepEqual(live(),before,'targeted invalidation preserves live CPL/flags/GPR/FP/counter');
+        assert.equal(receipts.length,start+1);const receipt=receipts.at(-1),writing=pc===writePc;
+        assert.equal(receipt.physicalSlots,writing?1:0);
+        assert.deepEqual(receipt.pages.slice().sort((x,y)=>x-y),writing?[a>>>12,b>>>12].sort((x,y)=>x-y):[]);
+        assert.equal(pte(a)&64,0);assert.equal(pte(b)&64,0);
+        for(const address of [a,b])assert.equal(new DataView(memory.buffer).getUint32(cache.tables.ram+DIRECTORY+(address>>>22)*4,true)&32,0);
+        report.targetedDirty.runs.push({pc,run,receipt,cplPreserved:true,flags:before.flags,fullLiveStatePreserved:true});
+      }
+      assert.equal(cache.tables.targetedDirtyPages-beforePages,6);assert.equal(read(a),0x22222222);assert.equal(read(b),0x22222222);
+      report.targetedDirty.pages=cache.tables.targetedDirtyPages-beforePages;report.targetedDirty.complete=true;save();
+    } finally {engine.ok=original;cache.configurePortGates(false,{paused:true,open:cache.open});}
+  }
   if(portText==='overlap') {
     stage='graphics overlap ABI mode handoff';cache.tables.refresh();
     const owner={paused:true,open:cache.open},initial=cache.getGraphicsOverlap();
