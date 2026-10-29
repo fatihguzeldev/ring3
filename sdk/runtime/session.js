@@ -28,6 +28,7 @@ export class Session {
     this.needsSchedule = false;
     this.fastNativeCalls = false;
     this.fastNativeCompletions = 0;
+    this.fastPresetApplied = false;
   }
   status(state, message, extra = {}) {
     const unavailable = [];
@@ -54,6 +55,8 @@ export class Session {
       message,
       backend: this.backend ?? "core",
       cpuHash: this.externalCpu?.hash,
+      fastPreset: this.externalCpu?.fastPreset===true,
+      fastPresetApplied: this.fastPresetApplied,
       pc: read("pc", () => this.engine?.get(48)),
       stats: read("cache.stats", () => this.code?.stats()),
       windowsCalls: read("windowsCalls.snapshot", () => this.callDiagnostics?.snapshot()),
@@ -151,6 +154,7 @@ export class Session {
           !globalThis.__r3PhaseWindow && !globalThis.__r3GateCensus && !globalThis.__r3BindingGatePolicy,
       };
       if(typeof this.code.initializeExecutionPolicy==='function')this.code.initializeExecutionPolicy();
+      this.initializeFastPreset();
     }
     this.abort.signal.throwIfAborted();
     this.observation?.observer.event("execution.backend", { backend: this.backend, callback_backend: this.backend,
@@ -166,6 +170,31 @@ export class Session {
         this.fail(error);
       })
       .finally(() => this.scheduler.close());
+  }
+  initializeFastPreset() {
+    if(this.externalCpu?.fastPreset!==true)return;
+    const c=this.code,g=this.media.graphicsTransport,owner={paused:true,open:false};
+    if(this.backend!=='v86' || this.running || this.stopped || this.fastPresetApplied ||
+        !c.executionPolicyInitialized || c.runs!==0 || c.imported || c.open || c.closed || !c.tables.ownsPin)
+      throw new Error('v86 fast preset requires its fresh closed startup owner');
+    if(!c.relaxedFpu || !this.externalCpu.relaxedFpu || c.cpu.wm.exports.get_relaxed_fpu()!==1 ||
+        !c.portGates || !c.inlineGates || !c.directGates || !c.directBindings || !c.lockStagingReuse ||
+        !c.tables.globalCode || !c.tables.descriptorReuse || !c.tables.targetedDirty || !c.tables.targetedDirtySupported ||
+        !c.wasmPortsSupported || !c.directStateInputsSupported ||
+        typeof this.engine.api.component_cpu_try_complete_gate!=='function' ||
+        !['configureDirectStateInputs','configureBudgetDirtyDeferral','configureTargetedMappings','configureWasmPorts'].every(name=>typeof c[name]==='function') ||
+        typeof g.configureBorrowedBatches!=='function' || !g.deferredSealing || g.pending || g.draining || g.forceDemand)
+      throw new Error('v86 fast preset is unsupported by this startup owner');
+    try {
+      c.configureDirectStateInputs(true,owner);
+      c.configureBudgetDirtyDeferral(true,owner);
+      c.configureTargetedMappings(true,owner);
+      c.configureWasmPorts(true,owner);
+      c.budgetStateReuse=true;
+      g.configureBorrowedBatches(true,owner);
+      this.fastNativeCalls=true;
+      this.fastPresetApplied=true;
+    } catch(error) {c.inlineFailure??=error;throw error;}
   }
   stack() {
     if (!this.callbacks.has(this.thread)) this.callbacks.set(this.thread, []);

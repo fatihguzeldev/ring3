@@ -10,7 +10,7 @@ export interface SessionStatus {
 export interface LaunchOptions {
   engineUrl?: string;
   backend?: 'core'|'v86';
-  v86?: {wasmUrl?:string;sha256?:string;relaxedFpu?:boolean};
+  v86?: {wasmUrl?:string;sha256?:string;relaxedFpu?:boolean;fastPreset?:boolean};
   executable?: string;
   commandLine?: string;
   manifestUrl?: string;

@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {V86CodeCache,prepareV86} from '../runtime/v86/index.js';
+import {Session} from '../runtime/session.js';
 import {cpuViews,importState} from '../runtime/v86/state.js';
 import {Traps} from '../runtime/v86/traps.js';
 import {PARK,SEGMENTS,X87} from '../runtime/v86/layout.js';
@@ -170,6 +171,48 @@ test('relaxed FPU boot is boolean-only before fetch and strict-compatible when o
     for(const options of [{},{relaxedFpu:false},{relaxedFpu:true}])await assert.rejects(prepareV86(options),/HTTP418/);
     assert.equal(fetches,3,'omitted, strict and explicit experimental modes reach the same CPU loading path');
   } finally {globalThis.fetch=original;}
+});
+
+test('fast preset boot requires an explicit boolean and experimental relaxed mode before fetch',async()=>{
+  const original=globalThis.fetch;let fetches=0;
+  globalThis.fetch=async()=>{fetches++;return {ok:false,status:418};};
+  try {
+    for(const fastPreset of [null,0,1,'true',{}])await assert.rejects(prepareV86({fastPreset,relaxedFpu:true}),/preset.*boolean/);
+    for(const options of [{fastPreset:true},{fastPreset:true,relaxedFpu:false}])await assert.rejects(prepareV86(options),/requires.*relaxed/);
+    assert.equal(fetches,0);
+    for(const options of [{},{fastPreset:false},{fastPreset:true,relaxedFpu:true}])await assert.rejects(prepareV86(options),/HTTP418/);
+    assert.equal(fetches,3);
+  } finally {globalThis.fetch=original;}
+});
+
+test('fast preset applies seven controls only after fresh supported startup and marks success last',()=>{
+  const make=()=>{
+    const events=[],code={executionPolicyInitialized:true,runs:0,imported:false,open:false,closed:false,
+      relaxedFpu:true,portGates:true,inlineGates:true,directGates:true,directBindings:true,lockStagingReuse:true,
+      wasmPortsSupported:true,directStateInputsSupported:true,budget:50000,
+      cpu:{wm:{exports:{get_relaxed_fpu:()=>1}}},
+      tables:{ownsPin:true,globalCode:true,descriptorReuse:true,targetedDirty:true,targetedDirtySupported:true}};
+    for(const [name,field] of [['configureWasmPorts','wasmPorts'],['configureDirectStateInputs','directStateInputs'],
+      ['configureBudgetDirtyDeferral','budgetDirtyDeferral'],['configureTargetedMappings','targetedMappings']])
+      code[name]=(value,owner)=>{assert.deepEqual(owner,{paused:true,open:false});events.push(name);code[field]=value;};
+    const graphicsTransport={deferredSealing:true,configureBorrowedBatches(value){events.push('borrowed');this.borrowedBatches=value;}};
+    const session=Object.assign(Object.create(Session.prototype),{backend:'v86',running:false,stopped:false,fastPresetApplied:false,
+      externalCpu:{fastPreset:true,relaxedFpu:true},code,media:{graphicsTransport},engine:{api:{component_cpu_try_complete_gate(){}}}});
+    return {session,code,graphicsTransport,events};
+  };
+  const f=make();f.session.initializeFastPreset();
+  assert.equal(f.session.fastPresetApplied,true);assert.equal(f.session.fastNativeCalls,true);
+  for(const field of ['wasmPorts','directStateInputs','budgetDirtyDeferral','targetedMappings','budgetStateReuse'])assert.equal(f.code[field],true);
+  assert.equal(f.graphicsTransport.borrowedBatches,true);assert.equal(f.code.budget,50000);
+  assert.deepEqual(f.events,['configureDirectStateInputs','configureBudgetDirtyDeferral','configureTargetedMappings','configureWasmPorts','borrowed']);
+  const plain=make();plain.session.externalCpu.fastPreset=false;plain.session.initializeFastPreset();assert.deepEqual(plain.events,[]);
+  for(const change of [f=>f.code.wasmPortsSupported=false,f=>f.code.runs=1]) {
+    const bad=make();change(bad);assert.throws(()=>bad.session.initializeFastPreset(),/preset/);
+    assert.equal(bad.session.fastPresetApplied,false);assert.deepEqual(bad.events,[]);
+  }
+  const failed=make(),failure=Error('preset configuration failed');failed.code.configureTargetedMappings=()=>{throw failure;};
+  assert.throws(()=>failed.session.initializeFastPreset(),error=>error===failure);
+  assert.equal(failed.session.fastPresetApplied,false);assert.equal(failed.code.inlineFailure,failure);
 });
 
 test('SetRenderState defers dirty publication until the next non-allowlisted gate', () => {

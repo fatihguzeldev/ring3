@@ -14,6 +14,9 @@ const GUEST_RETURN_GATE_IDS=new Set([0x10001,0x40225,0x4022a,0x4022e,0x40232,0x4
 export async function prepareV86(options={}, {signal}={}) {
   const relaxedFpu=options.relaxedFpu===undefined?false:options.relaxedFpu;
   if(typeof relaxedFpu!=='boolean')throw new TypeError('v86 relaxed FPU option must be boolean');
+  const fastPreset=options.fastPreset===undefined?false:options.fastPreset;
+  if(typeof fastPreset!=='boolean')throw new TypeError('v86 fast preset option must be boolean');
+  if(fastPreset && !relaxedFpu)throw new Error('v86 fast preset requires explicit relaxed FPU mode');
   const memorySize=options.memorySize??PHYSICAL_BYTES;
   if(!Number.isInteger(memorySize) || memorySize<PHYSICAL_BYTES || memorySize>256*1024*1024)
     throw new Error('v86 physical memory must be between160 and256MiB');
@@ -31,7 +34,7 @@ export async function prepareV86(options={}, {signal}={}) {
       // ring3 supplies process time and devices; the cpu's machine timers stay inactive.
       imports.env.run_hardware_timers=()=>0;
       portBridgeOriginalIO=imports.env.io_port_write8;
-      if(options.wasmPorts===true) {
+      if(options.wasmPorts===true || fastPreset) {
         portBridgeFallback=(port,value)=>portCache?portCache.forwardPortIO(portBridgeOriginalIO,port,value):portBridgeOriginalIO(port,value);
         portBridge=createPortBridge(portBridgeFallback);imports.env.io_port_write8=portBridge.write8;
       }
@@ -61,7 +64,7 @@ export async function prepareV86(options={}, {signal}={}) {
   let generated=0,generatedBytes=0,finalized=0,attached=false,disposed=false;
   cpu.test_hook_did_generate_wasm=encoded=>{generated++;generatedBytes+=encoded.byteLength;};
   cpu.test_hook_did_finalize_wasm=()=>{finalized++;};
-  const runtime={cpu,memory:cpu.wasm_memory,hash,relaxedFpu,portBridge,portBridgeOriginalIO,portBridgeFallback,
+  const runtime={cpu,memory:cpu.wasm_memory,hash,relaxedFpu,fastPreset,portBridge,portBridgeOriginalIO,portBridgeFallback,
     async attach(engine,execution={}) {
       if(attached || disposed)throw new Error('v86 runtime cannot attach twice');
       signal?.throwIfAborted();
