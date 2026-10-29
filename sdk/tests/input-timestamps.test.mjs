@@ -3,6 +3,7 @@ import test from 'node:test';
 import {InputHost} from '../browser/input.js';
 import {Media} from '../runtime/media.js';
 import {Session} from '../runtime/session.js';
+import {Session as BrowserSession} from '../browser/session.js';
 
 const ms = value => BigInt(value) * 1_000_000n;
 
@@ -57,8 +58,47 @@ function browserFixture(t) {
     Object.defineProperties(event,{code:{value:code},timeStamp:{value:timeStamp}});
     window.dispatchEvent(event);
   };
-  return {host,packets,key,set:time=>{now=time;}};
+  return {host,packets,key,window,document,canvas,set:time=>{now=time;}};
 }
+
+test('execution pause releases held inputs without manufacturing guest focus loss',async t=>{
+  const b=browserFixture(t),messages=[];
+  b.key('keydown','KeyA',100);b.host.buttons.add(0);
+  const before=b.packets.length,session=Object.assign(Object.create(BrowserSession.prototype),{
+    state:'running',worker:{},generation:1,failed:false,input:b.host,
+    async holdAudio(){},audio:{async pause(){}},post:message=>messages.push(message),
+  });
+  await session.pause();
+  assert.deepEqual(b.packets.slice(before).flat().map(({kind,code,button,down})=>({kind,code,button,down})),[
+    {kind:'key',code:30,button:undefined,down:false},
+    {kind:'button',code:undefined,button:0,down:false},
+  ]);
+  assert.equal(b.host.enabled,false);assert.equal(b.host.focused,true);
+  b.host.enable();
+  assert.deepEqual(b.packets.flat().filter(event=>event.kind==='focus').map(event=>event.focused),[true]);
+  assert.deepEqual(messages,[{type:'pause'}]);
+});
+
+test('preserved pause forwards genuine focus and capture losses and reconciles current focus on resume',t=>{
+  const b=browserFixture(t),focuses=()=>b.packets.flat().filter(event=>event.kind==='focus').map(event=>event.focused);
+  b.host.disable({preserveFocus:true});
+  b.document.hasFocus=()=>false;b.window.dispatchEvent(new Event('blur'));
+  assert.deepEqual(focuses(),[true,false]);
+  b.host.enable();assert.equal(b.host.focused,false);assert.deepEqual(focuses(),[true,false]);
+  b.document.hasFocus=()=>true;b.window.dispatchEvent(new Event('focus'));
+  assert.deepEqual(focuses(),[true,false,true]);
+  b.host.disable({preserveFocus:true});b.host.setBlocked(true);
+  assert.deepEqual(focuses(),[true,false,true,false]);
+  b.host.enable();assert.equal(b.host.focused,false);b.host.setBlocked(false);
+  assert.deepEqual(focuses(),[true,false,true,false,true]);
+  b.document.pointerLockElement=b.canvas;
+  b.document.exitPointerLock=()=>{b.document.pointerLockElement=null;b.document.dispatchEvent(new Event('pointerlockchange'));};
+  b.host.disable({preserveFocus:true});
+  assert.equal(b.packets.flat().at(-1).kind,'capture');assert.equal(b.packets.flat().at(-1).captured,false);
+  assert.deepEqual(focuses(),[true,false,true,false,true],'capture release with canvas focus is not a physical blur');
+  b.document.hasFocus=()=>false;b.host.enable();
+  assert.deepEqual(focuses(),[true,false,true,false,true,false],'resume detects loss even without a browser blur event');
+});
 
 test('browser packs distinct source key times before a delayed Worker can receive them',t=>{
   const browser=browserFixture(t),origin=performance.timeOrigin;

@@ -355,7 +355,7 @@ export class Session {
   async pause() {
     if (this.state !== "running") return;
     const worker = this.worker, generation = this.generation;
-    this.input.disable();
+    this.input.disable({preserveFocus:true});
     try {
       await this.holdAudio(worker);
       if (this.worker !== worker || this.generation !== generation || this.failed) return;

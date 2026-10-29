@@ -18,6 +18,7 @@ export class InputHost {
     this.onCapture = onCapture;
     this.onDiagnostic = onDiagnostic;
     this.enabled = false;
+    this.preserveFocus = false;
     this.blocked = false;
     this.focused = false;
     this.windowFocused = document.hasFocus();
@@ -78,10 +79,10 @@ export class InputHost {
     canvas.addEventListener('contextmenu', event => event.preventDefault(), options);
     document.addEventListener('pointerlockchange', () => {
       if (!this.locked) this.release(false);
-      if (!this.available) this.release(true);
+      if (!this.physicalAvailable) this.release(true);
       else this.focus();
       const captured = this.active && this.locked;
-      if (this.enabled) this.sendTimed([{kind:'capture',captured}]);
+      if (this.enabled || this.preserveFocus) this.sendTimed([{kind:'capture',captured}]);
       this.onCapture(captured);
       if (this.locked && !captured) document.exitPointerLock();
     }, options);
@@ -140,10 +141,18 @@ export class InputHost {
       }
     } catch {}
   }
-  get available() { return this.enabled && !this.blocked && this.windowFocused && !document.hidden && document.hasFocus() && (this.locked || document.activeElement === this.canvas); }
+  get physicalAvailable() { return !this.blocked && this.windowFocused && !document.hidden && document.hasFocus() && (this.locked || document.activeElement === this.canvas); }
+  get available() { return this.enabled && this.physicalAvailable; }
   get active() { return this.focused && this.available; }
-  enable() { this.control('enable'); this.enabled = true; if (!document.hidden && document.hasFocus()) this.canvas.focus(); this.focus(); }
-  disable() { this.control('disable'); this.release(true); this.enabled = false; if (this.locked) document.exitPointerLock(); }
+  enable() {
+    this.control('enable'); this.enabled = true; this.preserveFocus = false; this.windowFocused = document.hasFocus();
+    if (!document.hidden && this.windowFocused) this.canvas.focus();
+    if (!this.physicalAvailable) this.release(true); else this.focus();
+  }
+  disable({preserveFocus = false} = {}) {
+    this.control('disable'); this.release(!preserveFocus); this.enabled = false; this.preserveFocus = preserveFocus;
+    if (this.locked) document.exitPointerLock();
+  }
   focus() {
     if (!this.available || this.focused) return;
     this.sendTimed([{kind:'focus',focused:true}, ...(this.locked ? [{kind:'capture',captured:true}] : [])]);
@@ -217,7 +226,7 @@ export class InputHost {
     this.absolute = null;
     this.motionTimestampMs = undefined;
     if (blur && this.focused) events.push({kind:'focus',focused:false});
-    if (this.enabled && events.length) this.sendTimed(events);
+    if ((this.enabled || this.preserveFocus) && events.length) this.sendTimed(events);
     if (blur) this.focused = false;
   }
   async capture() {
