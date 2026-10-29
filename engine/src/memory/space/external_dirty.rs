@@ -44,7 +44,10 @@ fn dirty_quad(actual: &[u8; 16], expected: &[u32; 4]) -> Result<u32, MemoryError
         expected[2] as i32,
         expected[3] as i32,
     );
-    if !i32x4_all_true(i32x4_eq(v128_and(actual, i32x4_splat(!96)), expected)) {
+    let optional_global = v128_and(expected, i32x4_splat(256));
+    let required = v128_and(expected, i32x4_splat(!256));
+    let ignored = v128_or(i32x4_splat(96), optional_global);
+    if !i32x4_all_true(i32x4_eq(v128_and(actual, v128_not(ignored)), required)) {
         return Err(MemoryError::InvalidRange);
     }
     Ok(i32x4_bitmask(i32x4_ne(v128_and(actual, i32x4_splat(64)), i32x4_splat(0))) as u32)
@@ -101,11 +104,17 @@ impl Collector {
             || permissions.allows(Access::Write)
             || permissions.allows(Access::Execute);
         let writable = permissions.allows(Access::Write) && !private;
+        let global = permissions.allows(Access::Read)
+            && permissions.allows(Access::Execute)
+            && !permissions.allows(Access::Write)
+            && !private;
+        // the global bit records optional eligibility; required identity and rights stay exact.
         // slot and permission changes can keep the same mapped presence.
         self.expected[page] = if mapped {
             (BACKING_PHYSICAL + (mapping - 1) * 4096)
                 | if present { 5 } else { 0 }
                 | if writable { 2 } else { 0 }
+                | if global { 256 } else { 0 }
         } else {
             0
         };
@@ -192,7 +201,7 @@ impl Collector {
                         let expected = self.expected[page];
                         let offset = 4096 + page * 4;
                         let pte = word(tables, offset);
-                        if pte & !96 != expected {
+                        if pte & !(96 | (expected & 256)) != expected & !256 {
                             return Err(MemoryError::InvalidRange);
                         }
                         if pte & 64 != 0 {
@@ -368,6 +377,158 @@ mod tests {
             let value = word(bytes, pte(page)) | 64;
             put(bytes, pte(page), value);
         }
+    }
+
+    #[test]
+    fn external_dirty_collect_global_rx_keeps_alias_publication_and_evidence_order() {
+        let mut memory = AddressSpace::new(2).unwrap();
+        let shared = memory.allocate_shared_pages(1, &[7]).unwrap();
+        memory
+            .map_shared_pages(range(0x1000), &shared, 0, Permissions::READ_WRITE, false)
+            .unwrap();
+        memory
+            .map_shared_pages(range(0x2000), &shared, 0, Permissions::READ_EXECUTE, false)
+            .unwrap();
+        track(&mut memory);
+        let slot = memory.mappings[1] - 1;
+        let mut bytes = tables(&memory);
+        let entry = word(&bytes, pte(2)) | 256;
+        put(&mut bytes, pte(2), entry);
+        access(&mut bytes, 2, false);
+        let version = memory.transaction_version();
+        let readonly = memory
+            .collect_external_dirty(memory.external_mapping_epoch, &mut bytes)
+            .unwrap();
+        assert_eq!(word(&readonly, 20), 0);
+        assert_eq!(word(&readonly, 24), 1);
+        assert_eq!(word(&readonly, 28), 1);
+        assert_eq!(memory.transaction_version(), version);
+        assert_eq!(word(&bytes, pte(2)), entry);
+        access(&mut bytes, 1, true);
+        let evidence = bytes.clone();
+        memory.version = u64::MAX;
+        assert_eq!(
+            memory.collect_external_dirty(memory.external_mapping_epoch, &mut bytes),
+            Err(MemoryError::VersionExhausted)
+        );
+        assert_eq!(
+            bytes, evidence,
+            "publication failure preserves every A/D/G bit"
+        );
+        memory.version = version;
+        let published = memory
+            .collect_external_dirty(memory.external_mapping_epoch, &mut bytes)
+            .unwrap();
+        assert_eq!(word(&published, 20), 1);
+        assert_eq!(memory.external_dirty.as_ref().unwrap().slots, [slot]);
+        assert_eq!(
+            memory.versions[slot as usize].content,
+            memory.transaction_version()
+        );
+        assert_eq!(
+            memory.code_validation_version(),
+            memory.transaction_version()
+        );
+        assert_eq!(word(&bytes, pte(1)) & 64, 0);
+        assert_eq!(word(&bytes, 0) & 32, 0);
+        assert_eq!(word(&bytes, pte(2)), entry);
+        assert_ne!(word(&memory.external_descriptor(), 108) & 32, 0);
+    }
+
+    #[test]
+    fn external_dirty_collect_global_rx_rejects_ineligible_or_malformed_ptes_atomically() {
+        for (permissions, private, extra) in [
+            (Permissions::READ_WRITE, false, 256),
+            (Permissions::READ, false, 256),
+            (Permissions::EXECUTE, false, 256),
+            (Permissions::ALL, false, 256),
+            (Permissions::READ_EXECUTE, true, 256),
+            (Permissions::READ_EXECUTE, false, 256 | 2),
+            (Permissions::READ_EXECUTE, false, 256 | 512),
+        ] {
+            let mut memory = AddressSpace::new(2).unwrap();
+            let shared = memory.allocate_shared_pages(1, &[7]).unwrap();
+            memory
+                .map_shared_pages(
+                    range(0x1000),
+                    &shared,
+                    0,
+                    if private {
+                        Permissions::READ_WRITE
+                    } else {
+                        permissions
+                    },
+                    private,
+                )
+                .unwrap();
+            if private {
+                memory.protect(range(0x1000), permissions).unwrap();
+            }
+            track(&mut memory);
+            let mut bytes = tables(&memory);
+            let entry = word(&bytes, pte(1)) | extra;
+            put(&mut bytes, pte(1), entry);
+            access(&mut bytes, 1, false);
+            let evidence = bytes.clone();
+            let version = memory.transaction_version();
+            assert_eq!(
+                memory.collect_external_dirty(memory.external_mapping_epoch, &mut bytes),
+                Err(MemoryError::InvalidRange)
+            );
+            assert_eq!(bytes, evidence);
+            assert_eq!(memory.transaction_version(), version);
+        }
+    }
+
+    #[test]
+    fn external_dirty_collect_global_rx_mapping_ack_refreshes_permission_eligibility() {
+        let mut memory = AddressSpace::new(2).unwrap();
+        memory
+            .map_zeroed(range(0x1000), Permissions::READ_EXECUTE)
+            .unwrap();
+        track(&mut memory);
+        let mut bytes = tables(&memory);
+        access(&mut bytes, 1, false);
+        memory
+            .collect_external_dirty(memory.external_mapping_epoch, &mut bytes)
+            .unwrap();
+        memory
+            .protect(range(0x1000), Permissions::READ_WRITE)
+            .unwrap();
+        memory
+            .acknowledge_external_mappings(memory.external_mapping_epoch, 1)
+            .unwrap();
+        let mut bytes = tables(&memory);
+        let entry = word(&bytes, pte(1)) | 256;
+        put(&mut bytes, pte(1), entry);
+        access(&mut bytes, 1, true);
+        let evidence = bytes.clone();
+        let version = memory.transaction_version();
+        assert_eq!(
+            memory.collect_external_dirty(memory.external_mapping_epoch, &mut bytes),
+            Err(MemoryError::InvalidRange)
+        );
+        assert_eq!(bytes, evidence);
+        assert_eq!(memory.transaction_version(), version);
+        memory
+            .protect(range(0x1000), Permissions::READ_EXECUTE)
+            .unwrap();
+        memory
+            .acknowledge_external_mappings(memory.external_mapping_epoch, 1)
+            .unwrap();
+        let mut bytes = tables(&memory);
+        let entry = word(&bytes, pte(1)) | 256;
+        put(&mut bytes, pte(1), entry);
+        access(&mut bytes, 1, false);
+        assert_eq!(
+            word(
+                &memory
+                    .collect_external_dirty(memory.external_mapping_epoch, &mut bytes)
+                    .unwrap(),
+                20
+            ),
+            0
+        );
     }
 
     #[test]
