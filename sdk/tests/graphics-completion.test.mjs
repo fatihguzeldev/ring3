@@ -29,7 +29,7 @@ async function graphicsFixture(t) {
   const fence=deferred(),mapping=deferred(),events=[],presents=[],buffers=[],errors=[];
   const globals={navigator:{gpu:{async requestAdapter(){return adapter;},getPreferredCanvasFormat(){return 'rgba8unorm';}}},
     GPUTextureUsage:{COPY_SRC:1,COPY_DST:2,TEXTURE_BINDING:4,RENDER_ATTACHMENT:8},
-    GPUBufferUsage:{STORAGE:1,COPY_DST:2,COPY_SRC:4,MAP_READ:8},GPUMapMode:{READ:1},GPUShaderStage:{VERTEX:1,FRAGMENT:2}};
+    GPUBufferUsage:{STORAGE:1,COPY_DST:2,COPY_SRC:4,MAP_READ:8,INDEX:16},GPUMapMode:{READ:1},GPUShaderStage:{VERTEX:1,FRAGMENT:2}};
   const saved=new Map(Object.keys(globals).map(name=>[name,Object.getOwnPropertyDescriptor(globalThis,name)]));
   for(const [name,value] of Object.entries(globals))Object.defineProperty(globalThis,name,{configurable:true,writable:true,value});
   t.after(()=>{for(const [name,descriptor] of saved)if(descriptor)Object.defineProperty(globalThis,name,descriptor);else delete globalThis[name];});
@@ -41,7 +41,7 @@ async function graphicsFixture(t) {
     addEventListener(){},pushErrorScope(){},async popErrorScope(){return null;},destroy(){events.push('device-destroy');},
     createTexture(){return {createView(){return {};},destroy(){events.push('texture-destroy');}};},
     createBuffer({size}){const buffer={destroyed:false,async mapAsync(){events.push('map');await mapping.promise;},getMappedRange(){return new ArrayBuffer(size);},unmap(){events.push('unmap');},destroy(){this.destroyed=true;events.push('buffer-destroy');}};buffers.push(buffer);return buffer;},
-    createCommandEncoder(){return {beginRenderPass(){return {setPipeline(){},setBindGroup(){},setViewport(){},draw(){},end(){events.push('pass-end');}};},beginComputePass(){return {setPipeline(){},setBindGroup(){},dispatchWorkgroups(){},end(){events.push('compute-end');}};},copyTextureToBuffer(){events.push('copy-to-buffer');},finish(){events.push('finish');return {};}};},
+    createCommandEncoder(){return {beginRenderPass(){return {setPipeline(){},setBindGroup(){},setViewport(){},draw(){},setIndexBuffer(buffer){events.push(['index-buffer',buffer]);},drawIndexed(...args){events.push(['indexed',...args]);},end(){events.push('pass-end');}};},beginComputePass(){return {setPipeline(){},setBindGroup(){},dispatchWorkgroups(){},end(){events.push('compute-end');}};},copyTextureToBuffer(){events.push('copy-to-buffer');},finish(){events.push('finish');return {};}};},
     createShaderModule({code}){return {code,async getCompilationInfo(){return {messages:[]};}};},
     async createRenderPipelineAsync(descriptor){return {descriptor,getBindGroupLayout(){return {};}};},createPipelineLayout(value){return value;},createBindGroupLayout(value){return value;},createBindGroup(){return {};},createSampler(){return {};},
   };
@@ -67,6 +67,36 @@ async function pipelineFixture(t) {
   renderer.pipelineInputMemoEnabled=true;
   return {...f,renderer,targets,run:(state,kind='triangle-list',kinds=Array(8).fill(null),patch=false,output=targets)=>renderer.gpuPipeline(state,kind,output,kinds,patch)};
 }
+
+test('retained ordinary list indices preserve draw subsets and base vertices while other paths stay transient',async t=>{
+  const {host,events}=await graphicsFixture(t);await host.consume(packet([[1,definition]]));
+  const renderer=host.sessions.get(1n),ref={key:'1:2:1',version:1n};
+  renderer.resources.items.set(ref.key,{buffer:true,type:7,format:101,version:1n,subs:[{bytes:Uint8Array.of(3,0,2,0,1,0,0,0,5,0,4,0)}]});
+  renderer.state=()=>pipelineState();renderer.renderTargets=()=>({color:{view:{}}});
+  renderer.textureBindings=()=>({kinds:[],entries:[]});renderer.gpuPipeline=async()=>({getBindGroupLayout:()=>({})});
+  renderer.resources.packStreams=()=>({buffer:{},temporary:false});renderer.program=()=>({});renderer.dynamic=()=>{};
+  const draw=async(primitive,start,base)=>{
+    const values=[primitive,1,...Array(24).fill(0),1,101,base>>>0,1,0,6,start];
+    await renderer.draw({u64:()=>1n,targets:()=>({}),version:()=>ref,u32:()=>values.shift()});assert.equal(values.length,0);
+  };
+  assert.equal(renderer.retainedIndicesEnabled,false);await draw(4,1,7);
+  assert.equal(renderer.retainedIndexUses,0);assert.equal(renderer.resources.retainedIndexBuilds,0);
+  renderer.retainedIndicesEnabled=true;await draw(4,1,7);await draw(2,2,-4);
+  const indices=events.filter(row=>row[0]==='index-buffer'),calls=events.filter(row=>row[0]==='indexed');
+  assert.notEqual(indices[0][1],indices[1][1]);assert.equal(indices[1][1],indices[2][1]);
+  assert.deepEqual(calls.map(row=>row.slice(1)),[[3,1,0,7,0],[3,1,1,7,0],[2,1,2,-4,0]]);
+  assert.equal(renderer.retainedIndexUses,2);assert.equal(renderer.resources.retainedIndexHits,1);assert.equal(renderer.resources.retainedIndexBuilds,1);
+  await draw(3,1,7);await draw(6,1,7);
+  assert.equal(renderer.retainedIndexUses,2);assert.equal(renderer.resources.retainedIndexHits,1);
+  renderer.resources.packStreams=()=>{
+    for(const key of renderer.resources.packedStreams.keys())if(key.startsWith('indices:'))renderer.resources.releaseStreams(key);
+    return {buffer:{},temporary:false};
+  };
+  await draw(4,1,7);
+  assert.equal(renderer.retainedIndexUses,2);assert.equal(renderer.resources.retainedIndexHits,1);
+  assert.deepEqual(events.filter(row=>row[0]==='indexed').at(-1).slice(1),[3,1,0,7,0],
+    'shared-LRU eviction during stream packing uses a fresh transient index buffer');
+});
 
 test('pipeline reuse crosses uniform-only snapshots without walking immutable shader IR again',async t=>{
   const {renderer,run}=await pipelineFixture(t),state=pipelineState();let reads=0;

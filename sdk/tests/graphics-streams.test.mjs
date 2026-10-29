@@ -3,7 +3,7 @@ import test from 'node:test';
 import {Resources} from '../graphics/resources.js';
 import {Reader} from '../graphics/packet.js';
 
-const usage={STORAGE:1,COPY_DST:2};
+const usage={STORAGE:1,COPY_DST:2,INDEX:4};
 function words(values,tail=new Uint8Array()) {
   const bytes=new Uint8Array(values.length*4+tail.length),view=new DataView(bytes.buffer);
   values.forEach((value,index)=>view.setUint32(index*4,value,true));bytes.set(tail,values.length*4);
@@ -24,8 +24,8 @@ function fixture(t,{limit=128<<20,copy=true}={}) {
   }};
   const resources=new Resources(device,()=>{events.push(['flush']);pending.clear();});
   t.after(()=>resources.close());
-  const add=(slot,data,generation=1)=>{
-    const r=words([1,0,slot,generation,6,0,0,0,data.length,1,1,1,0,0,0,0,1,data.length,1,1,data.length,data.length,data.length,0,0]);
+  const add=(slot,data,generation=1,type=6,format=0)=>{
+    const r=words([1,0,slot,generation,type,format,0,0,data.length,1,1,1,0,0,0,0,1,data.length,1,1,data.length,data.length,data.length,0,0]);
     resources.create(r);r.end();
     const ref={epoch:1n,slot,generation,key:`1:${slot}:${generation}`,version:1n,stride:4};
     upload(ref,data);return ref;
@@ -70,6 +70,23 @@ test('same-version offset uploads invalidate dependent packs before mutation but
   upload(a,Uint8Array.of(77),0,2n);
   assert.equal(current.buffer.destroyed,true);
   assert.equal(resources.packStreams(binding([0,{...a,version:2n}])).buffer.bytes[128],77);
+});
+
+test('retained index expansion reuses storage and revokes it before same-version and partial upload mutations',t=>{
+  const {resources,events,pending,add,upload}=fixture(t),a=add(1,Uint8Array.of(0,0,1,0,255,255,3,0),1,7,101);
+  const first=resources.retainedIndexBuffer(a,101),again=resources.retainedIndexBuffer(a,101);
+  assert.equal(again.buffer,first.buffer);assert.equal(resources.retainedIndexBuilds,1);assert.equal(again.cacheHit,true);
+  assert.deepEqual([...new Uint32Array(first.buffer.bytes.buffer)],[0,1,65535,3]);
+  pending.add(first.buffer);events.length=0;upload(a,Uint8Array.of(9,0),2,1n);
+  assert.deepEqual(events.slice(0,2),[['flush'],['destroy',first.buffer.id]]);
+  const changed=resources.retainedIndexBuffer(a,101);assert.deepEqual([...new Uint32Array(changed.buffer.bytes.buffer)],[0,9,65535,3]);
+  pending.add(changed.buffer);
+  const invalid=words([1,0,1,1,1,0,0,0,8,16,2,2,1,4],Uint8Array.of(7,0,8,0));
+  assert.throws(()=>resources.upload(invalid),/upload bounds/);assert.equal(changed.buffer.destroyed,true);
+  const partial=resources.retainedIndexBuffer(a,101);assert.deepEqual([...new Uint32Array(partial.buffer.bytes.buffer)],[7,9,65535,3]);
+  resources.destroy(a);assert.equal(partial.buffer.destroyed,true);
+  const replacement=add(1,Uint8Array.of(4,0,5,0),2,7,101),fresh=resources.retainedIndexBuffer(replacement,101);
+  assert.notEqual(fresh.buffer,partial.buffer);assert.deepEqual([...new Uint32Array(fresh.buffer.bytes.buffer)],[4,5]);
 });
 
 test('destroy and resource-generation reuse cannot resurrect a stale packed buffer',t=>{

@@ -12,6 +12,11 @@ const compare=[null,'never','less','equal','less-equal','greater','not-equal','g
 const blendFactors={1:'zero',2:'one',3:'src',4:'one-minus-src',5:'src-alpha',6:'one-minus-src-alpha',7:'dst-alpha',8:'one-minus-dst-alpha',9:'dst',10:'one-minus-dst',11:'src-alpha-saturated',14:'constant',15:'one-minus-constant'};
 const stencil=[null,'keep','zero','replace','increment-clamp','decrement-clamp','invert','increment-wrap','decrement-wrap'];
 const topology={1:'point-list',2:'line-list',3:'line-strip',4:'triangle-list',5:'triangle-strip',6:'triangle-list'};
+function indexWords(source,at,elements,step) {
+  const view=new DataView(source.buffer,source.byteOffset+at,elements*step),indices=new Uint32Array(elements);
+  for(let i=0;i<elements;i++)indices[i]=step===2?view.getUint16(i*step,true):view.getUint32(i*step,true);
+  return indices;
+}
 
 async function checkedShader(device,code,label) {
   const module=device.createShaderModule({code,label}),info=await module.getCompilationInfo();
@@ -26,6 +31,7 @@ class DeviceRenderer {
     this.shaders=new Map();this.states=new Map();this.pipelines=new Map();this.domains=new Map();this.patches=new Map();this.temporary=[];
     this.pipelineInputs=new Map();this.pipelineInputMemoEnabled=false;this.programIdentities=new WeakMap();this.nextProgramIdentity=0;
     this.pipelineInputHits=0;this.pipelineInputMisses=0;this.pipelineBuilds=0;
+    this.retainedIndicesEnabled=false;this.retainedIndexUses=0;
     this.draws=0;this.presents=0;this.removed=false;this.gamma=new Float32Array(3*256);
     for(let c=0;c<3;c++)for(let i=0;i<256;i++)this.gamma[c*256+i]=i/255;
   }
@@ -172,22 +178,25 @@ class DeviceRenderer {
     else throw new Error(`D3D8 host: draw mode ${mode}`);
     require(topology[primitive],'primitive topology');
     const elements=primitive===1?count:primitive===2?2*count:primitive===3?count+1:primitive===4?3*count:count+2;
-    let indexBytes=null,first=data.first??0,baseVertex=0;
+    let indexBytes=null,retainedIndex=null,indexSource,indexAt,indexStep,first=data.first??0,baseVertex=0;
     if(mode===1||mode===3){
       const format=mode===1?b.indices?.format:data.format,source=mode===1?this.resources.get(b.indices).subs[0].bytes:data.indices;
       require(format===101||format===102,'index format');const step=format===101?2:4,at=mode===1?data.start*step:0;
-      require(at+elements*step<=source.length,'index range');const view=new DataView(source.buffer,source.byteOffset+at,elements*step),indices=new Uint32Array(elements);
-      for(let i=0;i<elements;i++)indices[i]=step===2?view.getUint16(i*step,true):view.getUint32(i*step,true);
-      indexBytes=indices;baseVertex=mode===1?b.indices.baseVertex|0:-data.min;
+      require(at+elements*step<=source.length,'index range');indexSource=source;indexAt=at;indexStep=step;
+      if(this.retainedIndicesEnabled && mode===1 && (primitive===1 || primitive===2 || primitive===4))retainedIndex=this.resources.retainedIndexBuffer(b.indices,format);
+      if(!retainedIndex)indexBytes=indexWords(source,at,elements,step);
+      baseVertex=mode===1?b.indices.baseVertex|0:-data.min;
     }
     if(primitive===6){const expanded=new Uint32Array(count*3);for(let i=0;i<count;i++)expanded.set(indexBytes?[indexBytes[0],indexBytes[i+1],indexBytes[i+2]]:[first,first+i+1,first+i+2],i*3);indexBytes=expanded;first=0;}
     const p=this.state(id),output=this.renderTargets(targets),textures=this.textureBindings(p,b),gpu=await this.gpuPipeline(p,topology[primitive],output,textures.kinds);
     const packed=this.resources.packStreams(b,data.bytes?{bytes:data.bytes,stride:data.stride}:null),raw=packed.buffer;if(packed.temporary)this.temporary.push(raw);
+    if(retainedIndex && this.resources.packedStreams.get(retainedIndex.key)!==retainedIndex){retainedIndex=null;indexBytes=indexWords(indexSource,indexAt,elements,indexStep);}
     const programs=this.program(p),state=this.scratch(stateBytes(p,programs.vertex,programs.pixel),GPUBufferUsage.STORAGE);
     const entries=[{binding:0,resource:{buffer:state}},{binding:1,resource:{buffer:raw}},...textures.entries];
     const encoder=this.encoder(),pass=encoder.beginRenderPass(this.passDescriptor(output));
     pass.setPipeline(gpu);pass.setBindGroup(0,this.device.createBindGroup({layout:gpu.getBindGroupLayout(0),entries}));this.dynamic(pass,p,output);
-    if(indexBytes){const index=this.scratch(new Uint8Array(indexBytes.buffer),GPUBufferUsage.INDEX);pass.setIndexBuffer(index,'uint32');pass.drawIndexed(indexBytes.length,1,0,baseVertex,0);}
+    if(retainedIndex){pass.setIndexBuffer(retainedIndex.buffer,'uint32');pass.drawIndexed(elements,1,data.start,baseVertex,0);this.retainedIndexUses++;if(retainedIndex.cacheHit)this.resources.retainedIndexHits++;}
+    else if(indexBytes){const index=this.scratch(new Uint8Array(indexBytes.buffer),GPUBufferUsage.INDEX);pass.setIndexBuffer(index,'uint32');pass.drawIndexed(indexBytes.length,1,0,baseVertex,0);}
     else pass.draw(elements,1,first,0);
     pass.end();this.draws++;
   }

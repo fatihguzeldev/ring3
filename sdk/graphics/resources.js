@@ -4,7 +4,7 @@ import {decodeColor,encodeColor,depthFormats} from './formats.js';
 const align=(n,a)=>(Math.ceil(n/a)*a);
 const packedEntries=1024,packedBytes=32*1024*1024;
 export class Resources {
-  constructor(device,beforeTextureWrite=()=>{},beforeBufferDestroy=beforeTextureWrite) { this.device=device;this.beforeTextureWrite=beforeTextureWrite;this.beforeBufferDestroy=beforeBufferDestroy;this.items=new Map();this.bytes=0;this.palettes=new Map();this.packedStreams=new Map();this.packedDependencies=new Map();this.packedBytes=0; }
+  constructor(device,beforeTextureWrite=()=>{},beforeBufferDestroy=beforeTextureWrite) { this.device=device;this.beforeTextureWrite=beforeTextureWrite;this.beforeBufferDestroy=beforeBufferDestroy;this.items=new Map();this.bytes=0;this.palettes=new Map();this.packedStreams=new Map();this.packedDependencies=new Map();this.packedBytes=0;this.retainedIndexHits=0;this.retainedIndexBuilds=0; }
   create(r) {
     const id=r.resource(),[type,format,usage,pool,width,height,depth,levels,samples,lockable,fvf,reserved]=r.words(12);
     require(!this.items.has(id.key)&&!reserved&&width&&height&&depth&&levels,'resource definition');
@@ -78,6 +78,19 @@ export class Resources {
     this.packedStreams.set(key,row);this.packedBytes+=length;
     for(const resource of row.dependencies){let keys=this.packedDependencies.get(resource);if(!keys){keys=new Set();this.packedDependencies.set(resource,keys);}keys.add(key);}
     return row;
+  }
+  retainedIndexBuffer(ref,format) {
+    const item=this.get(ref),source=item.subs[0].bytes,step=format===101?2:4,length=source.length/step*4;
+    if(item.type!==7 || item.format!==format || ![101,102].includes(format) || source.length%step || !length || length>packedBytes)return null;
+    const key=`indices:${ref.key}@${item.version}:${format}`,cached=this.packedStreams.get(key);
+    if(cached){this.packedStreams.delete(key);this.packedStreams.set(key,cached);cached.cacheHit=true;return cached;}
+    const view=new DataView(source.buffer,source.byteOffset,source.length),indices=new Uint32Array(source.length/step);
+    for(let i=0;i<indices.length;i++)indices[i]=step===2?view.getUint16(i*step,true):view.getUint32(i*step,true);
+    while(this.packedStreams.size>=packedEntries || this.packedBytes+length>packedBytes)this.releaseStreams(this.packedStreams.keys().next().value);
+    const row={key,buffer:this.buffer(new Uint8Array(indices.buffer),GPUBufferUsage.INDEX),length,dependencies:[ref.key],cacheHit:false};
+    this.packedStreams.set(key,row);this.packedBytes+=length;
+    let keys=this.packedDependencies.get(ref.key);if(!keys){keys=new Set();this.packedDependencies.set(ref.key,keys);}keys.add(key);
+    this.retainedIndexBuilds++;return row;
   }
   buffer(bytes,usage) {
     const b=this.device.createBuffer({size:Math.max(4,align(bytes.byteLength,4)),usage:usage|GPUBufferUsage.COPY_DST});
