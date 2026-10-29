@@ -4,7 +4,7 @@ import {decodeColor,encodeColor,depthFormats} from './formats.js';
 const align=(n,a)=>(Math.ceil(n/a)*a);
 const packedEntries=1024,packedBytes=32*1024*1024;
 export class Resources {
-  constructor(device,beforeTextureWrite=()=>{},beforeBufferDestroy=beforeTextureWrite) { this.device=device;this.beforeTextureWrite=beforeTextureWrite;this.beforeBufferDestroy=beforeBufferDestroy;this.items=new Map();this.bytes=0;this.palettes=new Map();this.packedStreams=new Map();this.packedDependencies=new Map();this.packedBytes=0;this.retainedIndexHits=0;this.retainedIndexBuilds=0; }
+  constructor(device,beforeTextureWrite=()=>{},beforeBufferDestroy=beforeTextureWrite) { this.device=device;this.beforeTextureWrite=beforeTextureWrite;this.beforeBufferDestroy=beforeBufferDestroy;this.items=new Map();this.bytes=0;this.palettes=new Map();this.packedStreams=new Map();this.packedDependencies=new Map();this.packedBytes=0;this.retainedIndexHits=0;this.retainedIndexBuilds=0;this.retainedIndexUpdates=0;this.retainedIndexUploadedBytes=0; }
   create(r) {
     const id=r.resource(),[type,format,usage,pool,width,height,depth,levels,samples,lockable,fvf,reserved]=r.words(12);
     require(!this.items.has(id.key)&&!reserved&&width&&height&&depth&&levels,'resource definition');
@@ -29,14 +29,30 @@ export class Resources {
     const ref=r.version(),item=this.get(ref),[index,offset,rowPitch,slicePitch,rowBytes,rows,slices,length]=r.words(8),bytes=r.take(length),sub=item.subs[index];
     require(sub&&ref.version>=item.version&&rowBytes<=rowPitch&&rows&&slices,'upload definition');
     // uploads may share a version or fail after an earlier row has already changed.
-    this.invalidateStreams(ref.key);
-    for(let z=0;z<slices;z++)for(let y=0;y<rows;y++){
-      const at=offset+z*slicePitch+y*rowPitch;require(at+rowBytes<=sub.bytes.length,'upload bounds');sub.bytes.set(bytes.subarray(z*slicePitch+y*rowPitch,z*slicePitch+y*rowPitch+rowBytes),at);
-    }
-    item.version=ref.version;sub.gpuDirty=false;
-    if(!item.buffer)this.flushTexture(item,index);
+    this.invalidateStreams(ref.key,true);
+    try {
+      for(let z=0;z<slices;z++)for(let y=0;y<rows;y++){
+        const at=offset+z*slicePitch+y*rowPitch;require(at+rowBytes<=sub.bytes.length,'upload bounds');sub.bytes.set(bytes.subarray(z*slicePitch+y*rowPitch,z*slicePitch+y*rowPitch+rowBytes),at);
+      }
+      item.version=ref.version;sub.gpuDirty=false;
+      if(!item.buffer)this.flushTexture(item,index);
+      else this.updateRetainedIndices(ref,index,offset,rowPitch,slicePitch,rowBytes,rows,slices);
+    } catch(error){this.invalidateStreams(ref.key);throw error;}
   }
-  invalidateStreams(resource) { for(const key of [...(this.packedDependencies.get(resource)??[])])this.releaseStreams(key); }
+  invalidateStreams(resource,keepIndices=false) { for(const key of [...(this.packedDependencies.get(resource)??[])])if(!keepIndices||!this.packedStreams.get(key)?.indexFormat)this.releaseStreams(key); }
+  updateRetainedIndices(ref,index,offset,rowPitch,slicePitch,rowBytes,rows,slices) {
+    for(const key of [...(this.packedDependencies.get(ref.key)??[])]) {
+      const cached=this.packedStreams.get(key);if(!cached?.indexFormat)continue;
+      if(index!==0){this.releaseStreams(key);continue;}
+      if(!rowBytes)continue;
+      const source=this.get(ref).subs[0].bytes;this.beforeBufferDestroy();
+      for(let z=0;z<slices;z++)for(let y=0;y<rows;y++) {
+        const at=offset+z*slicePitch+y*rowPitch,start=at&~3,end=align(at+rowBytes,4),part=source.subarray(start,Math.min(end,source.length));
+        const bytes=part.length===end-start?part:new Uint8Array(end-start);if(bytes!==part)bytes.set(part);
+        this.device.queue.writeBuffer(cached.buffer,start,bytes);this.retainedIndexUpdates++;this.retainedIndexUploadedBytes+=bytes.length;
+      }
+    }
+  }
   releaseStreams(key) {
     const row=this.packedStreams.get(key);if(!row)return;
     // an encoder can still reference this buffer; submit it before destruction.
@@ -80,17 +96,16 @@ export class Resources {
     return row;
   }
   retainedIndexBuffer(ref,format) {
-    const item=this.get(ref),source=item.subs[0].bytes,step=format===101?2:4,length=source.length/step*4;
+    const item=this.get(ref),source=item.subs[0].bytes,step=format===101?2:4,length=align(source.length,4);
     if(item.type!==7 || item.format!==format || ![101,102].includes(format) || source.length%step || !length || length>packedBytes)return null;
-    const key=`indices:${ref.key}@${item.version}:${format}`,cached=this.packedStreams.get(key);
+    const key=`indices:${ref.key}:${format}`,cached=this.packedStreams.get(key);
     if(cached){this.packedStreams.delete(key);this.packedStreams.set(key,cached);cached.cacheHit=true;return cached;}
-    const view=new DataView(source.buffer,source.byteOffset,source.length),indices=new Uint32Array(source.length/step);
-    for(let i=0;i<indices.length;i++)indices[i]=step===2?view.getUint16(i*step,true):view.getUint32(i*step,true);
     while(this.packedStreams.size>=packedEntries || this.packedBytes+length>packedBytes)this.releaseStreams(this.packedStreams.keys().next().value);
-    const row={key,buffer:this.buffer(new Uint8Array(indices.buffer),GPUBufferUsage.INDEX),length,dependencies:[ref.key],cacheHit:false};
+    this.beforeBufferDestroy();
+    const row={key,buffer:this.buffer(source,GPUBufferUsage.INDEX),indexFormat:format===101?'uint16':'uint32',length,dependencies:[ref.key],cacheHit:false};
     this.packedStreams.set(key,row);this.packedBytes+=length;
     let keys=this.packedDependencies.get(ref.key);if(!keys){keys=new Set();this.packedDependencies.set(ref.key,keys);}keys.add(key);
-    this.retainedIndexBuilds++;return row;
+    this.retainedIndexBuilds++;this.retainedIndexUploadedBytes+=length;return row;
   }
   buffer(bytes,usage) {
     const b=this.device.createBuffer({size:Math.max(4,align(bytes.byteLength,4)),usage:usage|GPUBufferUsage.COPY_DST});

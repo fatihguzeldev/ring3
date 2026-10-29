@@ -17,7 +17,7 @@ function fixture(t,{limit=128<<20,copy=true}={}) {
   const device={limits:{maxStorageBufferBindingSize:limit},queue:{writeBuffer(buffer,offset,bytes){
     events.push(['write',buffer.id,bytes.byteLength]);
     if(failWrite){failWrite=false;throw new Error('write failed');}
-    if(copy)buffer.bytes=new Uint8Array(bytes.buffer,bytes.byteOffset,bytes.byteLength).slice();
+    if(copy){buffer.bytes??=new Uint8Array(buffer.size);buffer.bytes.set(new Uint8Array(bytes.buffer,bytes.byteOffset,bytes.byteLength),offset);}
   }},createBuffer({size}){
     const buffer={id:buffers.length,size,destroyed:false,destroyCalls:0,destroy(){assert.equal(pending.has(this),false,'submit queued references before destroying a packed buffer');this.destroyCalls++;this.destroyed=true;events.push(['destroy',this.id]);}};
     buffers.push(buffer);return buffer;
@@ -72,21 +72,27 @@ test('same-version offset uploads invalidate dependent packs before mutation but
   assert.equal(resources.packStreams(binding([0,{...a,version:2n}])).buffer.bytes[128],77);
 });
 
-test('retained index expansion reuses storage and revokes it before same-version and partial upload mutations',t=>{
-  const {resources,events,pending,add,upload}=fixture(t),a=add(1,Uint8Array.of(0,0,1,0,255,255,3,0),1,7,101);
+test('raw retained indices update aligned incoming bytes after flushing and revoke failed shadow or GPU updates',t=>{
+  const {resources,events,pending,add,upload,failNextWrite}=fixture(t),a=add(1,Uint8Array.of(0,0,1,0,255,255,3,0),1,7,101);
   const first=resources.retainedIndexBuffer(a,101),again=resources.retainedIndexBuffer(a,101);
   assert.equal(again.buffer,first.buffer);assert.equal(resources.retainedIndexBuilds,1);assert.equal(again.cacheHit,true);
-  assert.deepEqual([...new Uint32Array(first.buffer.bytes.buffer)],[0,1,65535,3]);
+  assert.equal(first.indexFormat,'uint16');assert.deepEqual([...new Uint16Array(first.buffer.bytes.buffer)],[0,1,65535,3]);
   pending.add(first.buffer);events.length=0;upload(a,Uint8Array.of(9,0),2,1n);
-  assert.deepEqual(events.slice(0,2),[['flush'],['destroy',first.buffer.id]]);
-  const changed=resources.retainedIndexBuffer(a,101);assert.deepEqual([...new Uint32Array(changed.buffer.bytes.buffer)],[0,9,65535,3]);
+  assert.deepEqual(events.slice(0,2),[['flush'],['write',first.buffer.id,4]]);assert.equal(first.buffer.destroyed,false);
+  const changed=resources.retainedIndexBuffer(a,101);assert.equal(changed.buffer,first.buffer);
+  assert.deepEqual([...new Uint16Array(changed.buffer.bytes.buffer)],[0,9,65535,3]);assert.equal(resources.retainedIndexBuilds,1);
+  assert.equal(resources.retainedIndexUpdates,1);assert.equal(resources.retainedIndexUploadedBytes,12);
   pending.add(changed.buffer);
   const invalid=words([1,0,1,1,1,0,0,0,8,16,2,2,1,4],Uint8Array.of(7,0,8,0));
   assert.throws(()=>resources.upload(invalid),/upload bounds/);assert.equal(changed.buffer.destroyed,true);
-  const partial=resources.retainedIndexBuffer(a,101);assert.deepEqual([...new Uint32Array(partial.buffer.bytes.buffer)],[7,9,65535,3]);
-  resources.destroy(a);assert.equal(partial.buffer.destroyed,true);
-  const replacement=add(1,Uint8Array.of(4,0,5,0),2,7,101),fresh=resources.retainedIndexBuffer(replacement,101);
-  assert.notEqual(fresh.buffer,partial.buffer);assert.deepEqual([...new Uint32Array(fresh.buffer.bytes.buffer)],[4,5]);
+  const partial=resources.retainedIndexBuffer(a,101);assert.deepEqual([...new Uint16Array(partial.buffer.bytes.buffer)],[7,9,65535,3]);
+  failNextWrite();assert.throws(()=>upload(a,Uint8Array.of(6,0),0,2n),/write failed/);assert.equal(partial.buffer.destroyed,true);
+  const recovered=resources.retainedIndexBuffer(a,101);assert.deepEqual([...new Uint16Array(recovered.buffer.bytes.buffer)],[6,9,65535,3]);
+  resources.destroy(a);assert.equal(recovered.buffer.destroyed,true);
+  const replacement=add(1,Uint8Array.of(4,0,5,0,6,0),2,7,101),fresh=resources.retainedIndexBuffer(replacement,101);
+  assert.notEqual(fresh.buffer,recovered.buffer);upload(replacement,Uint8Array.of(9,0),4,1n);
+  assert.equal(resources.retainedIndexBuffer(replacement,101).buffer,fresh.buffer);
+  assert.deepEqual([...fresh.buffer.bytes],[4,0,5,0,9,0,0,0]);
 });
 
 test('destroy and resource-generation reuse cannot resurrect a stale packed buffer',t=>{

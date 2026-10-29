@@ -195,7 +195,7 @@ class DeviceRenderer {
     const entries=[{binding:0,resource:{buffer:state}},{binding:1,resource:{buffer:raw}},...textures.entries];
     const encoder=this.encoder(),pass=encoder.beginRenderPass(this.passDescriptor(output));
     pass.setPipeline(gpu);pass.setBindGroup(0,this.device.createBindGroup({layout:gpu.getBindGroupLayout(0),entries}));this.dynamic(pass,p,output);
-    if(retainedIndex){pass.setIndexBuffer(retainedIndex.buffer,'uint32');pass.drawIndexed(elements,1,data.start,baseVertex,0);this.retainedIndexUses++;if(retainedIndex.cacheHit)this.resources.retainedIndexHits++;}
+    if(retainedIndex){pass.setIndexBuffer(retainedIndex.buffer,retainedIndex.indexFormat);pass.drawIndexed(elements,1,data.start,baseVertex,0);this.retainedIndexUses++;if(retainedIndex.cacheHit)this.resources.retainedIndexHits++;}
     else if(indexBytes){const index=this.scratch(new Uint8Array(indexBytes.buffer),GPUBufferUsage.INDEX);pass.setIndexBuffer(index,'uint32');pass.drawIndexed(indexBytes.length,1,0,baseVertex,0);}
     else pass.draw(elements,1,first,0);
     pass.end();this.draws++;

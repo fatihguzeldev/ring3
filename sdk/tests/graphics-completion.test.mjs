@@ -41,7 +41,7 @@ async function graphicsFixture(t) {
     addEventListener(){},pushErrorScope(){},async popErrorScope(){return null;},destroy(){events.push('device-destroy');},
     createTexture(){return {createView(){return {};},destroy(){events.push('texture-destroy');}};},
     createBuffer({size}){const buffer={destroyed:false,async mapAsync(){events.push('map');await mapping.promise;},getMappedRange(){return new ArrayBuffer(size);},unmap(){events.push('unmap');},destroy(){this.destroyed=true;events.push('buffer-destroy');}};buffers.push(buffer);return buffer;},
-    createCommandEncoder(){return {beginRenderPass(){return {setPipeline(){},setBindGroup(){},setViewport(){},draw(){},setIndexBuffer(buffer){events.push(['index-buffer',buffer]);},drawIndexed(...args){events.push(['indexed',...args]);},end(){events.push('pass-end');}};},beginComputePass(){return {setPipeline(){},setBindGroup(){},dispatchWorkgroups(){},end(){events.push('compute-end');}};},copyTextureToBuffer(){events.push('copy-to-buffer');},finish(){events.push('finish');return {};}};},
+    createCommandEncoder(){return {beginRenderPass(){return {setPipeline(){},setBindGroup(){},setViewport(){},draw(){},setIndexBuffer(buffer,format){events.push(['index-buffer',buffer,format]);},drawIndexed(...args){events.push(['indexed',...args]);},end(){events.push('pass-end');}};},beginComputePass(){return {setPipeline(){},setBindGroup(){},dispatchWorkgroups(){},end(){events.push('compute-end');}};},copyTextureToBuffer(){events.push('copy-to-buffer');},finish(){events.push('finish');return {};}};},
     createShaderModule({code}){return {code,async getCompilationInfo(){return {messages:[]};}};},
     async createRenderPipelineAsync(descriptor){return {descriptor,getBindGroupLayout(){return {};}};},createPipelineLayout(value){return value;},createBindGroupLayout(value){return value;},createBindGroup(){return {};},createSampler(){return {};},
   };
@@ -84,6 +84,7 @@ test('retained ordinary list indices preserve draw subsets and base vertices whi
   renderer.retainedIndicesEnabled=true;await draw(4,1,7);await draw(2,2,-4);
   const indices=events.filter(row=>row[0]==='index-buffer'),calls=events.filter(row=>row[0]==='indexed');
   assert.notEqual(indices[0][1],indices[1][1]);assert.equal(indices[1][1],indices[2][1]);
+  assert.deepEqual(indices.map(row=>row[2]),['uint32','uint16','uint16']);
   assert.deepEqual(calls.map(row=>row.slice(1)),[[3,1,0,7,0],[3,1,1,7,0],[2,1,2,-4,0]]);
   assert.equal(renderer.retainedIndexUses,2);assert.equal(renderer.resources.retainedIndexHits,1);assert.equal(renderer.resources.retainedIndexBuilds,1);
   await draw(3,1,7);await draw(6,1,7);
