@@ -269,6 +269,8 @@ impl EngineInstance {
             self.windows_memory =
                 empty_memory.expect("initial rollback prepared empty Windows memory");
         }
+        #[cfg(feature = "external-cpu")]
+        self.forget_unloaded_external_port_gates();
         Ok(())
     }
 }

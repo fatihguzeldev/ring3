@@ -41,6 +41,19 @@ pub(in crate::process) struct PortGates32 {
 }
 
 impl EngineInstance {
+    pub(in crate::process) fn forget_unloaded_external_port_gates(&mut self) {
+        // successful unload has retired the registry and mappings before any address reuse.
+        let mut gates = std::mem::take(&mut self.external_port_gates.gates);
+        gates.retain(|entry| {
+            entry.cleanup.is_some()
+                || self.external_gate_is_owned(entry.gate)
+                || self.memory.as_ref().is_none_or(|memory| {
+                    memory.mapping_version_at(entry.patch.address) == Ok(entry.patch.mapping)
+                })
+        });
+        self.external_port_gates.gates = gates;
+    }
+
     fn external_gate_is_system(&self, gate: GateSpec) -> bool {
         self.loaded_windows_modules()
             .any(|module| module.is_system() && module.gates().contains(&gate))

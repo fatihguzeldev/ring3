@@ -1099,6 +1099,88 @@ fn external_port_gate_mode_patches_rx_and_lazily_owns_new_module_gates() {
 
 #[cfg(feature = "external-cpu")]
 #[test]
+fn external_port_gate_unload_forgets_only_retired_mappings_before_same_va_reload() {
+    let mut engine = fixture();
+    engine.external_cpu_memory_pinned = true;
+    let (_, initial) = engine.set_external_cpu_gate_mode(1).unwrap();
+    engine.register_user32_module(0x71000000).unwrap();
+    engine.load_library_module("user32.dll", None).unwrap();
+    let first = engine
+        .module_gates()
+        .unwrap()
+        .into_iter()
+        .find(|gate| gate.entry.0 == 0x71000000)
+        .unwrap();
+    assert_eq!(
+        engine.external_cpu_lookup_gate(first.entry.0).unwrap(),
+        Some((first.id, false))
+    );
+    assert_eq!(
+        engine.external_cpu_gate_match(first.entry.0),
+        Some((first.id, true))
+    );
+    let mapping = engine
+        .memory()
+        .unwrap()
+        .mapping_version_at(first.entry)
+        .unwrap();
+    assert_eq!(engine.external_cpu_gate_mode().unwrap()[1], initial + 1);
+    engine.free_library_module(0x71000000).unwrap();
+    assert!(
+        engine
+            .memory()
+            .unwrap()
+            .mapping_version_at(first.entry)
+            .is_err()
+    );
+    assert_eq!(
+        engine.external_cpu_gate_mode().unwrap()[..3],
+        [1, initial, 0]
+    );
+    let stable = gate(&engine, WindowsApi32::GetLastError.id());
+    assert_eq!(external_gate_bytes(&engine, stable), [0xe6, 0xe1]);
+    engine.register_d3d8_module(0x71000000).unwrap();
+    engine.load_library_module("d3d8.dll", None).unwrap();
+    let replacement = engine
+        .module_gates()
+        .unwrap()
+        .into_iter()
+        .find(|gate| gate.entry == first.entry)
+        .unwrap();
+    assert_ne!(replacement.id, first.id);
+    assert_ne!(
+        engine
+            .memory()
+            .unwrap()
+            .mapping_version_at(replacement.entry)
+            .unwrap(),
+        mapping
+    );
+    assert_eq!(
+        external_gate_bytes(&engine, replacement.entry.0),
+        [0x0f, 0x0b]
+    );
+    assert_eq!(
+        engine
+            .external_cpu_lookup_gate(replacement.entry.0)
+            .unwrap(),
+        Some((replacement.id, false))
+    );
+    assert_eq!(
+        engine.external_cpu_gate_match(replacement.entry.0),
+        Some((replacement.id, true))
+    );
+    assert_eq!(engine.external_cpu_gate_mode().unwrap()[1], initial + 1);
+    assert_eq!(engine.set_external_cpu_gate_mode(0).unwrap(), (0, 0));
+    assert_eq!(
+        external_gate_bytes(&engine, replacement.entry.0),
+        [0x0f, 0x0b]
+    );
+    assert_eq!(external_gate_bytes(&engine, stable), [0x0f, 0x0b]);
+}
+
+#[cfg(feature = "external-cpu")]
+#[test]
 fn external_port_gate_restore_rejects_modified_bytes_without_partial_restore() {
     use crate::memory::{PageRange, Permissions};
     let mut engine = fixture();
