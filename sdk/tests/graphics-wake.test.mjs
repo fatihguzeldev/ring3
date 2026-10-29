@@ -78,6 +78,8 @@ function borrowedBatchFixture({sealed=true,grow=false,pointer=8192n,capability=1
 
 test('legacy sealed batches retain chunked byte parity without borrowed capability',async()=>{
   const f=borrowedBatchFixture({capability:0n});
+  assert.equal(f.transport.borrowedBatches,false);
+  f.transport.configureBorrowedBatches(true,{paused:true,open:false});
   await f.transport.output();
   assert.deepEqual(new Uint8Array(f.messages[0].packet),f.bytes);
   assert.equal(f.calls.filter(([operation])=>operation==='d3d8_read_batch').length,3);
@@ -86,6 +88,7 @@ test('legacy sealed batches retain chunked byte parity without borrowed capabili
 test('borrowed batch info and seal replies copy once into an owned transferable packet',async()=>{
   for(const sealed of [true,false]) {
     const f=borrowedBatchFixture({sealed}),t=f.transport;
+    t.configureBorrowedBatches(true,{paused:true,open:false});
     if(!sealed)t.requestFlush();
     await t.output();
     const packet=new Uint8Array(f.messages[0].packet);
@@ -107,6 +110,7 @@ test('borrowed batch info and seal replies copy once into an owned transferable 
 test('known borrowed capability rejects invalid native spans without a chunk fallback',async()=>{
   for(const pointer of [0n,65000n,0x100000000n]) {
     const f=borrowedBatchFixture({pointer});
+    f.transport.configureBorrowedBatches(true,{paused:true,open:false});
     await assert.rejects(f.transport.output(),/borrowed|span|pointer/i);
     assert.equal(f.messages.length,0);assert.equal(f.transport.pending,null);
     assert.equal(f.calls.some(([operation])=>operation==='d3d8_read_batch'),false);
@@ -115,6 +119,7 @@ test('known borrowed capability rejects invalid native spans without a chunk fal
 
 test('borrowed batches acquire the current memory buffer after native growth',async()=>{
   const f=borrowedBatchFixture({grow:true,pointer:66000n});
+  f.transport.configureBorrowedBatches(true,{paused:true,open:false});
   await f.transport.output();
   assert.equal(f.previousBuffer.byteLength,0);
   assert.deepEqual(new Uint8Array(f.messages[0].packet),f.bytes);
