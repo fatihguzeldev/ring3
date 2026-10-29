@@ -10,7 +10,7 @@ import {image as moduleImage} from '../../../loader/modules/wasm/fixtures/runtim
 
 const [enginePath, reportPath, permissionText = '1', portText = ''] = process.argv.slice(2);
 assert(enginePath && reportPath, 'usage: v86.mjs imported-engine.wasm fresh-report.json');
-assert(['', 'port', 'inline'].includes(portText));
+assert(['', 'port', 'inline', 'simd'].includes(portText));
 const deniedPermission = Number(permissionText);
 assert([0,1].includes(deniedPermission));
 const hash = bytes => createHash('sha256').update(bytes).digest('hex');
@@ -20,7 +20,7 @@ assert.equal(hash(image), '7c0451977a0818d5f4905a2b00f3a3bae63b9449ef22775ea003e
 const cpuBytes = readFileSync(new URL('../../../../../sdk/runtime/v86/vendor/v86.wasm', import.meta.url));
 const report = {complete: false, engineSha256: artifact.sha256, cpuSha256: hash(cpuBytes),
   scope: 'actual unmodified v86 CPU, shared RAM, authored PE with four Ring3 Windows calls; no game/FPS claim',
-  portControls:portText==='port',inlineControls:portText==='inline',calls: [], runs: [], ownCpuCalls: 0};
+  portControls:portText==='port',inlineControls:portText==='inline',simdControls:portText==='simd',calls: [], runs: [], ownCpuCalls: 0};
 writeFileSync(reportPath, JSON.stringify(report), {flag: 'wx'});
 const save = () => writeFileSync(reportPath, JSON.stringify(report, (_key, value) =>
   typeof value === 'bigint' ? String(value) : value, 2) + '\n');
@@ -240,7 +240,33 @@ try {
     assert.equal(read(dataAddress),3,'same-VA remap executes new canonical bytes');
     report.hostCodeInvalidation={clears,finalizedModules:cache.stats().v86.finalizedModules};
   } finally {cache.cpu.jit_clear_cache=clear;}
-  if(portText==='inline') {
+  if(portText==='simd') {
+    stage='dense read-only PTE validation';
+    const dense=0x6c0000,pc=0x600d00,code=[];
+    engine.ok('map',dense,4,3);
+    for(let index=0;index<4;index++)code.push(0xa1,...u32(dense+index*4096));
+    code.push(0xb8,...u32(gate),0xff,0xe0);upload(pc,code);
+    const version=()=>{engine.ok('component_cpu_view',...KEY);return engine.resultView(128).getBigUint64(72,true);};
+    report.densePteValidation=[];
+    for(let lane=0;lane<4;lane++) {
+      new DataView(memory.buffer).setUint32(engine.base+48,pc,true);cache.import();
+      const run=cache.execute(cache.select());assert.equal(run.reason,8);assert.equal(cache.dirtyPending,true);
+      const data=new DataView(memory.buffer),offset=cache.tables.pte((dense>>>12)+lane);
+      const original=data.getUint32(offset,true);assert.equal(original&64,0,'the actual dense reads are not dirty');
+      data.setUint32(offset,original^2,true);
+      const evidence=Buffer.from(new Uint8Array(memory.buffer,cache.tables.ram+DIRECTORY,4096*1025));
+      const before=version(),dirtyBefore=cache.dirtyPages;
+      assert.throws(()=>cache.publish(),error=>error.operation==='component_cpu_collect_dirty');
+      assert.equal(cache.dirtyPending,true);assert.equal(version(),before);
+      assert.deepEqual(Buffer.from(new Uint8Array(memory.buffer,cache.tables.ram+DIRECTORY,4096*1025)),evidence,
+        'a malformed zero-dirty lane preserves every A/D bit');
+      new DataView(memory.buffer).setUint32(offset,original,true);cache.publish();
+      assert.equal(cache.dirtyPending,false);assert.equal(version(),before);
+      assert.equal(cache.dirtyPages,dirtyBefore);assert(cache.tables.lastDirtyScanCount>=4);
+      assert.equal(new DataView(memory.buffer).getUint32(cache.tables.ram+DIRECTORY+(dense>>>22)*4,true)&32,0);
+      report.densePteValidation.push({lane,before,after:version(),scannedPtes:cache.tables.lastDirtyScanCount});save();
+    }
+  } else if(portText==='inline') {
     stage='inline native API continuation';
     engine.ok('protect',0x601000,1,3);
     const entries=new Map();

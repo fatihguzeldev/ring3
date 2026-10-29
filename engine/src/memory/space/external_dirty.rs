@@ -29,6 +29,27 @@ fn put(bytes: &mut [u8], offset: usize, value: u32) {
     bytes[offset..offset + 4].copy_from_slice(&value.to_le_bytes());
 }
 
+#[cfg(all(target_arch = "wasm32", target_feature = "simd128"))]
+fn dirty_quad(actual: &[u8; 16], expected: &[u32; 4]) -> Result<u32, MemoryError> {
+    use std::arch::wasm32::*;
+    let actual = i32x4(
+        word(actual, 0) as i32,
+        word(actual, 4) as i32,
+        word(actual, 8) as i32,
+        word(actual, 12) as i32,
+    );
+    let expected = i32x4(
+        expected[0] as i32,
+        expected[1] as i32,
+        expected[2] as i32,
+        expected[3] as i32,
+    );
+    if !i32x4_all_true(i32x4_eq(v128_and(actual, i32x4_splat(!96)), expected)) {
+        return Err(MemoryError::InvalidRange);
+    }
+    Ok(i32x4_bitmask(i32x4_ne(v128_and(actual, i32x4_splat(64)), i32x4_splat(0))) as u32)
+}
+
 impl Collector {
     fn new(memory: &AddressSpace) -> Result<Self, MemoryError> {
         let mut slots = Vec::new();
@@ -118,8 +139,8 @@ impl Collector {
             leaves: 0,
             directories: 0,
         };
-        for (group, &directories) in self.directories.iter().enumerate() {
-            let mut remaining = directories;
+        for group in 0..self.directories.len() {
+            let mut remaining = self.directories[group];
             while remaining != 0 {
                 let directory = group * 32 + remaining.trailing_zeros() as usize;
                 remaining &= remaining - 1;
@@ -135,7 +156,34 @@ impl Collector {
                 for index in directory * 32..directory * 32 + 32 {
                     let mut pages = self.occupied[index];
                     while pages != 0 {
-                        let page = index * 32 + pages.trailing_zeros() as usize;
+                        let within = pages.trailing_zeros() as usize;
+                        let page = index * 32 + within;
+                        #[cfg(all(target_arch = "wasm32", target_feature = "simd128"))]
+                        if within % 4 == 0 && pages & (15u32 << within) == 15u32 << within {
+                            if page < PRIVATE_PAGE + 8 && page + 4 > PRIVATE_PAGE {
+                                return Err(MemoryError::InvalidRange);
+                            }
+                            let offset = 4096 + page * 4;
+                            let actual = tables
+                                .get(offset..offset + 16)
+                                .ok_or(MemoryError::InvalidRange)?;
+                            let expected = self
+                                .expected
+                                .get(page..page + 4)
+                                .ok_or(MemoryError::InvalidRange)?;
+                            let mut dirty = dirty_quad(
+                                actual.try_into().map_err(|_| MemoryError::InvalidRange)?,
+                                expected.try_into().map_err(|_| MemoryError::InvalidRange)?,
+                            )?;
+                            observation.leaves += 4;
+                            pages &= !(15u32 << within);
+                            while dirty != 0 {
+                                let lane = dirty.trailing_zeros() as usize;
+                                dirty &= dirty - 1;
+                                self.stage_dirty(offset + lane * 4, self.expected[page + lane]);
+                            }
+                            continue;
+                        }
                         pages &= pages - 1;
                         observation.leaves += 1;
                         if (PRIVATE_PAGE..PRIVATE_PAGE + 8).contains(&page) {
@@ -148,19 +196,24 @@ impl Collector {
                             return Err(MemoryError::InvalidRange);
                         }
                         if pte & 64 != 0 {
-                            self.dirty_ptes.push(offset as u32);
-                            let slot = ((expected & !4095) - BACKING_PHYSICAL) >> 12;
-                            let bit = 1u32 << (slot % 32);
-                            if self.seen_slots[slot as usize / 32] & bit == 0 {
-                                self.seen_slots[slot as usize / 32] |= bit;
-                                self.slots.push(slot);
-                            }
+                            self.stage_dirty(offset, expected);
                         }
                     }
                 }
             }
         }
         Ok(observation)
+    }
+
+    #[inline]
+    fn stage_dirty(&mut self, offset: usize, expected: u32) {
+        self.dirty_ptes.push(offset as u32);
+        let slot = ((expected & !4095) - BACKING_PHYSICAL) >> 12;
+        let bit = 1u32 << (slot % 32);
+        if self.seen_slots[slot as usize / 32] & bit == 0 {
+            self.seen_slots[slot as usize / 32] |= bit;
+            self.slots.push(slot);
+        }
     }
 
     fn clear_observed(&self, tables: &mut [u8], observation: &Observation) {
@@ -600,6 +653,103 @@ mod tests {
             .unwrap();
         assert_eq!(word(&written, 20), 1);
         assert_eq!(memory.mappings[1], mapping);
+    }
+
+    #[test]
+    fn external_dirty_collect_dense_quads_preserve_sparse_counts_and_alias_deduplication() {
+        let mut memory = AddressSpace::new(6).unwrap();
+        let shared = memory.allocate_shared_pages(1, &[7]).unwrap();
+        for (page, permissions) in [
+            (4, Permissions::READ_WRITE),
+            (5, Permissions::READ_EXECUTE),
+            (9, Permissions::READ_WRITE),
+        ] {
+            memory
+                .map_shared_pages(range(page * 4096), &shared, 0, permissions, false)
+                .unwrap();
+        }
+        for (page, permissions) in [
+            (6, Permissions::NONE),
+            (7, Permissions::READ_WRITE),
+            (1024, Permissions::READ_WRITE),
+        ] {
+            memory.map_zeroed(range(page * 4096), permissions).unwrap();
+        }
+        track(&mut memory);
+        let mut bytes = tables(&memory);
+        for page in [4, 5, 7, 9] {
+            access(&mut bytes, page, true);
+        }
+        for page in [6, 1024] {
+            access(&mut bytes, page, false);
+        }
+        let result = memory
+            .collect_external_dirty(memory.external_mapping_epoch, &mut bytes)
+            .unwrap();
+        assert_eq!(
+            word(&result, 20),
+            2,
+            "three dirty aliases still publish one physical slot"
+        );
+        assert_eq!(
+            word(&result, 32),
+            6,
+            "dense and partial groups count occupied leaves only"
+        );
+        assert_eq!(word(&result, 36), 2);
+        assert_eq!(word(&result, 24), 1);
+        assert_eq!(word(&result, 28), 1);
+        for page in [4, 5, 6, 7, 9, 1024] {
+            assert_eq!(word(&bytes, pte(page)) & 64, 0);
+        }
+        assert_eq!(word(&bytes, 0) & 32, 0);
+        assert_eq!(word(&bytes, 4) & 32, 0);
+    }
+
+    #[test]
+    fn external_dirty_collect_dense_quad_validates_every_lane_before_publication() {
+        let mut memory = AddressSpace::new(4).unwrap();
+        for page in 4..8 {
+            memory
+                .map_zeroed(range(page * 4096), Permissions::READ_WRITE)
+                .unwrap();
+        }
+        track(&mut memory);
+        for dirty in [false, true] {
+            for lane in 0..4 {
+                let mut bytes = tables(&memory);
+                for page in 4..8 {
+                    access(&mut bytes, page, dirty);
+                }
+                let offset = pte(4 + lane);
+                let original = word(&bytes, offset);
+                put(&mut bytes, offset, original ^ 2);
+                let before = bytes.clone();
+                let version = memory.transaction_version();
+                assert_eq!(
+                    memory.collect_external_dirty(memory.external_mapping_epoch, &mut bytes),
+                    Err(MemoryError::InvalidRange),
+                    "dirty={dirty} lane={lane}"
+                );
+                assert_eq!(
+                    bytes, before,
+                    "malformed read-only and dirty leaves preserve all A/D evidence"
+                );
+                assert_eq!(memory.transaction_version(), version);
+                put(&mut bytes, offset, original);
+                let retry = memory
+                    .collect_external_dirty(memory.external_mapping_epoch, &mut bytes)
+                    .unwrap();
+                assert_eq!(word(&retry, 20), if dirty { 4 } else { 0 });
+                assert_eq!(word(&retry, 32), 4);
+                assert_eq!(word(&retry, 36), 1);
+                assert_eq!(word(&retry, 28), 1);
+                for page in 4..8 {
+                    assert_eq!(word(&bytes, pte(page)) & 64, 0);
+                }
+                assert_eq!(word(&bytes, 0) & 32, 0);
+            }
+        }
     }
 
     #[test]
