@@ -34,6 +34,26 @@ impl<'a> Encoder<'a> {
         self.bytes(&value.to_le_bytes())
     }
     pub fn words(&mut self, values: &[u32]) -> Result<(), CodecError> {
+        if values.is_empty() {
+            return Ok(());
+        }
+        if self.output.is_none() {
+            if let Some(length) = values
+                .len()
+                .checked_mul(4)
+                .and_then(|bytes| self.length.checked_add(bytes))
+                .filter(|length| *length <= u32::MAX as usize)
+            {
+                self.length = length;
+                return Ok(());
+            }
+            // preserve the word-by-word counter position when a later word overflows.
+            self.length += values
+                .len()
+                .min((u32::MAX as usize).saturating_sub(self.length) / 4)
+                * 4;
+            return Err(CodecError::Length);
+        }
         for value in values {
             self.u32(*value)?;
         }
@@ -76,5 +96,50 @@ impl<'a> Encoder<'a> {
             return Err(CodecError::InvalidCommand);
         }
         self.words(&[rect.left, rect.top, rect.right, rect.bottom])
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn word_count_matches_little_endian_output_and_empty_input() {
+        let words = [0, 0x12345678, u32::MAX];
+        let mut bytes = Vec::new();
+        let mut output = Encoder::new(Some(&mut bytes));
+        output.words(&[]).unwrap();
+        output.words(&words).unwrap();
+        assert_eq!(output.length, 12);
+        let mut count = Encoder::new(None);
+        count.words(&[]).unwrap();
+        count.words(&words).unwrap();
+        assert_eq!(count.length, output.length);
+        assert_eq!(
+            bytes,
+            [0, 0, 0, 0, 0x78, 0x56, 0x34, 0x12, 255, 255, 255, 255]
+        );
+    }
+
+    #[test]
+    fn word_count_preserves_partial_length_and_output_on_overflow() {
+        for initial in [
+            u32::MAX as usize - 12,
+            u32::MAX as usize - 7,
+            u32::MAX as usize - 3,
+            u32::MAX as usize,
+            usize::MAX,
+        ] {
+            let mut count = Encoder::new(None);
+            count.length = initial;
+            let mut bytes = Vec::new();
+            let mut output = Encoder::new(Some(&mut bytes));
+            output.length = initial;
+            assert_eq!(count.words(&[]), Ok(()));
+            assert_eq!(count.length, initial);
+            assert_eq!(count.words(&[1, 2, 3]), output.words(&[1, 2, 3]));
+            assert_eq!(count.length, output.length);
+            assert_eq!(bytes.len(), count.length - initial);
+        }
     }
 }
