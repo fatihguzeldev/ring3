@@ -24,6 +24,7 @@ class DeviceRenderer {
   constructor(host,epoch) {
     this.host=host;this.device=host.device;this.epoch=epoch;this.stream=new PacketStream();this.pendingEncoder=null;this.accepting=false;this.resources=new Resources(this.device,()=>this.flush());
     this.shaders=new Map();this.states=new Map();this.pipelines=new Map();this.domains=new Map();this.patches=new Map();this.temporary=[];
+    this.pipelineInputs=new Map();this.pipelineInputMemoEnabled=true;this.programIdentities=new WeakMap();this.nextProgramIdentity=0;
     this.draws=0;this.presents=0;this.removed=false;this.gamma=new Float32Array(3*256);
     for(let c=0;c<3;c++)for(let i=0;i<256;i++)this.gamma[c*256+i]=i/255;
   }
@@ -82,6 +83,17 @@ class DeviceRenderer {
   }
   state(id){const p=this.states.get(id);require(p,`unknown pipeline snapshot ${id}`);return p;}
   program(p){const vertex=this.shaders.get(p.vertexShader),pixel=this.shaders.get(p.pixelShader);require(!p.pixelShader||pixel,'pixel shader unavailable');return {vertex,pixel};}
+  programIdentity(program){
+    if(!program)return 0;
+    let id=this.programIdentities.get(program);
+    if(id===undefined){id=++this.nextProgramIdentity;this.programIdentities.set(program,id);}
+    return id;
+  }
+  rememberPipelineInput(input,key){
+    if(input===null)return;
+    this.pipelineInputs.delete(input);this.pipelineInputs.set(input,key);
+    while(this.pipelineInputs.size>256)this.pipelineInputs.delete(this.pipelineInputs.keys().next().value);
+  }
   renderTargets(targets){
     const color=this.resources.surface(targets.color),depth=targets.depth?this.resources.surface(targets.depth):null;
     require(!depthFormats.has(color.item.format),'depth format used as color');
@@ -108,9 +120,23 @@ class DeviceRenderer {
     require(rs[172]===3,'non-cubic patch interpolation unsupported');
     require(!rs[136]||rs[136]===1,'clipping state');
     require(!rs[152],'user clip planes require clip-distance/discard emulation');
-    const code=buildShader(p,vertex,pixel,textureKinds,{patch}),colorFormat=targets.color.item.gpuFormat,depthFormat=targets.depth?.item.gpuFormat;
+    const colorFormat=targets.color.item.gpuFormat,depthFormat=targets.depth?.item.gpuFormat;
+    const input=this.pipelineInputMemoEnabled?JSON.stringify([
+      this.programIdentity(vertex),vertex?.declaration?null:p.vertexShader,this.programIdentity(pixel),
+      p.render,p.stages,p.lights.filter(light=>light.enabled),p.viewport,
+      textureKinds,patch,kind,colorFormat,depthFormat,
+    ]):null;
+    if(input!==null){
+      const key=this.pipelineInputs.get(input);
+      if(key!==undefined&&this.pipelines.has(key)){
+        const cached=this.pipelines.get(key);this.pipelines.delete(key);this.pipelines.set(key,cached);
+        this.rememberPipelineInput(input,key);return cached;
+      }
+      this.pipelineInputs.delete(input);
+    }
+    const code=buildShader(p,vertex,pixel,textureKinds,{patch});
     const key=JSON.stringify([code,kind,colorFormat,depthFormat,rs[7],rs[14],rs[19],rs[20],rs[22],rs[23],rs[27],rs.slice(52,60),rs[168],rs[171],rs[47]]);
-    if(this.pipelines.has(key)){const cached=this.pipelines.get(key);this.pipelines.delete(key);this.pipelines.set(key,cached);return cached;}
+    if(this.pipelines.has(key)){const cached=this.pipelines.get(key);this.pipelines.delete(key);this.pipelines.set(key,cached);this.rememberPipelineInput(input,key);return cached;}
     const module=await checkedShader(this.device,code,'D3D8 vertex/pixel IR');
     const target={format:colorFormat,writeMask:rs[168]&15};
     if(rs[27]){
@@ -131,6 +157,7 @@ class DeviceRenderer {
     }
     const gpu=await this.device.createRenderPipelineAsync(descriptor);
     this.pipelines.set(key,gpu);while(this.pipelines.size>128)this.pipelines.delete(this.pipelines.keys().next().value);
+    this.rememberPipelineInput(input,key);
     return gpu;
   }
   async draw(r) {
@@ -232,7 +259,7 @@ class DeviceRenderer {
     const entries=[{binding:0,resource:{buffer:state}},{binding:1,resource:{buffer:raw}},{binding:18,resource:{buffer:vertices}},...textures.entries];
     const encoder=this.encoder(),pass=encoder.beginRenderPass(this.passDescriptor(output));pass.setPipeline(gpu);pass.setBindGroup(0,this.device.createBindGroup({layout:gpu.getBindGroupLayout(0),entries}));this.dynamic(pass,p,output);pass.setIndexBuffer(d.indices,'uint32');pass.drawIndexed(d.indexCount);pass.end();this.draws++;
   }
-  close(){if(this.closed)return;this.closed=true;this.pendingEncoder=null;this.resources.close();for(const p of this.patches.values())p.controls.destroy();for(const d of this.domains.values()){d.vertices.destroy();d.indices.destroy();}for(const b of this.temporary)b.destroy();this.temporary.length=0;this.patches.clear();this.domains.clear();this.states.clear();this.shaders.clear();this.pipelines.clear();}
+  close(){if(this.closed)return;this.closed=true;this.pendingEncoder=null;this.resources.close();for(const p of this.patches.values())p.controls.destroy();for(const d of this.domains.values()){d.vertices.destroy();d.indices.destroy();}for(const b of this.temporary)b.destroy();this.temporary.length=0;this.patches.clear();this.domains.clear();this.states.clear();this.shaders.clear();this.pipelines.clear();this.pipelineInputs.clear();}
 }
 
 export async function createGraphicsHost(canvas,{onDiagnostic=()=>{}}={}) {

@@ -29,7 +29,7 @@ async function graphicsFixture(t) {
   const fence=deferred(),mapping=deferred(),events=[],presents=[],buffers=[],errors=[];
   const globals={navigator:{gpu:{async requestAdapter(){return adapter;},getPreferredCanvasFormat(){return 'rgba8unorm';}}},
     GPUTextureUsage:{COPY_SRC:1,COPY_DST:2,TEXTURE_BINDING:4,RENDER_ATTACHMENT:8},
-    GPUBufferUsage:{STORAGE:1,COPY_DST:2,COPY_SRC:4,MAP_READ:8},GPUMapMode:{READ:1}};
+    GPUBufferUsage:{STORAGE:1,COPY_DST:2,COPY_SRC:4,MAP_READ:8},GPUMapMode:{READ:1},GPUShaderStage:{VERTEX:1,FRAGMENT:2}};
   const saved=new Map(Object.keys(globals).map(name=>[name,Object.getOwnPropertyDescriptor(globalThis,name)]));
   for(const [name,value] of Object.entries(globals))Object.defineProperty(globalThis,name,{configurable:true,writable:true,value});
   t.after(()=>{for(const [name,descriptor] of saved)if(descriptor)Object.defineProperty(globalThis,name,descriptor);else delete globalThis[name];});
@@ -42,8 +42,8 @@ async function graphicsFixture(t) {
     createTexture(){return {createView(){return {};},destroy(){events.push('texture-destroy');}};},
     createBuffer({size}){const buffer={destroyed:false,async mapAsync(){events.push('map');await mapping.promise;},getMappedRange(){return new ArrayBuffer(size);},unmap(){events.push('unmap');},destroy(){this.destroyed=true;events.push('buffer-destroy');}};buffers.push(buffer);return buffer;},
     createCommandEncoder(){return {beginRenderPass(){return {setPipeline(){},setBindGroup(){},setViewport(){},draw(){},end(){events.push('pass-end');}};},beginComputePass(){return {setPipeline(){},setBindGroup(){},dispatchWorkgroups(){},end(){events.push('compute-end');}};},copyTextureToBuffer(){events.push('copy-to-buffer');},finish(){events.push('finish');return {};}};},
-    createShaderModule(){return {async getCompilationInfo(){return {messages:[]};}};},
-    async createRenderPipelineAsync(){return {getBindGroupLayout(){return {};}};},createBindGroup(){return {};},createSampler(){return {};},
+    createShaderModule({code}){return {code,async getCompilationInfo(){return {messages:[]};}};},
+    async createRenderPipelineAsync(descriptor){return {descriptor,getBindGroupLayout(){return {};}};},createPipelineLayout(value){return value;},createBindGroupLayout(value){return value;},createBindGroup(){return {};},createSampler(){return {};},
   };
   const adapter={features:[],limits:device.limits,async requestDevice(){return device;}};
   const context={configure(){},unconfigure(){},getCurrentTexture(){return {createView(){return {};}};}};
@@ -51,6 +51,73 @@ async function graphicsFixture(t) {
   t.after(()=>{fence.resolve();mapping.resolve();host.close();});
   return {host,fence,mapping,events,presents,buffers,errors};
 }
+
+function pipelineState() {
+  const render=Array(174).fill(0);
+  for(const [index,value] of [[8,3],[19,2],[20,1],[22,1],[23,4],[25,8],[168,15],[171,1],[172,3]])render[index]=value;
+  const stages=Array.from({length:8},()=>{const state=Array(29).fill(0);state[1]=state[4]=state[13]=state[14]=1;return state;});
+  return {render,stages,lights:[],viewport:{x:0,y:0,width:1,height:1,min:0,max:1},
+    vertexShader:0x44,pixelShader:0,transforms:[],material:Array(17).fill(0),
+    vc:Array.from({length:96},()=>[0,0,0,0]),pc:Array.from({length:8},()=>[0,0,0,0])};
+}
+
+async function pipelineFixture(t) {
+  const f=await graphicsFixture(t);await f.host.consume(packet([[1,definition]]));
+  const renderer=f.host.sessions.get(1n),targets={color:{item:{gpuFormat:'rgba8unorm'}}};
+  return {...f,renderer,targets,run:(state,kind='triangle-list',kinds=Array(8).fill(null),patch=false,output=targets)=>renderer.gpuPipeline(state,kind,output,kinds,patch)};
+}
+
+test('pipeline reuse crosses uniform-only snapshots without walking immutable shader IR again',async t=>{
+  const {renderer,run}=await pipelineFixture(t),state=pipelineState();let reads=0;
+  const elements=[{stream:0,offset:0,register:0,kind:3},{stream:0,offset:16,register:5,kind:4}];
+  renderer.shaders.set(0x80000001,{stage:1,program:null,declaration:{transformed:true,get elements(){reads++;return elements;}}});
+  state.vertexShader=0x80000001;
+  const first=await run(state),initialReads=reads,next=structuredClone(state);
+  next.transforms=[[2,0,0,0,0,2,0,0,0,0,2,0,0,0,0,2]];next.vc[0]=[1,2,3,4];next.pc[0]=[5,6,7,8];next.material.fill(9);
+  assert.equal(await run(next),first);
+  assert.equal(reads,initialReads,'uniform-only snapshots must not regenerate unchanged WGSL');
+});
+
+test('pipeline input reuse preserves shader replacement, code inputs and descriptor validation',async t=>{
+  const {renderer,run,targets}=await pipelineFixture(t),state=pipelineState(),first=await run(state);
+  const moved=structuredClone(state);moved.viewport.width=2;
+  assert.notEqual(await run(moved),first);
+  assert.notEqual(await run(state,'line-list'),first);
+  assert.notEqual(await run(state,'triangle-list',Array(8).fill(null),true),first);
+  assert.notEqual(await run(state,'triangle-list',Array(8).fill(null),false,{color:{item:{gpuFormat:'bgra8unorm'}}}),first);
+  const stage=structuredClone(state);stage.stages[0][1]=2;stage.stages[0][2]=2;
+  const kinds=['2d',...Array(7).fill(null)],textured=await run(stage,'triangle-list',kinds);
+  const border=structuredClone(stage);border.stages[0][13]=4;border.stages[0][15]=0xff112233;
+  assert.notEqual(await run(border,'triangle-list',kinds),textured);
+  assert.notEqual(await run(stage,'triangle-list',['cube',...Array(7).fill(null)]),textured);
+  const lit=structuredClone(state);lit.vertexShader=0x52;lit.render[137]=1;
+  lit.lights=[{index:0,enabled:1,kind:3,direction:[0,0,-1],position:[0,0,0],range:1,falloff:1,attenuation:[1,0,0],theta:0,phi:0,diffuse:[1,1,1,1],specular:[0,0,0,0],ambient:[0,0,0,0]}];
+  const lighting=await run(lit),changed=structuredClone(lit);changed.lights[0].diffuse[0]=0.5;
+  assert.notEqual(await run(changed),lighting);
+  const shader={stage:1,program:null,declaration:{transformed:true,elements:[{stream:0,offset:0,register:0,kind:3}]}};
+  state.vertexShader=0x80000001;renderer.shaders.set(state.vertexShader,shader);
+  const original=await run(state),replacement=structuredClone(shader);replacement.declaration.elements[0].offset=4;
+  renderer.shaders.delete(state.vertexShader);renderer.shaders.set(state.vertexShader,replacement);
+  assert.notEqual(await run(state),original,'a reused handle must resolve the new shader object');
+  const invalid=structuredClone(state);invalid.render[8]=2;
+  await assert.rejects(run(invalid),/fill mode/);
+  invalid.render[8]=3;invalid.pixelShader=0x80000002;
+  await assert.rejects(run(invalid),/pixel shader unavailable/);
+  assert.equal(targets.color.item.gpuFormat,'rgba8unorm');
+});
+
+test('pipeline input memo stays bounded and cannot resurrect an evicted canonical GPU pipeline',async t=>{
+  const {renderer,run}=await pipelineFixture(t),state=pipelineState();
+  for(let i=0;i<300;i++){const variant=structuredClone(state);variant.render[173]=i;await run(variant);}
+  assert.equal(renderer.pipelines.size,1,'conservative input differences still use the canonical full key');
+  assert.ok(renderer.pipelineInputs.size<=256);
+  state.render[15]=1;state.render[25]=2;
+  let first;
+  for(let i=0;i<129;i++){const variant=structuredClone(state);variant.render[24]=i;const gpu=await run(variant);if(i===0)first=gpu;}
+  assert.equal(renderer.pipelines.size,128);
+  assert.notEqual(await run(state),first,'stale input memo must miss after canonical LRU eviction');
+  assert.ok(renderer.pipelineInputs.size<=256);
+});
 
 test('submit ACK returns before Present completion while its fence owns metrics and uniforms',async t=>{
   const {host,fence,presents,buffers}=await graphicsFixture(t);
