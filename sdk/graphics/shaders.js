@@ -205,7 +205,10 @@ export function stateBytes(p,vertex,pixel){
   for(const [i,c] of vertex?.declaration?.constants??[])out.set(c,i*4);
   for(const [i,c] of vertex?.program?.constants??[])out.set(c,i*4);
   for(const [i,c] of pixel?.program?.constants??[])out.set(c,(96+i)*4);
-  if(mask){for(let i=0;i<266;i++)if(mask[i>>5]&(1<<(i&31)))out.set(p.transforms[i],(104+i*4)*4);}
+  if(mask){for(let word=0;word<9;word++){
+    let bits=mask[word]|0;if(word===8)bits&=0x3ff;
+    while(bits){const i=word*32+31-Math.clz32(bits&-bits);out.set(p.transforms[i],(104+i*4)*4);bits&=bits-1;}
+  }}
   else p.transforms.forEach((m,i)=>out.set(m,(104+i*4)*4));
   out.set(p.material,1168*4);
   return new Uint8Array(out.buffer);

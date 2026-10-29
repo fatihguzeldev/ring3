@@ -111,7 +111,13 @@ test('sparse uniform packing reads only explicit matrices and preserves float va
     [0, Array.from({length: 16}, (_, i) => i / 3)],
     [31, [-0, Infinity, -Infinity, NaN, ...Array(12).fill(2)]],
     [32, Array(16).fill(-2)],
+    [63, Array(16).fill(3)],
+    [64, Array(16).fill(-3)],
+    [255, Array(16).fill(4)],
+    [256, Array(16).fill(-4)],
     [265, Array.from({length: 16}, (_, i) => 100 + i)],
+    [266, Array(16).fill(99)],
+    [287, Array(16).fill(99)],
   ]);
   const r = new Reader(pipelineBytes(matrices)), p = pipeline(r);r.end();
   const reads = [];
@@ -122,7 +128,7 @@ test('sparse uniform packing reads only explicit matrices and preserves float va
   const vertex = {declaration: {constants: [[0, [1, 2, 3, 4]]]}, program: {constants: [[0, [5, 6, 7, 8]]]}},
     pixel = {program: {constants: [[0, [9, 10, 11, 12]]]}},
     packed = new Float32Array(stateBytes(p, vertex, pixel).buffer);
-  assert.deepEqual(reads, [0, 31, 32, 265]);
+  assert.deepEqual(reads, [0, 31, 32, 63, 64, 255, 256, 265]);
   assert.deepEqual([...packed.subarray(0, 4)], [5, 6, 7, 8]);
   assert.deepEqual([...packed.subarray(96 * 4, 97 * 4)], [9, 10, 11, 12]);
   const identity = [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1];

@@ -87,7 +87,16 @@ export function pipeline(r) {
   const render = r.words(r.count(174)); require(render.length === 174, 'render state size');
   const stages = Array.from({length: r.count(8)}, () => r.words(r.count(29))); require(stages.length === 8 && stages.every(s => s.length === 29), 'texture stage size');
   const count = r.count(266), mask = r.words(r.count(9)); require(count === 266 && mask.length === 9, 'transform mask');
-  const transforms = Array.from({length: count}, (_, i) => mask[i >> 5] & (1 << (i & 31)) ? r.floats(16) : identity);
+  const transforms = new Array(count).fill(identity);
+  for (let word = 0; word < 9; word++) {
+    let bits = mask[word] | 0;
+    if (word === 8) bits &= 0x3ff;
+    while (bits) {
+      const bit = 31 - Math.clz32(bits & -bits);
+      transforms[word * 32 + bit] = r.floats(16);
+      bits &= bits - 1;
+    }
+  }
   const material = r.floats(17);
   const lights = Array.from({length: r.count(256)}, () => ({index: r.u32(), enabled: r.u32(), kind: r.u32(), diffuse: r.floats(4), specular: r.floats(4), ambient: r.floats(4), position: r.floats(3), direction: r.floats(3), range: r.f32(), falloff: r.f32(), attenuation: r.floats(3), theta: r.f32(), phi: r.f32()}));
   const planes = Array.from({length: r.count(6)}, () => r.floats(4)), clipStatus = r.words(2);
