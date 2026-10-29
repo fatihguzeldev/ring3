@@ -143,7 +143,7 @@ test('call capture consumes borrowed fields before native completion overwrites 
   assert.equal(engine.resultView(112).getUint32(0, true), 0xcccccccc);
 });
 
-async function fusedGateCase(fusedStatus, backend = 'v86', observedClock) {
+async function fusedGateCase(fusedStatus, backend = 'v86', observedClock, id = 0x40232) {
   const memory = new WebAssembly.Memory({initial: 1}), calls = [], token = 37;
   const state = new DataView(memory.buffer);
   state.setUint32(72, 3, true);
@@ -172,18 +172,18 @@ async function fusedGateCase(fusedStatus, backend = 'v86', observedClock) {
       return 0;
     },
   }, memory, 'fixture');
-  let executions = 0, clocks = 0, callbacks = 0, settled = 0;
+  let executions = 0, clocks = 0, callbacks = 0, settled = 0, flushes = 0;
   const session = Object.assign(Object.create(Session.prototype), {
     running: true, paused: false, stopped: false, lastSchedule: Infinity, lastStatus: Infinity,
     recent: [], thread: 1, blocked: new Map(), exits: new Map(), engine,
     backend, fastNativeCalls: true, fastNativeCompletions: 0,
     windows: {capture(receipt) { calls.push(['window', receipt.args[0]]); }},
-    media: {update() {}, async graphicsOutput() {}, graphicsTransport: {}},
+    media: {update() {}, async graphicsOutput() {}, graphicsTransport: {requestFlush(){flushes++;}}},
     code: {
       publish() {}, import() {}, select: () => null,
       execute() {
         if (++executions === 1)
-          return {coreReason: 4, reason: 8, fastGate: false, pc: 0x1000, detail: 0x40232,observedClock};
+          return {coreReason: 4, reason: 8, fastGate: false, pc: 0x1000, detail: id,observedClock};
         session.running = false;
         return {coreReason: 2};
       },
@@ -193,8 +193,42 @@ async function fusedGateCase(fusedStatus, backend = 'v86', observedClock) {
     beginCallback() { callbacks++; return false; }, settleWindows() { settled++; },
   });
   await session.loop();
-  return {session, engine, calls, clocks, callbacks, settled, token};
+  return {session, engine, calls, clocks, callbacks, settled, token, flushes};
 }
+
+test('successful Present and D3D Busy completions demand a tail flush without widening other APIs',()=>{
+  for(const [id,status,expected] of [[0x4020f,0,1],[0x40c03,0,1],[0x40232,12,1],
+      [0x50001,12,1],[0x40232,0,0],[0x10001,12,0],[0x4020f,7,0]]) {
+    let flushes=0;
+    const session=Object.assign(Object.create(Session.prototype),{observeClock:()=>0n,settleWindows(){},
+      engine:{status:()=>status},media:{graphicsTransport:{requestFlush(){flushes++;}}}});
+    const complete=()=>session.complete({id,operation:'core_complete_windows_call',args:[]});
+    if(status===7)assert.throws(complete);else assert.equal(complete(),status===0);
+    assert.equal(flushes,expected,`id ${id.toString(16)} status ${status}`);
+  }
+});
+
+test('fused Present and D3D Busy use the same flush demand without recapturing calls',async()=>{
+  for(const [id,status] of [[0x4020f,0],[0x40c03,0],[0x40232,12],[0x50001,12]]) {
+    const result=await fusedGateCase(status,'v86',undefined,id);
+    assert.equal(result.flushes,1);assert(!result.calls.includes('capture'));
+  }
+});
+
+test('pause publishes and drains the native tail before reporting paused or allowing resume',async()=>{
+  const events=[],controller=new AbortController();let release;
+  const draining=new Promise(resolve=>{release=resolve;});
+  const session=Object.assign(Object.create(Session.prototype),{paused:false,pausedDuration:0,running:true,
+    abort:controller,code:{publish(){events.push('publish');}},
+    media:{pauseAudio(){events.push('hold');},resumeAudio(){events.push('refill');},
+      graphicsTransport:{drain(){events.push('drain');return draining;}}},status:state=>events.push(state)});
+  const pausing=session.pause(),resuming=session.resume();
+  try {
+    assert.equal(session.paused,true);assert.deepEqual(events,['hold','publish','drain']);
+    assert.equal(controller.signal.aborted,false);release();await pausing;await resuming;
+    assert.deepEqual(events,['hold','publish','drain','paused','refill','running']);assert.equal(session.paused,false);
+  } finally {release();await pausing;await resuming;}
+});
 
 test('fused gate completion settles and checks scheduling without a second capture or completion', async () => {
   const {session, engine, calls, clocks, callbacks, settled, token} = await fusedGateCase(0);

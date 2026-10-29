@@ -301,16 +301,16 @@ test('PCM progress is forwarded only to the Worker generation that submitted it'
   } finally {complete();await consuming;}
 });
 
-test('runtime pause, resume and cancellation keep audio refilling under the same lifecycle',()=>{
+test('runtime pause, resume and cancellation keep audio refilling under the same lifecycle',async()=>{
   const events=[];
   const session=Object.assign(Object.create(RuntimeSession.prototype),{
     paused:false,pausedDuration:0,running:true,abort:new AbortController(),
     media:{pauseAudio(){events.push('hold');},resumeAudio(){events.push('refill');}},
     status:state=>events.push(state),
   });
-  session.pause();
+  await session.pause();
   assert.deepEqual(events,['hold','paused']);
-  session.resume();
+  await session.resume();
   assert.deepEqual(events,['hold','paused','refill','running']);
   session.cancel();
   assert.equal(events.at(-1),'hold');
@@ -342,7 +342,7 @@ test('resuming an emptied held queue refills before the Worklet can report an av
   };
   let browser;
   const runtime=Object.assign(Object.create(RuntimeSession.prototype),{
-    paused:false,pausedDuration:0,running:true,media,status:state=>{browser.state=state;},
+    paused:false,pausedDuration:0,running:true,abort:new AbortController(),media,status:state=>{browser.state=state;},
   });
   const worker={postMessage(message){
     if(message.type==='audio-hold'){media.pauseAudio();heldRequest=message.request;}
@@ -368,6 +368,7 @@ test('resuming an emptied held queue refills before the Worklet can report an av
   assert.equal(media.audio.length,0);assert.equal(output.pending.size,0);
   await browser.message({type:'audio-held',request:heldRequest},worker);
   await pausing;
+  await runtime.pausing;
   assert.equal(browser.state,'paused');assert.equal(host.context.state,'suspended');
   assert.equal(processor.paused,true);assert.equal(processor.renderedFrames,1024);
   assert.deepEqual([...render()[0]],new Array(128).fill(0));

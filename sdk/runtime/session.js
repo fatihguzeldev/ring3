@@ -267,6 +267,7 @@ export class Session {
   armFrameProbe(id) {
     if (!this.frameProbeEnabled || !this.running || this.paused || this.frameProbe || this.requestedFrameProbe) return;
     if (typeof id !== "string" || !/^[a-zA-Z0-9-]{1,80}$/.test(id)) return;
+    this.media?.graphicsTransport?.requestFlush?.();
     this.requestedFrameProbe = id;
   }
   complete(receipt, observedClock) {
@@ -283,8 +284,14 @@ export class Session {
         operation: receipt.operation,
         status,
       });
+    this.requestGraphicsFlush(receipt.id,status);
     if (status === 0) this.settleWindows();
     return status === 0;
+  }
+  requestGraphicsFlush(id,status) {
+    if ((status===0 && (id===0x4020f || id===0x40c03)) ||
+        (status===12 && ((id&0xffff0000)===0x40000 || id===0x50001)))
+      this.media?.graphicsTransport?.requestFlush?.();
   }
   settleWindows() {
     this.windows.settle(this.thread);
@@ -467,6 +474,7 @@ export class Session {
         };
         this.windows.capture(receipt, captured, this.thread);
         this.callDiagnostics?.capture(receipt, captured, this.thread);
+        if(fused!==256)this.requestGraphicsFlush(receipt.id,fused);
         if ([0x10003, 0xfffff, 0xf0003].includes(run.detail)) this.exits.set(this.thread, receipt);
         if (fused === 0) {
           this.fastNativeCompletions++;
@@ -548,18 +556,34 @@ export class Session {
       );
   }
   pause() {
-    if (this.paused) return;
+    if (this.paused) return this.pausing;
     this.media?.pauseAudio?.();
     this.paused = true;
     this.pauseStarted = performance.now();
-    this.status("paused", "paused");
+    this.pausing=(async()=>{
+      await this.drainGraphics();
+      if(!this.stopped && !this.abort.signal.aborted)this.status("paused", "paused");
+    })().finally(()=>{this.pausing=null;});
+    return this.pausing;
   }
   resume() {
+    if(this.finalizing || this.stopped || this.abort?.signal.aborted)return;
+    if(this.pausing)return this.pausing.then(()=>this.resume());
     if (!this.paused) return;
     this.pausedDuration += performance.now() - this.pauseStarted;
     this.media?.resumeAudio?.();
     this.paused = false;
     this.status("running", "resumed");
+  }
+  drainGraphics() {
+    this.code?.publish();
+    return this.media?.graphicsTransport?.drain?.();
+  }
+  prepareFinalization() {
+    this.running=false;
+    this.media?.pauseAudio?.();
+    this.scheduler?.wake();
+    if(this.executing && !this.failureReported && !this.abort.signal.aborted)return this.drainGraphics();
   }
   stop(notify = true) {
     if (this.stopped) return;

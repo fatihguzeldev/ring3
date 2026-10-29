@@ -21,12 +21,12 @@ const emit = (message, transfer = [], owner = session, capture = observation) =>
   }
 };
 const finalize = (owner, capture, outcome, error) => {
-  owner.cancel();
+  const finishing=finishSession(owner, capture, outcome, error);
   if(owner.audioOutput&&!owner.audioOutput.closed) {
     const snapshot=owner.audioOutput.close();
     postMessage({type:'audio-closed',snapshot});
   }
-  return finishSession(owner, capture, outcome, error).catch((failure) => {
+  return finishing.catch((failure) => {
     capture?.transportError(failure);
     postMessage({type:'diagnostic',message:'session finalization failed',detail:{message:failure.message}});
     throw failure;
@@ -108,8 +108,12 @@ self.onmessage = (event) => {
   if (!session || session.stopped) return;
   try {
     if (message.type === "frame-probe-arm") session.armFrameProbe(message.id);
-    else if (message.type === "pause") session.pause();
-    else if (message.type === "resume") session.resume();
+    else if (message.type === "pause" || message.type === "resume") {
+      const owner=session,operation=message.type;
+      control=control.then(()=>{
+        if(owner===session && !owner.stopped && !owner.finalizing && !owner.abort.signal.aborted)return owner[operation]();
+      }).catch(error=>{if(!owner.abort.signal.aborted)owner.fail(error);});
+    }
     else if (message.type === "input" && session.media) {
       const events = message.events ?? [];
       session.media.enqueue(events, message.sentAtMs);
