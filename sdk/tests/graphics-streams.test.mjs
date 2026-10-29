@@ -3,6 +3,32 @@ import test from 'node:test';
 import {Resources} from '../graphics/resources.js';
 import {Reader} from '../graphics/packet.js';
 
+test('sampler cache is opt-in and separates effective LOD, anisotropy and device ownership',()=>{
+  const make=()=>{const calls=[],device={createSampler(descriptor){const sampler={device,descriptor:{...descriptor}};calls.push(sampler);return sampler;}};return {calls,resources:new Resources(device)};};
+  const a=make(),b=make(),descriptor={addressModeU:'repeat',addressModeV:'clamp-to-edge',addressModeW:'repeat',magFilter:'linear',minFilter:'linear',mipmapFilter:'nearest',lodMinClamp:0,lodMaxClamp:32,maxAnisotropy:1};
+  assert.equal(a.resources.samplerCacheEnabled,false);
+  assert.notEqual(a.resources.sampler(descriptor),a.resources.sampler({...descriptor}));
+  assert.equal(a.resources.samplerCacheHits,0);assert.equal(a.resources.samplerCacheMisses,0);
+  a.resources.samplerCacheEnabled=b.resources.samplerCacheEnabled=true;
+  const first=a.resources.sampler(descriptor);
+  assert.equal(a.resources.sampler({...descriptor}),first);
+  for(const changed of [{lodMinClamp:1},{lodMaxClamp:0},{maxAnisotropy:4}])assert.notEqual(a.resources.sampler({...descriptor,...changed}),first);
+  assert.notEqual(b.resources.sampler(descriptor),first);
+  assert.equal(a.resources.samplerCacheHits,1);assert.equal(a.resources.samplerCacheMisses,4);
+  a.resources.close();b.resources.close();
+});
+
+test('sampler cache keeps128 LRU entries and clears without destroying samplers',()=>{
+  let creates=0;const resources=new Resources({createSampler(){return {id:++creates,destroy(){assert.fail('samplers have no destruction step');}};}});
+  resources.samplerCacheEnabled=true;
+  const first=resources.sampler({lodMinClamp:0}),second=resources.sampler({lodMinClamp:1});
+  assert.equal(resources.sampler({lodMinClamp:0}),first);
+  for(let lod=2;lod<=128;lod++)resources.sampler({lodMinClamp:lod});
+  assert.equal(resources.samplers.size,128);assert.equal(resources.sampler({lodMinClamp:0}),first);
+  assert.notEqual(resources.sampler({lodMinClamp:1}),second);
+  resources.close();assert.equal(resources.samplers.size,0);resources.close();
+});
+
 const usage={STORAGE:1,COPY_DST:2,INDEX:4};
 function words(values,tail=new Uint8Array()) {
   const bytes=new Uint8Array(values.length*4+tail.length),view=new DataView(bytes.buffer);

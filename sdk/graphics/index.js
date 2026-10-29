@@ -138,7 +138,7 @@ class DeviceRenderer {
       const filter=value=>value===1?'nearest':value===2||value===3?'linear':null;
       require(filter(s[16])&&filter(s[17]),'texture filter mode');
       const lodMin=Math.max(0,(s[20]||0)-(bindings.textures[i]?.lod||0));
-      const sampler=this.device.createSampler({addressModeU:address(s[13]),addressModeV:address(s[14]),addressModeW:address(s[25]||1),magFilter:filter(s[16]),minFilter:filter(s[17]),mipmapFilter:s[18]===2?'linear':'nearest',lodMinClamp:lodMin,lodMaxClamp:s[18]===0?lodMin:32,maxAnisotropy:s[17]===3&&s[16]===3?Math.max(1,Math.min(16,s[21])):1});
+      const sampler=this.resources.sampler({addressModeU:address(s[13]),addressModeV:address(s[14]),addressModeW:address(s[25]||1),magFilter:filter(s[16]),minFilter:filter(s[17]),mipmapFilter:s[18]===2?'linear':'nearest',lodMinClamp:lodMin,lodMaxClamp:s[18]===0?lodMin:32,maxAnisotropy:s[17]===3&&s[16]===3?Math.max(1,Math.min(16,s[21])):1});
       entries.push({binding:2+i*2,resource:textures[i].view},{binding:3+i*2,resource:sampler});
     }
     return {kinds,entries};

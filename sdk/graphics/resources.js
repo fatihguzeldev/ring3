@@ -4,7 +4,17 @@ import {decodeColor,encodeColor,depthFormats} from './formats.js';
 const align=(n,a)=>(Math.ceil(n/a)*a);
 const packedEntries=1024,packedBytes=32*1024*1024;
 export class Resources {
-  constructor(device,beforeTextureWrite=()=>{},beforeBufferDestroy=beforeTextureWrite) { this.device=device;this.beforeTextureWrite=beforeTextureWrite;this.beforeBufferDestroy=beforeBufferDestroy;this.items=new Map();this.bytes=0;this.palettes=new Map();this.packedStreams=new Map();this.packedDependencies=new Map();this.packedBytes=0;this.retainedIndexHits=0;this.retainedIndexBuilds=0;this.retainedIndexUpdates=0;this.retainedIndexUploadedBytes=0; }
+  constructor(device,beforeTextureWrite=()=>{},beforeBufferDestroy=beforeTextureWrite) { this.device=device;this.beforeTextureWrite=beforeTextureWrite;this.beforeBufferDestroy=beforeBufferDestroy;this.items=new Map();this.bytes=0;this.palettes=new Map();this.packedStreams=new Map();this.packedDependencies=new Map();this.packedBytes=0;this.retainedIndexHits=0;this.retainedIndexBuilds=0;this.retainedIndexUpdates=0;this.retainedIndexUploadedBytes=0;this.samplerCacheEnabled=false;this.samplers=new Map();this.samplerCacheHits=0;this.samplerCacheMisses=0; }
+  sampler(descriptor) {
+    if(!this.samplerCacheEnabled)return this.device.createSampler(descriptor);
+    const key=JSON.stringify([descriptor.addressModeU,descriptor.addressModeV,descriptor.addressModeW,descriptor.magFilter,descriptor.minFilter,descriptor.mipmapFilter,descriptor.lodMinClamp,descriptor.lodMaxClamp,descriptor.maxAnisotropy,descriptor.compare]);
+    if(this.samplers.has(key)) {
+      const sampler=this.samplers.get(key);this.samplers.delete(key);this.samplers.set(key,sampler);this.samplerCacheHits++;return sampler;
+    }
+    const sampler=this.device.createSampler(descriptor);this.samplerCacheMisses++;
+    this.samplers.set(key,sampler);if(this.samplers.size>128)this.samplers.delete(this.samplers.keys().next().value);
+    return sampler;
+  }
   create(r) {
     const id=r.resource(),[type,format,usage,pool,width,height,depth,levels,samples,lockable,fvf,reserved]=r.words(12);
     require(!this.items.has(id.key)&&!reserved&&width&&height&&depth&&levels,'resource definition');
@@ -131,5 +141,5 @@ export class Resources {
     v.setBigUint64(16,requestEpoch,true);v.setBigUint64(24,requestSequence,true);v.setBigUint64(32,source.epoch,true);v.setUint32(40,source.slot,true);v.setUint32(44,source.generation,true);v.setBigUint64(48,source.version,true);v.setUint32(56,source.subresource,true);
     return {receipt,bytes,kind};
   }
-  close(){for(const key of this.packedStreams.keys())this.releaseStreams(key);for(const i of this.items.values())i.texture?.destroy();this.items.clear();this.bytes=0;}
+  close(){for(const key of this.packedStreams.keys())this.releaseStreams(key);for(const i of this.items.values())i.texture?.destroy();this.items.clear();this.samplers.clear();this.bytes=0;}
 }
