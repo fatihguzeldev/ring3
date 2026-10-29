@@ -6,9 +6,9 @@ import {BACKING_BASE,DIRECTORY,TABLES,PRIVATE_VA} from '../runtime/v86/layout.js
 
 const PAGE=4096, CODE=0x100, DATA=0x200;
 
-function world({journal=false,nativeDirty=false,nativeDirtyEpoch=false,dirtyGateFlags=false,preciseExecutable=false,globalCode=false}={}) {
+function world({journal=false,nativeDirty=false,nativeDirtyEpoch=false,dirtyGateFlags=false,preciseExecutable=false,globalCode=false,dirtyVirtualPages=false}={}) {
   const memory=new WebAssembly.Memory({initial:512}),data=new DataView(memory.buffer);
-  const capabilities=(nativeDirty?2:0)|(nativeDirtyEpoch?4:0)|(dirtyGateFlags?8:0)|(preciseExecutable?16:0)|(globalCode?32:0);
+  const capabilities=(nativeDirty?2:0)|(nativeDirtyEpoch?4:0)|(dirtyGateFlags?8:0)|(preciseExecutable?16:0)|(globalCode?32:0)|(dirtyVirtualPages?128:0);
   const info={backing:16*1024*1024,length:16*PAGE,maps:8*1024*1024,permissions:12*1024*1024,
     guestPages:1<<20,capacity:16,mapped:2,mappingVersions:13*1024*1024,
     physicalVersions:21*1024*1024,privateSlots:0,executableViews:27*1024*1024,
@@ -47,6 +47,8 @@ function world({journal=false,nativeDirty=false,nativeDirtyEpoch=false,dirtyGate
   const flushes=[],compiled=new Map(),cpu={mem8:{byteOffset:0,length:160*1024*1024},clears:0,tlbClears:0,nonGlobalClears:0,
     jit_clear_cache(){flushes.push('jit');this.clears++;compiled.clear();},full_clear_tlb(){flushes.push('full');this.tlbClears++;},
     clear_tlb(){flushes.push('non-global');this.nonGlobalClears++;}};
+  cpu.cpl=new Uint8Array(memory.buffer,612,1);cpu.cpl[0]=3;cpu.invalidatedPages=[];
+  cpu.wm={exports:{instr16_0F01_7_mem(address){assert.equal(cpu.cpl[0],0);cpu.invalidatedPages.push(address>>>0);if(cpu.invalidateFailure)throw cpu.invalidateFailure;}}};
   const engine={memory,base:0,
     ok(operation,...args) {
       if(operation==='component_cpu_attach') {tracking=journal;info.mappingChangeFlags=(journal?1:0)|capabilities;return;}
@@ -100,7 +102,7 @@ function world({journal=false,nativeDirty=false,nativeDirtyEpoch=false,dirtyGate
         }
         for(const [at,value] of [...accessed,...dirtyPtes])data.setUint32(at,value,true);
         new Uint32Array(memory.buffer,slotsPtr,values.length).set(values);
-        const at=140,size=nativeDirtyEpoch?88:80;new Uint8Array(memory.buffer,at,size).fill(0);
+        const at=140,size=dirtyVirtualPages?96:nativeDirtyEpoch?88:80;new Uint8Array(memory.buffer,at,size).fill(0);
         data.setUint32(at,0x43443352,true);data.setUint16(at+4,1,true);data.setUint16(at+6,1,true);
         data.setUint32(at+8,size,true);
         for(const [offset,value] of [[16,slotsPtr],[20,values.length],[24,accessed.length?1:0],
@@ -109,6 +111,7 @@ function world({journal=false,nativeDirty=false,nativeDirtyEpoch=false,dirtyGate
         for(const [offset,value] of [[40,info.mapping],[48,info.transaction],[56,info.code],[64,info.identity]])
           data.setBigUint64(at+offset,value,true);
         if(nativeDirtyEpoch)data.setBigUint64(at+80,beforeCode,true);
+        if(dirtyVirtualPages){const pointer=slotsPtr+PAGE;new Uint32Array(memory.buffer,pointer,dirtyPtes.length).set(dirtyPtes.map(([at])=>at-DIRECTORY));data.setUint32(at+88,pointer,true);data.setUint32(at+92,dirtyPtes.length,true);}
         nativeCollections.push({epoch,directory,slots:values});hooks.collectResult?.(data,at);
         return;
       }
@@ -385,6 +388,37 @@ test('native read-only directory access resets require a TLB flush even without 
   assert.equal(f.cpu.tlbClears,flushes+1);
   assert.equal(f.data.getUint32(DIRECTORY,true)&32,0);
   assert.equal(f.info.transaction,transaction);assert.equal(f.requests.length,0);
+});
+
+test('targeted dirty rearm invalidates every dirty virtual alias and preserves read-only translations',()=>{
+  const f=world({journal:true,nativeDirty:true,nativeDirtyEpoch:true,dirtyVirtualPages:true});
+  f.cpu.cpl=new Proxy({},{get(_target,key){const view=new Uint8Array(f.memory.buffer,612,1);return Reflect.get(view,key,view);},
+    set(_target,key,value){new Uint8Array(f.memory.buffer,612,1)[key]=value;return true;}});
+  assert.equal(f.cpu.cpl instanceof Uint8Array,false);
+  f.map(DATA+1024,1,3);const t=new PageTables(f.engine,f.cpu),owner={paused:true,open:false};
+  assert.equal(t.configureTargetedDirty(true,owner),true);f.flushes.length=0;
+  for(const page of [DATA,DATA+1024]){f.data.setUint32(t.pte(page),f.data.getUint32(t.pte(page),true)|64,true);const at=DIRECTORY+(page>>>10)*4;f.data.setUint32(at,f.data.getUint32(at,true)|32,true);}
+  assert.equal(t.publishDirty(),1);assert.deepEqual(f.cpu.invalidatedPages,[DATA*PAGE,(DATA+1024)*PAGE]);
+  assert.equal(f.cpu.cpl[0],3);assert.deepEqual(f.flushes,[]);
+  f.data.setUint32(DIRECTORY,f.data.getUint32(DIRECTORY,true)|32,true);
+  assert.equal(t.publishDirty(),0);assert.deepEqual(f.flushes,[]);assert.equal(f.cpu.invalidatedPages.length,2);
+  f.data.setUint32(t.pte(DATA),f.data.getUint32(t.pte(DATA),true)|64,true);f.data.setUint32(DIRECTORY,f.data.getUint32(DIRECTORY,true)|32,true);
+  assert.equal(t.publishDirty(),1);assert.equal(f.cpu.invalidatedPages.length,3);
+});
+
+test('targeted rearm restores privilege and flushes on helper failure, malformed aliases or executable writes',()=>{
+  for(const kind of ['helper','malformed','executable','alias']){
+    const f=world({journal:true,nativeDirty:true,nativeDirtyEpoch:true,dirtyVirtualPages:true});
+    if(kind==='executable')f.map(DATA,1,7);
+    if(kind==='alias')f.map(DATA,0,3);
+    const t=new PageTables(f.engine,f.cpu);t.configureTargetedDirty(true,{paused:true,open:false});f.flushes.length=0;
+    f.data.setUint32(t.pte(DATA),f.data.getUint32(t.pte(DATA),true)|64,true);f.data.setUint32(DIRECTORY,f.data.getUint32(DIRECTORY,true)|32,true);
+    if(kind==='helper')f.cpu.invalidateFailure=new Error('invlpg failed');
+    if(kind==='malformed')f.hooks.collectResult=(d,at)=>d.setUint32(d.getUint32(at+88,true),0,true);
+    if(kind==='executable'||kind==='alias'){assert.equal(t.publishDirty(),1);assert.deepEqual(f.cpu.invalidatedPages,[]);}
+    else assert.throws(()=>t.publishDirty(),kind==='helper'?/invlpg failed/:/native dirty/);
+    assert.equal(f.cpu.cpl[0],3);assert.deepEqual(f.flushes,['full']);
+  }
 });
 
 test('malformed native dirty results fail closed after a safety TLB flush and before guest acknowledgement',()=>{
