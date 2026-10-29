@@ -105,6 +105,11 @@ export function exportState(engine,cpu,trap=null) {
   for(let i=0;i<8;i++)v.bytes.set(v.bytes.subarray(1152+i*16,1162+i*16),fp+40+i*10);
   d.setUint32(b+SIMD+16,d.getUint32(824,true),true);
   v.bytes.set(v.bytes.subarray(832,960),b+SIMD+32);
+  validateSegmentSelectors(engine,cpu,trap);
+}
+
+export function validateSegmentSelectors(engine,cpu,trap=null) {
+  const v=cpuViews(engine.memory),d=v.data,b=engine.base;
   // only the flat windows segment profile is admitted; preserve its encoded caches.
   for(let i=0;i<6;i++) {
     const selector=trap&&i===1?trap.cs:trap&&i===2?trap.ss:v.selectors[i];

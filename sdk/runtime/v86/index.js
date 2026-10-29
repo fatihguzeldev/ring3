@@ -3,7 +3,7 @@ import {KEY} from '../engine.js';
 import {CPU_SHA256,PHYSICAL_BYTES,PARK,SHIPPING_JIT,CODEGEN_SWITCHES,BACKING_BASE,PAGE} from './layout.js';
 import {PageTables} from './memory.js';
 import {Traps} from './traps.js';
-import {cpuViews,importState,exportState,rememberStateBanks,forgetStateBanks} from './state.js';
+import {cpuViews,importState,exportState,rememberStateBanks,forgetStateBanks,validateSegmentSelectors} from './state.js';
 
 const INLINE_GATE_IDS=new Set([0x10001,0x10002,0xf000b,0x40225,0x4022a,0x4022e,0x40232,0x4023f]);
 
@@ -81,6 +81,7 @@ export class V86CodeCache {
     this.reuseNumericState=true;
     this.portGates=false;this.portGateModeTouched=false;this.portGateCalls=0;this.deniedPortCalls=0;
     this.inlineGates=false;this.inlineCompletions=0;this.inlineYields=0;this.inlineFailure=null;
+    this.directGates=false;this.directCompletions=0;this.directDeclines=0;
   }
   get pc() {return this.engine.get(48);}
   readCodeByte(address) {
@@ -183,6 +184,7 @@ export class V86CodeCache {
     const owner=this.inlineOwner,h=this.engine;
     if(!this.inlineGates || !this.portGates || !this.deferDirty ||
         this.tables.dirtyGateFlagsSupported!==true || !owner?.canContinue())return false;
+    if(this.directGates)return this.tryDirectGate(trap);
     exportState(h,this.cpu,trap);
     if(this.reuseNumericState!==false)rememberStateBanks(h,this.cpu);
     if(trap.portGate && trap.privateInstructions===0)trap.canonicalExported=true;
@@ -226,6 +228,35 @@ export class V86CodeCache {
       if(!owner.canContinue()) {this.inlineYields++;return 'yield';}
       return true;
     } catch(error) {this.inlineFailure=error;throw error;}
+  }
+  tryDirectGate(trap) {
+    if(!trap.portGate || trap.privateInstructions!==0)return false;
+    const h=this.engine;this.dirtyPending=true;
+    try {
+      validateSegmentSelectors(h,this.cpu,trap);
+      const before=cpuViews(this.memory),status=h.status('component_cpu_try_direct_gate',...KEY,trap.pc,before.regs[4],before.regs[0]);
+      if(status===256){this.directDeclines++;return false;}
+      if(status!==0)throw Object.assign(new Error(`v86 direct gate completion failed ${status}`),{status,pc:trap.pc});
+      const record=h.resultView(32),id=record.getUint32(16,true);
+      if(record.getUint32(0,true)!==0x46493352 || record.getUint32(4,true)!==0x10001 ||
+          record.getUint32(8,true)!==32 || record.getUint32(12,true)!==0 || !INLINE_GATE_IDS.has(id))
+        throw new Error('invalid v86 direct completion record');
+      const returned=cpuViews(this.memory);
+      returned.regs[0]=record.getUint32(20,true);returned.regs[4]=record.getUint32(28,true);
+      const pc=record.getUint32(24,true);
+      returned.data.setUint32(556,pc,true);returned.data.setUint32(560,pc,true);returned.data.setUint32(620,0xffffffff,true);
+      this.directCompletions++;this.inlineCompletions++;this.gates++;this.portGateCalls++;this.deferredDirtyPublications++;
+      if(!this.inlineOwner.canContinue()){this.inlineYields++;return 'yield';}
+      return true;
+    } catch(error){this.inlineFailure=error;throw error;}
+  }
+  configureDirectGates(enabled,owner) {
+    if(owner?.paused!==true || owner?.open!==false || this.open || this.closed || typeof enabled!=='boolean')
+      throw new Error('v86 direct gate changes require a closed paused owner');
+    if(this.inlineFailure)throw this.inlineFailure;
+    if(enabled && typeof this.engine.api.component_cpu_try_direct_gate!=='function')
+      throw new Error('native v86 direct gates are unsupported');
+    this.publish();this.directGates=enabled;return enabled;
   }
   configureInlineGates(enabled,owner) {
     if(owner?.paused!==true || owner?.open!==false || this.open || this.closed || typeof enabled!=='boolean')
@@ -283,6 +314,7 @@ export class V86CodeCache {
       dirtyPages:this.dirtyPages,deferDirty:this.deferDirty,
       portGates:this.portGates,portGateCalls:this.portGateCalls,deniedPortCalls:this.deniedPortCalls,
       inlineGates:this.inlineGates,inlineCompletions:this.inlineCompletions,inlineYields:this.inlineYields,
+      directGates:this.directGates,directCompletions:this.directCompletions,directDeclines:this.directDeclines,
       inlineFailed:!!this.inlineFailure,
       deferredDirtyPublications:this.deferredDirtyPublications,wasmMemoryBytes:this.memory.buffer.byteLength,
       executePermissionEnforcement:false,faultAccessLength:'one-byte conservative fault span',

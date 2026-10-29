@@ -5,12 +5,12 @@ import {readEngine} from '../../../support/wasm/engine.mjs';
 import {Engine, KEY, view} from '../../../../../sdk/runtime/engine.js';
 import {prepareV86} from '../../../../../sdk/runtime/v86/index.js';
 import {DIRECTORY} from '../../../../../sdk/runtime/v86/layout.js';
-import {cpuViews} from '../../../../../sdk/runtime/v86/state.js';
+import {cpuViews, exportState} from '../../../../../sdk/runtime/v86/state.js';
 import {image as moduleImage} from '../../../loader/modules/wasm/fixtures/runtime/images.mjs';
 
 const [enginePath, reportPath, permissionText = '1', portText = ''] = process.argv.slice(2);
 assert(enginePath && reportPath, 'usage: v86.mjs imported-engine.wasm fresh-report.json');
-assert(['', 'port', 'inline', 'simd'].includes(portText));
+assert(['', 'port', 'inline', 'direct', 'simd'].includes(portText));
 const deniedPermission = Number(permissionText);
 assert([0,1].includes(deniedPermission));
 const hash = bytes => createHash('sha256').update(bytes).digest('hex');
@@ -20,7 +20,7 @@ assert.equal(hash(image), '7c0451977a0818d5f4905a2b00f3a3bae63b9449ef22775ea003e
 const cpuBytes = readFileSync(new URL('../../../../../sdk/runtime/v86/vendor/v86.wasm', import.meta.url));
 const report = {complete: false, engineSha256: artifact.sha256, cpuSha256: hash(cpuBytes),
   scope: 'actual unmodified v86 CPU, shared RAM, authored PE with four Ring3 Windows calls; no game/FPS claim',
-  portControls:portText==='port',inlineControls:portText==='inline',simdControls:portText==='simd',calls: [], runs: [], ownCpuCalls: 0};
+  portControls:portText==='port',inlineControls:portText==='inline',directControls:portText==='direct',simdControls:portText==='simd',calls: [], runs: [], ownCpuCalls: 0};
 writeFileSync(reportPath, JSON.stringify(report), {flag: 'wx'});
 const save = () => writeFileSync(reportPath, JSON.stringify(report, (_key, value) =>
   typeof value === 'bigint' ? String(value) : value, 2) + '\n');
@@ -266,8 +266,9 @@ try {
       assert.equal(new DataView(memory.buffer).getUint32(cache.tables.ram+DIRECTORY+(dense>>>22)*4,true)&32,0);
       report.densePteValidation.push({lane,before,after:version(),scannedPtes:cache.tables.lastDirtyScanCount});save();
     }
-  } else if(portText==='inline') {
-    stage='inline native API continuation';
+  } else if(portText==='inline' || portText==='direct') {
+    const directMode=portText==='direct';
+    stage=directMode?'direct scalar API continuation':'inline native API continuation';
     engine.ok('protect',0x601000,1,3);
     const entries=new Map();
     for(let start=0,total=1;start<total;) {
@@ -280,7 +281,8 @@ try {
     for(const id of Object.values(ids))assert(entries.has(id),`real registered gate ${id.toString(16)}`);
     const programPc=0x600900,output=0x601900,stack=0x601800,initialError=0xf1234567,nextError=0x10203040,tlsValue=0x55aa7788;
     const savedBanks=banks(),atomicSupported=typeof engine.api.component_cpu_try_inline_gate==='function';
-    let allow=true,clockCalls=0,bankExports=0;
+    if(directMode)assert.equal(typeof engine.api.component_cpu_try_direct_gate,'function');
+    let allow=true,clockCalls=0,bankExports=0,bankTagReads=0,stateFlagUpdates=0;
     cache.inlineOwner={canContinue:()=>allow,observeClock(){clockCalls++;engine.ok('observe_cpu_clock',0,0);return 0n;}};
     assert.equal(cache.configurePortGates(true,{paused:true,open:cache.open}),true);
     const seed=pc=>{
@@ -311,18 +313,52 @@ try {
     program.push(0xa3,...u32(output+12),0xc7,0x05,...u32(output+16),...u32(0x52494e47));
     invoke(ids.slow);program.push(0xeb,0xfe);upload(programPc,program);
     cache.budget=100002;
-    report.inline={tlsIndex,programPc,afterGet,afterSlow,atomicSupported,authoredLoopPrefixInstructions:40001,
-      authoredFirstOuterInstructions:40018,runs:[],semantics:'all intermediate gate publications carry zero credits; only completed outer main_loop deltas are charged'};
+    const inlineReport=report[directMode?'direct':'inline']={tlsIndex,programPc,afterGet,afterSlow,atomicSupported,
+      directMode,authoredLoopPrefixInstructions:40001,authoredFirstOuterInstructions:40018,runs:[],
+      semantics:directMode?'direct calls preserve canonical State/Exit/banks/R3WK and return scalars; only the completed outer main_loop is published and charged':'all intermediate gate publications carry zero credits; only completed outer main_loop deltas are charged'};
     const reset=()=>{nativeCall(ids.set,[initialError]);for(let index=0;index<5;index++)put(output+index*4,0);seed(programPc);};
     const workPacket=()=>engine.get(4604);
     const execute=(label)=>{
-      const original=engine.ok,originalStatus=engine.status,publications=[],atomicCalls=[],before=cache.stats(),
+      const original=engine.ok,originalStatus=engine.status,originalContinue=cache.traps.continueGate,
+        publications=[],atomicCalls=[],directCalls=[],directResults=[],continuations=[],before=cache.stats(),
         counter=cpuViews(memory).data.getUint32(664,true),exportsBefore=bankExports;
+      if(directMode)cache.traps.continueGate=trap=>{
+        const exported=bankExports,tags=bankTagReads,updates=stateFlagUpdates,observed=clockCalls;
+        const result=originalContinue(trap);
+        assert.equal(bankExports,exported,'direct continuation does not export FP banks');
+        assert.equal(bankTagReads,tags,'direct continuation invokes no x87 import/export helpers');
+        assert.equal(stateFlagUpdates,updates,'direct continuation invokes no full state import');
+        assert.equal(clockCalls,observed,'direct continuation does not observe the clock');
+        continuations.push({result,bankExports:0,bankTagReads:0,stateFlagUpdates:0,clockObservations:0});
+        return result;
+      };
       const snapshot=()=>Buffer.concat([Buffer.from(new Uint8Array(memory.buffer,engine.base,96)),
         engine.take(112),banks(),Buffer.from(new Uint8Array(memory.buffer,engine.base+4588,24))]);
       engine.status=function(operation,...args) {
-        const previous=operation==='component_cpu_try_inline_gate'?snapshot():null;
+        const watched=operation==='component_cpu_try_inline_gate' || operation==='component_cpu_try_direct_gate';
+        const previous=watched?snapshot():null;
+        const canonical=operation==='component_cpu_try_direct_gate'?Buffer.concat([
+          Buffer.from(new Uint8Array(memory.buffer,engine.base,140)),
+          Buffer.from(new Uint8Array(memory.buffer,engine.base+172,engine.api.arena_len()-172)),
+        ]):null;
+        const exported=bankExports,observed=clockCalls;
         const status=originalStatus.call(this,operation,...args);
+        if(operation==='component_cpu_try_direct_gate') {
+          directCalls.push(status);
+          assert.equal(bankExports,exported,'native direct call invokes no guest FP export helpers');
+          assert.equal(clockCalls,observed,'native direct call does not observe the clock');
+          if(status===256)assert.deepEqual(snapshot(),previous,'direct decline preserves canonical state/exit/banks/work/transfer');
+          if(status===0) {
+            assert.deepEqual(Buffer.concat([Buffer.from(new Uint8Array(memory.buffer,engine.base,140)),
+              Buffer.from(new Uint8Array(memory.buffer,engine.base+172,engine.api.arena_len()-172))]),canonical,
+              'direct success changes only its32byte compact result, not canonical CPU/work state');
+            const result=this.resultView(32);
+            assert.equal(result.getUint32(0,true),0x46493352);assert.equal(result.getUint32(4,true),0x10001);
+            assert.equal(result.getUint32(8,true),32);assert.equal(result.getUint32(12,true),0);
+            directResults.push({id:result.getUint32(16,true),eax:result.getUint32(20,true),
+              pc:result.getUint32(24,true),esp:result.getUint32(28,true),canonicalUnchanged:true,bankExports:0,clockObservations:0});
+          }
+        }
         if(operation==='component_cpu_try_inline_gate') {
           atomicCalls.push(status);
           if(status===256)assert.deepEqual(snapshot(),previous,'atomic decline leaves state/exit/banks/work/transfer unchanged');
@@ -342,9 +378,10 @@ try {
       };
       let run;
       try {cache.import();run=cache.execute(cache.select());cache.publish();}
-      finally {engine.ok=original;engine.status=originalStatus;}
+      finally {engine.ok=original;engine.status=originalStatus;cache.traps.continueGate=originalContinue;}
       const after=cache.stats(),delta=(cpuViews(memory).data.getUint32(664,true)-counter)>>>0;
-      const row={label,run,publications,atomicCalls,bankExports:bankExports-exportsBefore,beforeCounter:counter,delta,inlineCompletions:after.inlineCompletions-before.inlineCompletions,
+      const row={label,run,publications,atomicCalls,directCalls,directResults,continuations,bankExports:bankExports-exportsBefore,beforeCounter:counter,delta,inlineCompletions:after.inlineCompletions-before.inlineCompletions,
+        directCompletions:(after.directCompletions??0)-(before.directCompletions??0),directDeclines:(after.directDeclines??0)-(before.directDeclines??0),
         runs:after.runs-before.runs,regions:after.regions-before.regions,gates:after.gates-before.gates,workPacket:workPacket(),clockCalls};
       assert.equal(run.work,delta);assert.equal(workPacket(),delta);
       assert.equal(after.work-before.work,delta);assert.equal(after.retired-before.retired,run.retired);
@@ -357,16 +394,20 @@ try {
         }
       }
       if(label==='warmup') {
-        report.inline.warmupCount=(report.inline.warmupCount??0)+1;report.inline.lastWarmup=row;
-      } else {report.inline.runs.push(row);save();}
+        inlineReport.warmupCount=(inlineReport.warmupCount??0)+1;inlineReport.lastWarmup=row;
+      } else {inlineReport.runs.push(row);save();}
       return row;
     };
     const checkChain=row=>{
       assert.equal(row.run.reason,8);assert.equal(row.run.detail,ids.slow);
       assert.equal(row.run.pc,entries.get(ids.slow));assert.equal(row.inlineCompletions,3);
-      assert.equal(row.gates,4);assert.equal(row.publications.length,4);
-      assert.equal(row.bankExports,4,'three completed APIs and one declined slow gate export full banks once each');
-      if(atomicSupported){assert.deepEqual(row.atomicCalls,[0,0,0,256]);assert.equal(row.publications.filter(p=>p.source==='js-publication').length,1);}
+      assert.equal(row.gates,4);assert.equal(row.publications.length,directMode?1:4);
+      assert.equal(row.bankExports,directMode?1:4,'direct successful calls skip banks and the slow fallback exports exactly once');
+      if(directMode) {
+        assert.deepEqual(row.directCalls,[0,0,0,256]);assert.deepEqual(row.atomicCalls,[]);
+        assert.equal(row.directCompletions,3);assert.equal(row.directDeclines,1);assert.equal(clockCalls,0);
+        assert.deepEqual(row.directResults.map(result=>result.id),[ids.get,ids.set,ids.tlsGet]);
+      } else if(atomicSupported){assert.deepEqual(row.atomicCalls,[0,0,0,256]);assert.equal(row.publications.filter(p=>p.source==='js-publication').length,1);}
       assert.equal(row.delta,40018);assert.equal(row.run.retired,40018);
       assert.equal(engine.get(32),stack-4);assert.equal(engine.get(52),0x646);
       assert.deepEqual([read(output),read(output+4),read(output+8)],[initialError,entries.get(ids.set),tlsValue]);
@@ -374,26 +415,32 @@ try {
       assert.equal(read(output+16),0,'first slow gate has not executed its return continuation');
     };
     cache.configureInlineGates(true,{paused:true,open:cache.open});
+    if(directMode)cache.configureDirectGates(true,{paused:true,open:cache.open});
     const wm=cache.cpu.wm,originalExports=wm.exports,exportDescriptor=Object.getOwnPropertyDescriptor(wm,'exports');
-    const observedExports={...originalExports,fpu_load_status_word(...args){bankExports++;return originalExports.fpu_load_status_word(...args);}};
+    const observedExports={...originalExports,fpu_load_status_word(...args){bankExports++;return originalExports.fpu_load_status_word(...args);},
+      fpu_load_tag_word(...args){bankTagReads++;return originalExports.fpu_load_tag_word(...args);}};
     Object.defineProperty(wm,'exports',{value:observedExports,writable:true,configurable:true});
+    const flagsDescriptor=Object.getOwnPropertyDescriptor(cache.cpu,'update_state_flags'),originalFlags=cache.cpu.update_state_flags;
+    Object.defineProperty(cache.cpu,'update_state_flags',{value:function(...args){stateFlagUpdates++;return originalFlags.apply(this,args);},writable:true,configurable:true});
     const ex=wm.exports,oldJit=ex.get_jit_config(0),oldStackLimit=Error.stackTraceLimit;
     Error.stackTraceLimit=64;
     try {
       stage='cold inline work aggregate';ex.set_jit_config(0,1);reset();checkChain(execute('cold'));
       ex.set_jit_config(0,0);
-      report.inline.jitBefore=runtime.counters();
+      inlineReport.jitBefore=runtime.counters();
       for(let index=0;index<20;index++){reset();checkChain(execute('warmup'));await new Promise(resolve=>setTimeout(resolve,2));}
-      report.inline.jitAfter=runtime.counters();
-      assert(report.inline.jitAfter.finalizedModules>report.inline.jitBefore.finalizedModules);
+      inlineReport.jitAfter=runtime.counters();
+      assert(inlineReport.jitAfter.finalizedModules>inlineReport.jitBefore.finalizedModules);
       stage='generated inline work aggregate';reset();const warmed=execute('generated');checkChain(warmed);
-      report.inline.nativeGateWitness={generatedCallback:/at g[0-9a-f]+@t/.test(warmed.publications[0].stack),
+      inlineReport.nativeGateWitness={generatedCallback:/at g[0-9a-f]+@t/.test(warmed.publications[0].stack),
         semantics:'registered API thunk may remain interpreted; finalized modules during this caller campaign and the separate actual continuation probe provide the bounded JIT evidence'};
       engine.ok('core_capture_windows_call');const token=engine.resultView(112).getUint32(16,true);
       engine.ok('core_complete_windows_call',token);assert.equal(engine.get(48),afterSlow);
       const followOn=execute('first slow gate completed once');
       assert.equal(followOn.inlineCompletions,0);assert.equal(followOn.delta,5);assert.equal(followOn.run.detail,ids.slow);
-      assert.equal(followOn.bankExports,1);if(atomicSupported)assert.deepEqual(followOn.atomicCalls,[256]);
+      assert.equal(followOn.bankExports,1);
+      if(directMode){assert.deepEqual(followOn.directCalls,[256]);assert.deepEqual(followOn.atomicCalls,[]);}
+      else if(atomicSupported)assert.deepEqual(followOn.atomicCalls,[256]);
       assert.equal(read(output+12),threadId);assert.equal(read(output+16),0x52494e47);
       stage='inline owner opt-out';reset();allow=false;const clocks=clockCalls,optOut=execute('owner opt-out');
       assert.equal(optOut.inlineCompletions,0);assert.equal(optOut.run.detail,ids.get);
@@ -405,16 +452,21 @@ try {
       const yielded=execute('deadline after successful completion');
       assert.equal(yielded.run.inlineYield,true);assert.equal(yielded.run.coreReason,2);assert.equal(yielded.delta,40004);
       assert.equal(yielded.inlineCompletions,1);assert.equal(engine.get(48),afterGet);
-      assert.equal(yielded.bankExports,2,'returned-state Budget yield exports the completed state after the gate snapshot');
+      assert.equal(yielded.bankExports,directMode?1:2,'returned-state Budget yield exports completed state exactly once for direct mode');
       assert.equal(engine.get(16),initialError);assert.equal(engine.get(32),stack);assert.equal(read(output),0);
       cache.inlineOwner.canContinue=()=>true;const resumed=execute('resume after completed deadline yield');
       assert.equal(resumed.run.detail,ids.slow);assert.equal(resumed.inlineCompletions,2);
       assert.equal(yielded.delta+resumed.delta,40018);
       stage='captured inline Busy is terminal';reset();const status=engine.status,before=cache.stats();let captures=0,failure;
-      const completionOperation=atomicSupported?'component_cpu_try_inline_gate':'component_cpu_try_complete_gate';
+      const completionOperation=directMode?'component_cpu_try_direct_gate':atomicSupported?'component_cpu_try_inline_gate':'component_cpu_try_complete_gate';
       engine.status=function(operation,...args) {
         if(operation===completionOperation) {
-          if(atomicSupported)status.call(this,'component_cpu_publish',...KEY,7,0,0,ids.get,0,0);
+          if(directMode) {
+            const views=cpuViews(memory);
+            exportState(this,cache.cpu,{pc:args[2],esp:args[3],flags:cache.cpu.wm.exports.get_eflags(),
+              cs:views.selectors[1],ss:views.selectors[2]});
+          }
+          if(atomicSupported || directMode)status.call(this,'component_cpu_publish',...KEY,7,0,0,ids.get,0,0);
           captures++;status.call(this,'core_capture_windows_call');return 12;
         }
         return status.call(this,operation,...args);
@@ -423,9 +475,10 @@ try {
       finally {engine.status=status;}
       for(const operation of ['import','select','execute'])assert.throws(()=>cache[operation](),error=>error===failure);
       assert.equal(captures,1);assert.equal(cache.stats().runs,before.runs);assert.equal(read(output+16),0);
-      assert.equal(cache.stats().inlineFailed,true);report.inline.busy={poisoned:true,captures,message:failure.message,
-        operation:completionOperation,injection:atomicSupported?'explicit zero Gate publication plus real capture, then simulated ABI Busy; handler not executed':'real capture then simulated ABI Busy; handler not executed'};
+      assert.equal(cache.stats().inlineFailed,true);inlineReport.busy={poisoned:true,captures,message:failure.message,
+        operation:completionOperation,injection:directMode?'test-only full live-state export and zero Gate publication plus real capture, then simulated ABI Busy; direct handler not executed':atomicSupported?'explicit zero Gate publication plus real capture, then simulated ABI Busy; handler not executed':'real capture then simulated ABI Busy; handler not executed'};
     } finally {ex.set_jit_config(0,oldJit);Error.stackTraceLimit=oldStackLimit;
+      if(flagsDescriptor)Object.defineProperty(cache.cpu,'update_state_flags',flagsDescriptor);else delete cache.cpu.update_state_flags;
       if(exportDescriptor)Object.defineProperty(wm,'exports',exportDescriptor);else delete wm.exports;}
   } else if(portText==='port') {
     stage='owned port gates and denied I/O forms';

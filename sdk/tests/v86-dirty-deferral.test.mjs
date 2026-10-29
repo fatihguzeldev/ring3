@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {V86CodeCache} from '../runtime/v86/index.js';
-import {importState} from '../runtime/v86/state.js';
+import {cpuViews,importState} from '../runtime/v86/state.js';
 import {Traps} from '../runtime/v86/traps.js';
 import {PARK,SEGMENTS,X87} from '../runtime/v86/layout.js';
 
@@ -208,6 +208,87 @@ test('atomic unexpected completion IDs and committed errors remain sticky failur
       assert.throws(()=>V86CodeCache.prototype[retry].call(f.cache),error=>error===failure);
     assert.equal(f.completions(),1);assert.deepEqual(f.publications,[]);
   }
+});
+
+function directFixture({status=0,recordId=0x10001,grow=false,allow=()=>true,...options}={}) {
+  const f=inlineFixture({atomic:true,allow,...options}),c=f.cache,h=c.engine;
+  Object.assign(c,{directGates:true,directCompletions:0,directDeclines:0});
+  h.api.component_cpu_try_direct_gate=()=>{};
+  const previous=h.status,calls=[];
+  h.status=(operation,...args)=>{
+    if(operation!=='component_cpu_try_direct_gate')return previous(operation,...args);
+    assert.equal(c.dirtyPending,true,'guest evidence must survive a native dispatch failure');
+    calls.push(args.slice(-3));
+    if(grow)c.memory.grow(1);
+    if(status!==0)return status;
+    const result=h.resultView(32);
+    for(const [offset,value] of [[0,0x46493352],[4,0x10001],[8,32],[12,0],[16,recordId],[20,0x89abcdef],[24,0x2000],[28,0x6100]])
+      result.setUint32(offset,value,true);
+    return 0;
+  };
+  return {...f,directCalls:calls};
+}
+
+test('direct gates change only live return registers across native growth without exporting banks or observing clocks',()=>{
+  for(const grow of [false,true]) {
+    const f=directFixture({grow}),c=f.cache,v=cpuViews(c.memory),b=c.engine.base;
+    v.regs[0]=0x55;v.regs[4]=0x6000;v.data.setUint32(b+72,2,true);
+    v.data.setUint32(120,0x246,true);v.bytes.fill(0x5a,832,960);v.bytes.fill(0x3c,1152,1280);
+    const canonical=v.bytes.slice(b,b+8192),numeric=v.bytes.slice(816,1280);
+    c.cpu.wm.exports.fpu_load_status_word=()=>{throw new Error('unexpected full-bank export');};
+    c.cpu.wm.exports.fpu_load_tag_word=()=>{throw new Error('unexpected full-bank import');};
+    c.cpu.update_state_flags=()=>{throw new Error('unexpected full-state import');};
+    assert.equal(c.tryInlineGate(f.trap()),true);
+    const current=cpuViews(c.memory);
+    assert.deepEqual(f.directCalls,[[0x1000,0x6000,0x55]]);
+    assert.deepEqual(current.bytes.slice(b,b+8192),canonical);assert.deepEqual(current.bytes.slice(816,1280),numeric);
+    assert.equal(current.regs[0],0x89abcdef);assert.equal(current.regs[4],0x6100);
+    assert.equal(current.data.getUint32(556,true),0x2000);assert.equal(current.data.getUint32(560,true),0x2000);
+    assert.equal(current.data.getUint32(620,true),0xffffffff);assert.equal(current.data.getUint32(120,true),0x246);
+    assert.equal(c.directCompletions,1);assert.equal(c.inlineCompletions,1);assert.equal(c.directDeclines,0);
+    assert.deepEqual(f.events,[]);assert.deepEqual(f.publications,[]);assert.equal(f.completions(),0);
+  }
+});
+
+test('direct decline uses one ordinary full-state fallback with no atomic retry or adapter clock',()=>{
+  const f=directFixture({status:256,id:0x4023d}),c=f.cache,data=new DataView(c.memory.buffer);
+  let exports=0;c.cpu.wm.exports.fpu_load_status_word=()=>{exports++;return 0;};
+  c.cpu.main_loop=()=>{
+    data.setUint32(64,0x55,true);data.setUint32(80,0x6000,true);const trap=f.trap();
+    assert.equal(c.tryInlineGate(trap),false);c.traps.pending=trap;
+    data.setUint32(556,PARK,true);data.setUint32(620,0xffffffff,true);data.setUint32(664,7,true);
+  };
+  const run=c.execute();
+  assert.equal(exports,1);assert.equal(f.completions(),0);assert.equal(f.directCalls.length,1);
+  assert.equal(c.directDeclines,1);assert.equal(c.directCompletions,0);assert.equal(run.observedClock,undefined);
+  assert.equal(run.work,7);assert.equal(run.retired,7);assert.equal(c.engine.get(16),0x55);
+  assert.deepEqual(f.events,[]);assert.deepEqual(f.publications,[[7,0,0,0x4023d,7,7]]);
+});
+
+test('direct deadline yields the live returned state while fatal or segment failures cannot replay',()=>{
+  const yielded=directFixture({allow:check=>check<2});
+  assert.equal(yielded.cache.tryInlineGate(yielded.trap()),'yield');
+  assert.equal(yielded.cache.inlineYields,1);assert.equal(cpuViews(yielded.cache.memory).regs[0],0x89abcdef);
+  for(const options of [{status:12},{recordId:0x4023d},{badSegment:true}]) {
+    const f=directFixture(options);let failure;
+    if(options.badSegment)cpuViews(f.cache.memory).selectors[4]=0x3b;
+    assert.throws(()=>f.cache.tryInlineGate(f.trap()),error=>{failure=error;return true;});
+    assert.equal(f.cache.dirtyPending,true);
+    for(const retry of ['import','select','execute'])
+      assert.throws(()=>V86CodeCache.prototype[retry].call(f.cache),error=>error===failure);
+    assert.equal(f.directCalls.length,options.badSegment?0:1);assert.equal(f.completions(),0);
+  }
+});
+
+test('direct configuration is opt-in and requires a supported native export and a closed paused owner',()=>{
+  const f=directFixture(),c=f.cache;c.directGates=false;
+  for(const owner of [undefined,{paused:false,open:false},{paused:true,open:true}])
+    assert.throws(()=>c.configureDirectGates(true,owner),/paused/);
+  const owner={paused:true,open:false};c.dirtyPending=true;
+  assert.equal(c.configureDirectGates(true,owner),true);assert.equal(c.tables.calls,1);assert.equal(c.dirtyPending,false);
+  assert.equal(c.configureDirectGates(false,owner),false);
+  delete c.engine.api.component_cpu_try_direct_gate;
+  assert.throws(()=>c.configureDirectGates(true,owner),/unsupported/);assert.equal(c.directGates,false);
 });
 
 test('inline eligibility does not expand with future native safe flags or stale ownership',()=>{
