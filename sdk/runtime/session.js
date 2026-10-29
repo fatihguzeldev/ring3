@@ -144,8 +144,7 @@ export class Session {
     if(this.backend==='v86')this.code.inlineOwner={
       canContinue:()=>this.running && !this.paused && !this.stopped && !this.measurements &&
         !this.callDiagnostics && !this.frameProbe && !globalThis.__r3PhaseWindow &&
-        !this.stack().length && !this.needsSchedule && performance.now()<this.inlineQuantumDeadline &&
-        !h.api.pending_windows_thread_schedule(),
+        !this.stack().length && !this.needsSchedule && performance.now()<this.inlineQuantumDeadline,
       observeClock:()=>this.observeClock(),
     };
     this.abort.signal.throwIfAborted();
@@ -438,11 +437,11 @@ export class Session {
           this.settleWindows();
           break;
         }
-        let fused = 256, observedClock;
+        let fused = 256, observedClock=run.observedClock;
         if (this.backend === "v86" && this.fastNativeCalls && !this.measurements && !this.callDiagnostics &&
             !this.frameProbe && !globalThis.__r3PhaseWindow &&
             typeof h.api.component_cpu_try_complete_gate === "function") {
-          observedClock = this.observeClock();
+          observedClock ??= this.observeClock();
           fused = h.status("component_cpu_try_complete_gate", ...KEY);
           if (fused !== 0 && fused !== 12 && fused !== 256)
             throw Object.assign(new Error(`component_cpu_try_complete_gate returned${fused}`), {

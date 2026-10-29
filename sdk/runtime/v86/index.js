@@ -123,8 +123,10 @@ export class V86CodeCache {
       if(!delta && !trap)throw new Error(`v86 made no progress at0x${cpuViews(this.memory).data.getUint32(556,true).toString(16)}`);
       work+=delta;retired+=Math.max(0,delta-(trap?.privateInstructions??(trap?2:0)));
       if(trap?.registers)cpuViews(this.memory).regs.set(trap.registers);
-      exportState(h,cpu,trap);
-      if(this.reuseNumericState!==false)rememberStateBanks(h,cpu);
+      if(!(trap?.portGate && trap.privateInstructions===0 && trap.canonicalExported===true)) {
+        exportState(h,cpu,trap);
+        if(this.reuseNumericState!==false)rememberStateBanks(h,cpu);
+      }
       this.dirtyPending=true;
       if(trap?.vector===14 && (trap.error&2) && this.tables.isCopyOnWrite(trap.address)) {
         this.publish();
@@ -167,6 +169,7 @@ export class V86CodeCache {
     this.retired+=retired;this.work+=work;
     return {pc:this.pc,coreReason:stop,reason:h.get(72),detail:h.get(80),retired,work,
       inlineYield:trap?.budgetYield===true,
+      observedClock:trap?.observedClock,
       kind:'v86',id:'v86',regions:1,chainedColdRuns:0,chainedColdWork:0,chainedColdRetired:0};
   }
   inlineNativePending() {
@@ -182,21 +185,41 @@ export class V86CodeCache {
         this.tables.dirtyGateFlagsSupported!==true || !owner?.canContinue())return false;
     exportState(h,this.cpu,trap);
     if(this.reuseNumericState!==false)rememberStateBanks(h,this.cpu);
+    if(trap.portGate && trap.privateInstructions===0)trap.canonicalExported=true;
     this.dirtyPending=true;
-    const lookup=()=>{
-      h.ok('component_cpu_gate',...KEY,trap.pc);
-      const result=h.resultView(8),id=result.getUint32(0,true);
-      return (result.getUint32(4,true)&3)===3 && INLINE_GATE_IDS.has(id)?id:0;
-    };
-    const id=lookup();
-    if(!id || this.inlineNativePending())return false;
-    owner.observeClock();
-    if(!owner.canContinue() || this.inlineNativePending() || lookup()!==id)return false;
+    const atomic=typeof h.api.component_cpu_try_inline_gate==='function';
+    let id;
+    if(atomic) {
+      trap.observedClock=owner.observeClock();
+      if(!owner.canContinue())return false;
+    } else {
+      const lookup=()=>{
+        h.ok('component_cpu_gate',...KEY,trap.pc);
+        const result=h.resultView(8),gate=result.getUint32(0,true);
+        return (result.getUint32(4,true)&3)===3 && INLINE_GATE_IDS.has(gate)?gate:0;
+      };
+      id=lookup();
+      if(!id || this.inlineNativePending())return false;
+      trap.observedClock=owner.observeClock();
+      if(!owner.canContinue() || this.inlineNativePending() || lookup()!==id)return false;
+    }
     try {
       // the enclosing main_loop owns all instruction credits, including these calls.
-      h.ok('component_cpu_publish',...KEY,7,0,0,id,0,0);
-      const status=h.status('component_cpu_try_complete_gate',...KEY);
-      if(status!==0 || h.get(72)!==3 || this.inlineNativePending())
+      let status;
+      if(atomic) {
+        status=h.status('component_cpu_try_inline_gate',...KEY,trap.pc);
+        if(status===256)return false;
+        if(status===0) {
+          const record=h.resultView(112);id=record.getUint32(20,true);
+          if(record.getUint32(0,true)!==0x46433352 || record.getUint32(4,true)!==0x10001 ||
+              record.getUint32(8,true)!==112 || record.getUint32(32,true)!==trap.pc || !INLINE_GATE_IDS.has(id))
+            throw new Error('invalid v86 atomic inline completion record');
+        }
+      } else {
+        h.ok('component_cpu_publish',...KEY,7,0,0,id,0,0);
+        status=h.status('component_cpu_try_complete_gate',...KEY);
+      }
+      if(status!==0 || h.get(72)!==3 || (!atomic && this.inlineNativePending()))
         throw Object.assign(new Error(`v86 inline gate completion failed ${status}`),{status,id,pc:trap.pc});
       importState(h,this.cpu,this.traps);
       this.inlineCompletions++;this.gates++;this.portGateCalls++;this.deferredDirtyPublications++;
@@ -210,7 +233,8 @@ export class V86CodeCache {
     if(this.inlineFailure)throw this.inlineFailure;
     if(enabled && (typeof this.inlineOwner?.canContinue!=='function' ||
         typeof this.inlineOwner?.observeClock!=='function' ||
-        typeof this.engine.api.component_cpu_try_complete_gate!=='function'))
+        (typeof this.engine.api.component_cpu_try_complete_gate!=='function' &&
+         typeof this.engine.api.component_cpu_try_inline_gate!=='function')))
       throw new Error('v86 inline gates require a synchronous owner and native completion');
     this.publish();this.inlineGates=enabled;
     this.traps.continueGate=enabled?trap=>this.tryInlineGate(trap):null;

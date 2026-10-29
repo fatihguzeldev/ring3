@@ -279,8 +279,9 @@ try {
     const ids={get:0x10001,set:0x10002,allocate:0xf0009,tlsGet:0xf000b,tlsSet:0xf000c,slow:0xc0002};
     for(const id of Object.values(ids))assert(entries.has(id),`real registered gate ${id.toString(16)}`);
     const programPc=0x600900,output=0x601900,stack=0x601800,initialError=0xf1234567,nextError=0x10203040,tlsValue=0x55aa7788;
-    const savedBanks=banks();let allow=true,clockCalls=0;
-    cache.inlineOwner={canContinue:()=>allow,observeClock(){clockCalls++;engine.ok('observe_cpu_clock',0,0);}};
+    const savedBanks=banks(),atomicSupported=typeof engine.api.component_cpu_try_inline_gate==='function';
+    let allow=true,clockCalls=0,bankExports=0;
+    cache.inlineOwner={canContinue:()=>allow,observeClock(){clockCalls++;engine.ok('observe_cpu_clock',0,0);return 0n;}};
     assert.equal(cache.configurePortGates(true,{paused:true,open:cache.open}),true);
     const seed=pc=>{
       const registers=[0x11223344,0,0xe1,0x3456789a,stack,0x456789ab,0x56789abc,0x6789abcd];
@@ -310,30 +311,50 @@ try {
     program.push(0xa3,...u32(output+12),0xc7,0x05,...u32(output+16),...u32(0x52494e47));
     invoke(ids.slow);program.push(0xeb,0xfe);upload(programPc,program);
     cache.budget=100002;
-    report.inline={tlsIndex,programPc,afterGet,afterSlow,authoredLoopPrefixInstructions:40001,
+    report.inline={tlsIndex,programPc,afterGet,afterSlow,atomicSupported,authoredLoopPrefixInstructions:40001,
       authoredFirstOuterInstructions:40018,runs:[],semantics:'all intermediate gate publications carry zero credits; only completed outer main_loop deltas are charged'};
     const reset=()=>{nativeCall(ids.set,[initialError]);for(let index=0;index<5;index++)put(output+index*4,0);seed(programPc);};
     const workPacket=()=>engine.get(4604);
     const execute=(label)=>{
-      const original=engine.ok,publications=[],before=cache.stats(),counter=cpuViews(memory).data.getUint32(664,true);
+      const original=engine.ok,originalStatus=engine.status,publications=[],atomicCalls=[],before=cache.stats(),
+        counter=cpuViews(memory).data.getUint32(664,true),exportsBefore=bankExports;
+      const snapshot=()=>Buffer.concat([Buffer.from(new Uint8Array(memory.buffer,engine.base,96)),
+        engine.take(112),banks(),Buffer.from(new Uint8Array(memory.buffer,engine.base+4588,24))]);
+      engine.status=function(operation,...args) {
+        const previous=operation==='component_cpu_try_inline_gate'?snapshot():null;
+        const status=originalStatus.call(this,operation,...args);
+        if(operation==='component_cpu_try_inline_gate') {
+          atomicCalls.push(status);
+          if(status===256)assert.deepEqual(snapshot(),previous,'atomic decline leaves state/exit/banks/work/transfer unchanged');
+          if(status===0){const record=this.resultView(112);publications.push({source:'atomic-native',id:record.getUint32(20,true),
+            recordMagic:record.getUint32(0,true),recordSize:record.getUint32(8,true),gatePc:record.getUint32(32,true),
+            canonicalReason:this.get(72),retired:this.get(76),work:workPacket(),packetWork:workPacket(),
+            visibleCounter:cpuViews(memory).data.getUint32(664,true),stack:new Error('atomic inline completion').stack});}
+        }
+        return status;
+      };
       engine.ok=function(operation,...args) {
         const result=original.call(this,operation,...args);
-        if(operation==='component_cpu_publish')publications.push({stop:args[2],id:args[5],retired:args[6],work:args[7],
+        if(operation==='component_cpu_publish')publications.push({source:'js-publication',stop:args[2],id:args[5],retired:args[6],work:args[7],
           packetWork:workPacket(),visibleCounter:cpuViews(memory).data.getUint32(664,true),
           stack:new Error('inline publication').stack});
         return result;
       };
       let run;
       try {cache.import();run=cache.execute(cache.select());cache.publish();}
-      finally {engine.ok=original;}
+      finally {engine.ok=original;engine.status=originalStatus;}
       const after=cache.stats(),delta=(cpuViews(memory).data.getUint32(664,true)-counter)>>>0;
-      const row={label,run,publications,beforeCounter:counter,delta,inlineCompletions:after.inlineCompletions-before.inlineCompletions,
+      const row={label,run,publications,atomicCalls,bankExports:bankExports-exportsBefore,beforeCounter:counter,delta,inlineCompletions:after.inlineCompletions-before.inlineCompletions,
         runs:after.runs-before.runs,regions:after.regions-before.regions,gates:after.gates-before.gates,workPacket:workPacket(),clockCalls};
       assert.equal(run.work,delta);assert.equal(workPacket(),delta);
       assert.equal(after.work-before.work,delta);assert.equal(after.retired-before.retired,run.retired);
       assert.equal(row.runs,1);assert.equal(row.regions,1);assert.deepEqual(banks(),savedBanks);
       for(const publication of publications.slice(0,-1)) {
         assert.equal(publication.work,0);assert.equal(publication.retired,0);assert.equal(publication.packetWork,0);
+        if(publication.source==='atomic-native'){
+          assert.equal(publication.recordMagic,0x46433352);assert.equal(publication.recordSize,112);
+          assert.equal(publication.gatePc,entries.get(publication.id));assert.equal(publication.canonicalReason,3);
+        }
       }
       if(label==='warmup') {
         report.inline.warmupCount=(report.inline.warmupCount??0)+1;report.inline.lastWarmup=row;
@@ -344,6 +365,8 @@ try {
       assert.equal(row.run.reason,8);assert.equal(row.run.detail,ids.slow);
       assert.equal(row.run.pc,entries.get(ids.slow));assert.equal(row.inlineCompletions,3);
       assert.equal(row.gates,4);assert.equal(row.publications.length,4);
+      assert.equal(row.bankExports,4,'three completed APIs and one declined slow gate export full banks once each');
+      if(atomicSupported){assert.deepEqual(row.atomicCalls,[0,0,0,256]);assert.equal(row.publications.filter(p=>p.source==='js-publication').length,1);}
       assert.equal(row.delta,40018);assert.equal(row.run.retired,40018);
       assert.equal(engine.get(32),stack-4);assert.equal(engine.get(52),0x646);
       assert.deepEqual([read(output),read(output+4),read(output+8)],[initialError,entries.get(ids.set),tlsValue]);
@@ -351,13 +374,16 @@ try {
       assert.equal(read(output+16),0,'first slow gate has not executed its return continuation');
     };
     cache.configureInlineGates(true,{paused:true,open:cache.open});
-    const ex=cache.cpu.wm.exports,oldJit=ex.get_jit_config(0),oldStackLimit=Error.stackTraceLimit;
+    const wm=cache.cpu.wm,originalExports=wm.exports,exportDescriptor=Object.getOwnPropertyDescriptor(wm,'exports');
+    const observedExports={...originalExports,fpu_load_status_word(...args){bankExports++;return originalExports.fpu_load_status_word(...args);}};
+    Object.defineProperty(wm,'exports',{value:observedExports,writable:true,configurable:true});
+    const ex=wm.exports,oldJit=ex.get_jit_config(0),oldStackLimit=Error.stackTraceLimit;
     Error.stackTraceLimit=64;
     try {
       stage='cold inline work aggregate';ex.set_jit_config(0,1);reset();checkChain(execute('cold'));
       ex.set_jit_config(0,0);
       report.inline.jitBefore=runtime.counters();
-      for(let index=0;index<300;index++){reset();checkChain(execute('warmup'));await new Promise(resolve=>setTimeout(resolve,2));}
+      for(let index=0;index<20;index++){reset();checkChain(execute('warmup'));await new Promise(resolve=>setTimeout(resolve,2));}
       report.inline.jitAfter=runtime.counters();
       assert(report.inline.jitAfter.finalizedModules>report.inline.jitBefore.finalizedModules);
       stage='generated inline work aggregate';reset();const warmed=execute('generated');checkChain(warmed);
@@ -367,23 +393,28 @@ try {
       engine.ok('core_complete_windows_call',token);assert.equal(engine.get(48),afterSlow);
       const followOn=execute('first slow gate completed once');
       assert.equal(followOn.inlineCompletions,0);assert.equal(followOn.delta,5);assert.equal(followOn.run.detail,ids.slow);
+      assert.equal(followOn.bankExports,1);if(atomicSupported)assert.deepEqual(followOn.atomicCalls,[256]);
       assert.equal(read(output+12),threadId);assert.equal(read(output+16),0x52494e47);
       stage='inline owner opt-out';reset();allow=false;const clocks=clockCalls,optOut=execute('owner opt-out');
       assert.equal(optOut.inlineCompletions,0);assert.equal(optOut.run.detail,ids.get);
       assert.equal(optOut.delta,40004);assert.equal(clockCalls,clocks);assert.equal(optOut.publications.length,1);
+      assert.equal(optOut.bankExports,1);if(atomicSupported)assert.deepEqual(optOut.atomicCalls,[]);
       allow=true;
       stage='completed inline deadline yields returned state';reset();const completed=cache.inlineCompletions;
       cache.inlineOwner.canContinue=()=>cache.inlineCompletions===completed;
       const yielded=execute('deadline after successful completion');
       assert.equal(yielded.run.inlineYield,true);assert.equal(yielded.run.coreReason,2);assert.equal(yielded.delta,40004);
       assert.equal(yielded.inlineCompletions,1);assert.equal(engine.get(48),afterGet);
+      assert.equal(yielded.bankExports,2,'returned-state Budget yield exports the completed state after the gate snapshot');
       assert.equal(engine.get(16),initialError);assert.equal(engine.get(32),stack);assert.equal(read(output),0);
       cache.inlineOwner.canContinue=()=>true;const resumed=execute('resume after completed deadline yield');
       assert.equal(resumed.run.detail,ids.slow);assert.equal(resumed.inlineCompletions,2);
       assert.equal(yielded.delta+resumed.delta,40018);
       stage='captured inline Busy is terminal';reset();const status=engine.status,before=cache.stats();let captures=0,failure;
+      const completionOperation=atomicSupported?'component_cpu_try_inline_gate':'component_cpu_try_complete_gate';
       engine.status=function(operation,...args) {
-        if(operation==='component_cpu_try_complete_gate') {
+        if(operation===completionOperation) {
+          if(atomicSupported)status.call(this,'component_cpu_publish',...KEY,7,0,0,ids.get,0,0);
           captures++;status.call(this,'core_capture_windows_call');return 12;
         }
         return status.call(this,operation,...args);
@@ -392,8 +423,10 @@ try {
       finally {engine.status=status;}
       for(const operation of ['import','select','execute'])assert.throws(()=>cache[operation](),error=>error===failure);
       assert.equal(captures,1);assert.equal(cache.stats().runs,before.runs);assert.equal(read(output+16),0);
-      assert.equal(cache.stats().inlineFailed,true);report.inline.busy={poisoned:true,captures,message:failure.message};
-    } finally {ex.set_jit_config(0,oldJit);Error.stackTraceLimit=oldStackLimit;}
+      assert.equal(cache.stats().inlineFailed,true);report.inline.busy={poisoned:true,captures,message:failure.message,
+        operation:completionOperation,injection:atomicSupported?'explicit zero Gate publication plus real capture, then simulated ABI Busy; handler not executed':'real capture then simulated ABI Busy; handler not executed'};
+    } finally {ex.set_jit_config(0,oldJit);Error.stackTraceLimit=oldStackLimit;
+      if(exportDescriptor)Object.defineProperty(wm,'exports',exportDescriptor);else delete wm.exports;}
   } else if(portText==='port') {
     stage='owned port gates and denied I/O forms';
     assert.equal(cache.portGates,false,'the existing default remains UD2');

@@ -137,11 +137,12 @@ test('mode changes and close preserve pending evidence when publication fails', 
   assert.deepEqual(f.events.slice(-2), ['dirty', 'release']);
 });
 
-function inlineFixture({id=0x10001,flags=3,status=0,allow=()=>true,pendingBefore=false,pendingAfter=false}={}) {
+function inlineFixture({id=0x10001,flags=3,status=0,allow=()=>true,pendingBefore=false,pendingAfter=false,atomic=false,recordId=id}={}) {
   const f=fixture([]),c=f.cache,h=c.engine,data=new DataView(c.memory.buffer),result=new DataView(new ArrayBuffer(112));
   const publications=[];let captured=false,completions=0,checks=0;
   Object.assign(c,{inlineGates:true,portGates:true,inlineCompletions:0,inlineYields:0,inlineFailure:null});
   h.api={component_cpu_try_complete_gate(){},pending_windows_thread_schedule:()=>pendingBefore||captured&&pendingAfter?1:0};
+  if(atomic)h.api.component_cpu_try_inline_gate=()=>{};
   h.resultView=()=>result;
   h.ok=(operation,...args)=>{
     if(operation==='component_cpu_gate'){result.setUint32(0,id,true);result.setUint32(4,flags,true);}
@@ -150,7 +151,9 @@ function inlineFixture({id=0x10001,flags=3,status=0,allow=()=>true,pendingBefore
     else throw new Error('unexpected inline operation '+operation);
   };
   h.status=operation=>{
-    assert.equal(operation,'component_cpu_try_complete_gate');completions++;
+    assert.equal(operation,atomic?'component_cpu_try_inline_gate':'component_cpu_try_complete_gate');completions++;
+    if(atomic&&status===256)return status;
+    if(atomic)for(const [offset,value] of [[0,0x46433352],[4,0x10001],[8,112],[16,37],[20,recordId],[32,0x1000]])result.setUint32(offset,value,true);
     data.setUint32(h.base+16,0x89abcdef,true);data.setUint32(h.base+32,0x6100,true);
     data.setUint32(h.base+48,0x2000,true);data.setUint32(h.base+72,3,true);return status;
   };
@@ -160,9 +163,9 @@ function inlineFixture({id=0x10001,flags=3,status=0,allow=()=>true,pendingBefore
     data.setUint16(h.base+SEGMENTS+16+index*2,selector,true);
   data.setUint16(h.base+X87+20,0xffff,true);
   importState(h,c.cpu,c.traps);
-  c.inlineOwner={canContinue:()=>allow(++checks),observeClock(){f.events.push('clock');}};
+  c.inlineOwner={canContinue:()=>allow(++checks),observeClock(){f.events.push('clock');return 123n;}};
   return {...f,publications,completions:()=>completions,
-    trap:()=>({...gateTrap(),cs:0x1b,ss:0x23,esp:0x6000,portGate:true})};
+    trap:()=>({...gateTrap(),cs:0x1b,ss:0x23,esp:0x6000,portGate:true,privateInstructions:0})};
 }
 
 test('inline completion publishes zero credits and imports the real returned state',()=>{
@@ -173,6 +176,38 @@ test('inline completion publishes zero credits and imports the real returned sta
   const data=new DataView(f.cache.memory.buffer);
   assert.equal(data.getUint32(64,true),0x89abcdef);assert.equal(data.getUint32(556,true),0x2000);
   assert.equal(f.cache.retired,0);assert.equal(f.cache.work,0);
+});
+
+test('atomic inline completion uses one native boundary without separate publication or lookups',()=>{
+  const f=inlineFixture({atomic:true}),trap=f.trap();
+  assert.equal(f.cache.tryInlineGate(trap),true);assert.equal(f.completions(),1);
+  assert.deepEqual(f.publications,[]);assert.deepEqual(f.events,['clock']);
+  assert.equal(trap.observedClock,123n);assert.equal(f.cache.inlineCompletions,1);
+});
+
+test('untouched atomic decline reuses exported canonical banks after a pure OUT parks',()=>{
+  const f=inlineFixture({atomic:true,status:256,id:0x4023d}),c=f.cache,data=new DataView(c.memory.buffer);
+  let exports=0;c.cpu.wm.exports.fpu_load_status_word=()=>{exports++;return 0;};
+  c.cpu.main_loop=()=>{
+    data.setUint32(64,0x55,true);const trap=f.trap();
+    assert.equal(c.tryInlineGate(trap),false);c.traps.pending=trap;
+    data.setUint32(556,PARK,true);data.setUint32(620,0xffffffff,true);data.setUint32(664,7,true);
+  };
+  const run=c.execute();
+  assert.equal(exports,1,'parked E6e1 fallback must not export identical FP/GPR banks twice');
+  assert.equal(run.work,7);assert.equal(run.retired,7);assert.equal(run.observedClock,123n);
+  assert.equal(c.engine.get(16),0x55);assert.equal(c.inlineFailure,null);
+  assert.deepEqual(f.publications,[[7,0,0,0x4023d,7,7]]);
+});
+
+test('atomic unexpected completion IDs and committed errors remain sticky failures',()=>{
+  for(const options of [{status:12},{recordId:0x4023d}]) {
+    const f=inlineFixture({atomic:true,...options});let failure;
+    assert.throws(()=>f.cache.tryInlineGate(f.trap()),error=>{failure=error;return true;});
+    for(const retry of ['import','select','execute'])
+      assert.throws(()=>V86CodeCache.prototype[retry].call(f.cache),error=>error===failure);
+    assert.equal(f.completions(),1);assert.deepEqual(f.publications,[]);
+  }
 });
 
 test('inline eligibility does not expand with future native safe flags or stale ownership',()=>{

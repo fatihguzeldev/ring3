@@ -143,7 +143,7 @@ test('call capture consumes borrowed fields before native completion overwrites 
   assert.equal(engine.resultView(112).getUint32(0, true), 0xcccccccc);
 });
 
-async function fusedGateCase(fusedStatus, backend = 'v86') {
+async function fusedGateCase(fusedStatus, backend = 'v86', observedClock) {
   const memory = new WebAssembly.Memory({initial: 1}), calls = [], token = 37;
   const state = new DataView(memory.buffer);
   state.setUint32(72, 3, true);
@@ -183,7 +183,7 @@ async function fusedGateCase(fusedStatus, backend = 'v86') {
       publish() {}, import() {}, select: () => null,
       execute() {
         if (++executions === 1)
-          return {coreReason: 4, reason: 8, fastGate: false, pc: 0x1000, detail: 0x40232};
+          return {coreReason: 4, reason: 8, fastGate: false, pc: 0x1000, detail: 0x40232,observedClock};
         session.running = false;
         return {coreReason: 2};
       },
@@ -216,6 +216,12 @@ test('declined fused gate captures once and reuses its already observed completi
   assert.equal(callbacks, 1);
   assert.equal(settled, 1);
   assert.equal(session.fastNativeCompletions, 0);
+});
+
+test('an inline-declined gate reuses its observed clock through ordinary capture and completion',async()=>{
+  const {calls,clocks,token}=await fusedGateCase(256,'v86',0n);
+  assert.equal(clocks,1,'only the outer host-loop observation remains');
+  assert.deepEqual(calls,['schedule','fused','capture',['window',token],['complete',token],'schedule']);
 });
 
 test('busy fused gate retains the returned capture token for the existing blocked-call retry', async () => {
