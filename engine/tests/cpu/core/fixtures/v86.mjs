@@ -11,7 +11,7 @@ import {image as moduleImage} from '../../../loader/modules/wasm/fixtures/runtim
 
 const [enginePath, reportPath, permissionText = '1', portText = ''] = process.argv.slice(2);
 assert(enginePath && reportPath, 'usage: v86.mjs imported-engine.wasm fresh-report.json');
-assert(['', 'port', 'inline', 'direct', 'direct-bindings', 'guest-ret', 'global', 'overlap', 'simd', 'targeted-dirty'].includes(portText));
+assert(['', 'port', 'inline', 'direct', 'direct-bindings', 'direct-state-inputs', 'guest-ret', 'global', 'overlap', 'simd', 'targeted-dirty'].includes(portText));
 const targetedMode=portText==='targeted-dirty';
 const deniedPermission = Number(permissionText);
 assert([0,1].includes(deniedPermission));
@@ -22,7 +22,7 @@ assert.equal(hash(image), '7c0451977a0818d5f4905a2b00f3a3bae63b9449ef22775ea003e
 const cpuBytes = readFileSync(new URL('../../../../../sdk/runtime/v86/vendor/v86.wasm', import.meta.url));
 const report = {complete: false, engineSha256: artifact.sha256, cpuSha256: hash(cpuBytes),
   scope: 'actual unmodified v86 CPU, shared RAM, authored PE with four Ring3 Windows calls; no game/FPS claim',
-  portControls:portText==='port',inlineControls:portText==='inline',directControls:portText==='direct'||portText==='direct-bindings',directBindingsControls:portText==='direct-bindings',simdControls:portText==='simd',calls: [], runs: [], ownCpuCalls: 0};
+  portControls:portText==='port',inlineControls:portText==='inline',directControls:['direct','direct-bindings','direct-state-inputs'].includes(portText),directBindingsControls:portText==='direct-bindings',directStateInputControls:portText==='direct-state-inputs',simdControls:portText==='simd',calls: [], runs: [], ownCpuCalls: 0};
 writeFileSync(reportPath, JSON.stringify(report), {flag: 'wx'});
 const save = () => writeFileSync(reportPath, JSON.stringify(report, (_key, value) =>
   typeof value === 'bigint' ? String(value) : value, 2) + '\n');
@@ -424,8 +424,9 @@ try {
       assert.equal(new DataView(memory.buffer).getUint32(cache.tables.ram+DIRECTORY+(dense>>>22)*4,true)&32,0);
       report.densePteValidation.push({lane,before,after:version(),scannedPtes:cache.tables.lastDirtyScanCount});save();
     }
-  } else if(portText==='inline' || portText==='direct' || portText==='direct-bindings' || portText==='guest-ret') {
-    const directMode=portText!=='inline',bindingMode=portText==='direct-bindings',guestReturnMode=portText==='guest-ret';
+  } else if(portText==='inline' || portText==='direct' || portText==='direct-bindings' || portText==='direct-state-inputs' || portText==='guest-ret') {
+    const directMode=portText!=='inline',stateInputsMode=portText==='direct-state-inputs',bindingMode=portText==='direct-bindings'||stateInputsMode,guestReturnMode=portText==='guest-ret';
+    const requestedMask=(bindingMode?0x7ff:0xff)|(stateInputsMode?0x1800:0);
     stage=directMode?'direct scalar API continuation':'inline native API continuation';
     engine.ok('protect',0x601000,1,3);
     const entries=new Map();
@@ -482,8 +483,9 @@ try {
     }
     cache.budget=100002;
     const inlineReport=report[directMode?'direct':'inline']={tlsIndex,programPc,afterGet,afterSlow,atomicSupported,
-      directMode,bindingMode,guestReturnMode,directOperation,requestedMask:bindingMode?0x7ff:0xff,
+      directMode,bindingMode,stateInputsMode,guestReturnMode,directOperation,requestedMask,
       bindingCoverage:'mask selection and existing scalar continuation only; no D3D device is provisioned by this fixture',
+      stateInputCoverage:stateInputsMode?'mask13 ABI and unchanged scalar GPR/bank/work/noReplay flow only; positive SetViewport/SetLight dispatch belongs to native controls and game counters':undefined,
       authoredLoopPrefixInstructions:40001,authoredFirstOuterInstructions:40018+(guestReturnMode?1:0),runs:[],
       semantics:directMode?'direct calls preserve canonical State/Exit/banks/R3WK and return scalars; only the completed outer main_loop is published and charged':'all intermediate gate publications carry zero credits; only completed outer main_loop deltas are charged'};
     const reset=()=>{nativeCall(ids.set,[initialError]);for(let index=0;index<5;index++)put(output+index*4,0);seed(programPc);};
@@ -515,7 +517,7 @@ try {
         const status=originalStatus.call(this,operation,...args);
         if(operation===directOperation) {
           if(operation==='component_cpu_try_direct_gate_mask') {
-            assert.equal(args[5],bindingMode?0x7ff:0xff);directMasks.push(args[5]);
+            assert.equal(args[5],requestedMask);directMasks.push(args[5]);
           }
           directCalls.push(status);
           assert.equal(bankExports,exported,'native direct call invokes no guest FP export helpers');
@@ -557,6 +559,7 @@ try {
       const row={label,run,publications,atomicCalls,directCalls,directMasks,directResults,continuations,bankExports:bankExports-exportsBefore,beforeCounter:counter,delta,inlineCompletions:after.inlineCompletions-before.inlineCompletions,
         directCompletions:(after.directCompletions??0)-(before.directCompletions??0),directDeclines:(after.directDeclines??0)-(before.directDeclines??0),
         directBindingCompletions:(after.directBindingCompletions??0)-(before.directBindingCompletions??0),
+        directStateInputCompletions:(after.directStateInputCompletions??0)-(before.directStateInputCompletions??0),
         guestReturnCompletions:(after.guestReturnCompletions??0)-(before.guestReturnCompletions??0),
         runs:after.runs-before.runs,regions:after.regions-before.regions,gates:after.gates-before.gates,workPacket:workPacket(),clockCalls};
       assert.equal(run.work,delta);assert.equal(workPacket(),delta);
@@ -583,7 +586,8 @@ try {
         assert.deepEqual(row.directCalls,[0,0,0,256]);assert.deepEqual(row.atomicCalls,[]);
         assert.equal(row.directCompletions,3);assert.equal(row.directDeclines,1);assert.equal(clockCalls,0);
         assert.equal(row.directBindingCompletions,0);
-        assert.deepEqual(row.directMasks,directOperation==='component_cpu_try_direct_gate_mask'?Array(4).fill(bindingMode?0x7ff:0xff):[]);
+        assert.equal(row.directStateInputCompletions,0);
+        assert.deepEqual(row.directMasks,directOperation==='component_cpu_try_direct_gate_mask'?Array(4).fill(requestedMask):[]);
         assert.deepEqual(row.directResults.map(result=>result.id),[ids.get,ids.set,ids.tlsGet]);
       } else if(atomicSupported){assert.deepEqual(row.atomicCalls,[0,0,0,256]);assert.equal(row.publications.filter(p=>p.source==='js-publication').length,1);}
       assert.equal(row.delta,40018+(guestReturnMode?1:0));assert.equal(row.run.retired,40018+(guestReturnMode?1:0));
@@ -596,6 +600,7 @@ try {
     cache.configureInlineGates(true,{paused:true,open:cache.open});
     if(directMode)cache.configureDirectGates(true,{paused:true,open:cache.open});
     if(bindingMode)cache.configureDirectBindings(true,{paused:true,open:cache.open});
+    if(stateInputsMode){assert.equal(cache.directStateInputsSupported,true);cache.configureDirectStateInputs(true,{paused:true,open:cache.open});}
     if(guestReturnMode) {
       assert.equal(cache.guestReturnsSupported,true);cache.configureGuestReturns(true,{paused:true,open:cache.open});
       assert.equal(cache.gateMode().mode,2);assert(cache.gateMode().guestRetSites>0);

@@ -210,10 +210,11 @@ test('atomic unexpected completion IDs and committed errors remain sticky failur
   }
 });
 
-function directFixture({status=0,recordId=0x10001,grow=false,allow=()=>true,masked=false,bindings=false,guestReturns=false,...options}={}) {
+function directFixture({status=0,recordId=0x10001,grow=false,allow=()=>true,masked=false,bindings=false,guestReturns=false,stateInputs=false,...options}={}) {
   const f=inlineFixture({atomic:true,allow,...options}),c=f.cache,h=c.engine;
   Object.assign(c,{directGates:true,directCompletions:0,directDeclines:0,directBindings:bindings,directBindingCompletions:0});
   Object.assign(c,{guestReturns,guestReturnCompletions:0,portGateMode:guestReturns?2:1,portGatePatchedCount:12});
+  Object.assign(c,{directStateInputs:stateInputs,directStateInputCompletions:0});c.tables.directStateInputsSupported=true;
   h.api.component_cpu_try_direct_gate=()=>{};
   if(masked)h.api.component_cpu_try_direct_gate_mask=()=>{};
   const previous=h.status,calls=[];
@@ -328,6 +329,41 @@ test('binding opt-in requires a masked host and publishes pending evidence witho
   assert.throws(()=>c.configureDirectBindings(true,owner),/unsupported/);assert.equal(c.directBindings,false);
 });
 
+test('direct state input masks admit only the two requested IDs without publishing or copying CPU banks',()=>{
+  for(const bindings of [false,true])for(const recordId of [0x40228,0x4022c]) {
+    const f=directFixture({masked:true,stateInputs:true,bindings,recordId}),c=f.cache,v=cpuViews(c.memory);
+    const numeric=v.bytes.slice(816,1280);c.cpu.wm.exports.fpu_load_status_word=()=>{throw new Error('unexpected bank export');};
+    assert.equal(c.tryInlineGate(f.trap()),true);assert.equal(f.directCalls[0][3],bindings?0x1fff:0x18ff);
+    assert.equal(c.directStateInputCompletions,1);assert.equal(c.directBindingCompletions,0);assert.equal(c.directCompletions,1);
+    assert.deepEqual(cpuViews(c.memory).bytes.slice(816,1280),numeric);assert.deepEqual(f.events,[]);assert.deepEqual(f.publications,[]);
+  }
+  for(const recordId of [0x40228,0x4022c]) {
+    const f=directFixture({masked:true,bindings:true,recordId});
+    assert.throws(()=>f.cache.tryInlineGate(f.trap()),/invalid v86 direct completion record/);
+    assert.equal(f.directCalls[0][3],0x7ff);assert.equal(f.cache.directStateInputCompletions,0);
+  }
+});
+
+test('direct state input opt-in requires capability256 and masked native support before publishing',()=>{
+  const f=directFixture({masked:true}),c=f.cache,owner={paused:true,open:false};c.directGates=false;
+  for(const invalid of [undefined,{paused:false,open:false},{paused:true,open:true}])
+    assert.throws(()=>c.configureDirectStateInputs(true,invalid),/paused/);
+  c.dirtyPending=true;assert.equal(c.configureDirectStateInputs(true,owner),true);assert.equal(c.tables.calls,1);
+  assert.equal(c.configureDirectStateInputs(false,owner),false);c.tables.directStateInputsSupported=false;
+  assert.throws(()=>c.configureDirectStateInputs(true,owner),/unsupported/);assert.equal(c.directStateInputs,false);
+  c.tables.directStateInputsSupported=true;delete c.engine.api.component_cpu_try_direct_gate_mask;
+  assert.throws(()=>c.configureDirectStateInputs(true,owner),/unsupported/);assert.equal(c.directStateInputs,false);
+});
+
+test('a declined state input call publishes old guest writes before normal fallback without widening generic flags',()=>{
+  const f=directFixture({masked:true,stateInputs:true,status:256,id:0x40228,flags:2}),c=f.cache,data=new DataView(c.memory.buffer);
+  c.cpu.main_loop=()=>{const trap=f.trap();assert.equal(c.tryInlineGate(trap),false);c.traps.pending=trap;
+    data.setUint32(556,PARK,true);data.setUint32(620,0xffffffff,true);data.setUint32(664,7,true);};
+  const run=c.execute();assert.equal(run.coreReason,7);assert.deepEqual(f.events,['dirty']);
+  assert.deepEqual(f.publications,[[7,0,0,0x40228,7,7]]);assert.equal(c.dirtyPending,false);
+  assert.equal(c.directDeclines,1);assert.equal(c.directStateInputCompletions,0);assert.equal(f.completions(),0);
+});
+
 test('owned guest RET continuations change EAX only for the exact nine neutral APIs',()=>{
   for(const recordId of [0x10001,0x40225,0x4022a,0x4022e,0x40232,0x4023f,0x4023d,0x40253,0x40255]) {
     const f=directFixture({masked:true,bindings:true,guestReturns:true,recordId}),v=cpuViews(f.cache.memory);
@@ -393,7 +429,7 @@ function overlapFixture() {
 function startupFixture() {
   const f=fixture([]),c=f.cache,result=c.engine.resultView(),ordinary=c.engine.ok;
   Object.assign(c,{imported:false,portGates:false,portGateMode:0,inlineGates:false,directGates:false,
-    directBindings:false,guestReturns:false,graphicsOverlap:false,inlineFailure:null});
+    directBindings:false,directStateInputs:false,guestReturns:false,graphicsOverlap:false,inlineFailure:null});
   c.inlineOwner={canContinue:()=>false,observeClock:()=>0n};
   c.engine.api={component_cpu_set_gate_mode(){},component_cpu_try_inline_gate(){},
     component_cpu_try_complete_gate(){},component_cpu_try_direct_gate(){},component_cpu_try_direct_gate_mask(){}};
@@ -415,6 +451,7 @@ test('the fresh v86 backend initializes the measured bridge policy before import
   c.initializeExecutionPolicy();
   assert.equal(c.deferDirty,true);assert.equal(c.portGates,true);assert.equal(c.portGateMode,1);
   assert.equal(c.inlineGates,true);assert.equal(c.directGates,true);assert.equal(c.directBindings,true);
+  assert.equal(c.directStateInputs,false);
   assert.equal(c.tables.globalCode,true);assert.equal(c.guestReturns,false);assert.equal(c.graphicsOverlap,false);
   assert.equal(c.imported,false);assert.equal(c.runs,0);assert.equal(c.open,false);
   assert.deepEqual(f.events.filter(event=>event.startsWith('mode:')),['mode:1']);

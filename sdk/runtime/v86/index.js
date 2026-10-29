@@ -7,6 +7,7 @@ import {cpuViews,importState,exportState,rememberStateBanks,forgetStateBanks,val
 
 const INLINE_GATE_IDS=new Set([0x10001,0x10002,0xf000b,0x40225,0x4022a,0x4022e,0x40232,0x4023f]);
 const DIRECT_BINDING_GATE_IDS=new Set([0x4023d,0x40253,0x40255]);
+const DIRECT_STATE_INPUT_GATE_IDS=new Set([0x40228,0x4022c]);
 const GUEST_RETURN_GATE_IDS=new Set([0x10001,0x40225,0x4022a,0x4022e,0x40232,0x4023f,0x4023d,0x40253,0x40255]);
 
 export async function prepareV86(options={}, {signal}={}) {
@@ -86,6 +87,7 @@ export class V86CodeCache {
     this.inlineGates=false;this.inlineCompletions=0;this.inlineYields=0;this.inlineFailure=null;
     this.directGates=false;this.directCompletions=0;this.directDeclines=0;
     this.directBindings=false;this.directBindingCompletions=0;
+    this.directStateInputs=false;this.directStateInputCompletions=0;
     this.guestReturns=false;this.guestReturnCompletions=0;
     this.graphicsOverlap=false;
     this.executionPolicyInitialized=false;
@@ -115,6 +117,7 @@ export class V86CodeCache {
   }
   get pc() {return this.engine.get(48);}
   get guestReturnsSupported() {return this.tables.guestReturnsSupported===true;}
+  get directStateInputsSupported() {return this.tables.directStateInputsSupported===true && typeof this.engine.api.component_cpu_try_direct_gate_mask==='function';}
   readCodeByte(address) {
     const {memory,tables}=this,page=address>>>12,buffer=memory.buffer;
     let views=this.codeByteViews;
@@ -265,17 +268,19 @@ export class V86CodeCache {
     const h=this.engine;this.dirtyPending=true;
     try {
       validateSegmentSelectors(h,this.cpu,trap);
-      const before=cpuViews(this.memory),bindings=this.directBindings===true,
+      const before=cpuViews(this.memory),bindings=this.directBindings===true,stateInputs=this.directStateInputs===true,
         masked=typeof h.api.component_cpu_try_direct_gate_mask==='function';
       if(bindings && !masked)throw new Error('native v86 direct bindings are unsupported');
-      const status=masked?h.status('component_cpu_try_direct_gate_mask',...KEY,trap.pc,before.regs[4],before.regs[0],bindings?0x7ff:0xff)
+      if(stateInputs && !this.directStateInputsSupported)throw new Error('native v86 direct state inputs are unsupported');
+      const mask=(bindings?0x7ff:0xff)|(stateInputs?0x1800:0);
+      const status=masked?h.status('component_cpu_try_direct_gate_mask',...KEY,trap.pc,before.regs[4],before.regs[0],mask)
         :h.status('component_cpu_try_direct_gate',...KEY,trap.pc,before.regs[4],before.regs[0]);
       if(status===256){this.directDeclines++;return false;}
       if(status!==0)throw Object.assign(new Error(`v86 direct gate completion failed ${status}`),{status,pc:trap.pc});
       const record=h.resultView(32),id=record.getUint32(16,true);
       if(record.getUint32(0,true)!==0x46493352 || record.getUint32(4,true)!==0x10001 ||
           record.getUint32(8,true)!==32 || record.getUint32(12,true)!==0 ||
-          !(INLINE_GATE_IDS.has(id) || bindings && DIRECT_BINDING_GATE_IDS.has(id)))
+          !(INLINE_GATE_IDS.has(id) || bindings && DIRECT_BINDING_GATE_IDS.has(id) || stateInputs && DIRECT_STATE_INPUT_GATE_IDS.has(id)))
         throw new Error('invalid v86 direct completion record');
       const returned=cpuViews(this.memory),continued=this.inlineOwner.canContinue(),
         guestReturn=this.guestReturns && this.portGateMode===2 && GUEST_RETURN_GATE_IDS.has(id) && continued;
@@ -287,6 +292,7 @@ export class V86CodeCache {
       }
       this.directCompletions++;this.inlineCompletions++;this.gates++;this.portGateCalls++;this.deferredDirtyPublications++;
       if(DIRECT_BINDING_GATE_IDS.has(id))this.directBindingCompletions++;
+      if(DIRECT_STATE_INPUT_GATE_IDS.has(id))this.directStateInputCompletions++;
       if(!continued){this.inlineYields++;return 'yield';}
       return true;
     } catch(error){this.inlineFailure=error;throw error;}
@@ -306,6 +312,13 @@ export class V86CodeCache {
     if(enabled && typeof this.engine.api.component_cpu_try_direct_gate_mask!=='function')
       throw new Error('native v86 direct bindings are unsupported');
     this.publish();this.directBindings=enabled;return enabled;
+  }
+  configureDirectStateInputs(enabled,owner) {
+    if(owner?.paused!==true || owner?.open!==false || this.open || this.closed || typeof enabled!=='boolean')
+      throw new Error('v86 direct state input changes require a closed paused owner');
+    if(this.inlineFailure)throw this.inlineFailure;
+    if(enabled && !this.directStateInputsSupported)throw new Error('native v86 direct state inputs are unsupported');
+    this.publish();this.directStateInputs=enabled;return enabled;
   }
   gateMode() {
     this.engine.ok('component_cpu_gate_mode',...KEY);const d=this.engine.resultView(16),
@@ -408,6 +421,7 @@ export class V86CodeCache {
       inlineGates:this.inlineGates,inlineCompletions:this.inlineCompletions,inlineYields:this.inlineYields,
       directGates:this.directGates,directCompletions:this.directCompletions,directDeclines:this.directDeclines,
       directBindings:this.directBindings,directBindingCompletions:this.directBindingCompletions,
+      directStateInputs:this.directStateInputs,directStateInputsSupported:this.directStateInputsSupported,directStateInputCompletions:this.directStateInputCompletions,
       inlineFailed:!!this.inlineFailure,
       deferredDirtyPublications:this.deferredDirtyPublications,wasmMemoryBytes:this.memory.buffer.byteLength,
       executePermissionEnforcement:false,faultAccessLength:'one-byte conservative fault span',

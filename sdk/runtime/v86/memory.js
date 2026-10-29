@@ -22,6 +22,7 @@ export class PageTables {
     this.globalCodeSupported=(info.mappingChangeFlags&32)!==0 && typeof cpu.clear_tlb==='function';
     this.guestReturnsSupported=(info.mappingChangeFlags&64)!==0;
     this.nativeDirtyVirtualSupported=(info.mappingChangeFlags&128)!==0;
+    this.directStateInputsSupported=(info.mappingChangeFlags&256)!==0;
     this.invalidateDirtyPage=cpu.wm?.exports?.instr16_0F01_7_mem;
     this.targetedDirtySupported=this.nativeDirtyVirtualSupported && this.nativeDirtyEpochSupported && typeof this.invalidateDirtyPage==='function' &&
       cpu.cpl?.length===1 && cpu.cpl.byteOffset===612 && cpu.cpl.buffer===engine.memory.buffer;
