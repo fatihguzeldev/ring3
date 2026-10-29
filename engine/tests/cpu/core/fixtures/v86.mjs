@@ -10,7 +10,7 @@ import {image as moduleImage} from '../../../loader/modules/wasm/fixtures/runtim
 
 const [enginePath, reportPath, permissionText = '1', portText = ''] = process.argv.slice(2);
 assert(enginePath && reportPath, 'usage: v86.mjs imported-engine.wasm fresh-report.json');
-assert(['', 'port', 'inline', 'direct', 'simd'].includes(portText));
+assert(['', 'port', 'inline', 'direct', 'direct-bindings', 'simd'].includes(portText));
 const deniedPermission = Number(permissionText);
 assert([0,1].includes(deniedPermission));
 const hash = bytes => createHash('sha256').update(bytes).digest('hex');
@@ -20,7 +20,7 @@ assert.equal(hash(image), '7c0451977a0818d5f4905a2b00f3a3bae63b9449ef22775ea003e
 const cpuBytes = readFileSync(new URL('../../../../../sdk/runtime/v86/vendor/v86.wasm', import.meta.url));
 const report = {complete: false, engineSha256: artifact.sha256, cpuSha256: hash(cpuBytes),
   scope: 'actual unmodified v86 CPU, shared RAM, authored PE with four Ring3 Windows calls; no game/FPS claim',
-  portControls:portText==='port',inlineControls:portText==='inline',directControls:portText==='direct',simdControls:portText==='simd',calls: [], runs: [], ownCpuCalls: 0};
+  portControls:portText==='port',inlineControls:portText==='inline',directControls:portText==='direct'||portText==='direct-bindings',directBindingsControls:portText==='direct-bindings',simdControls:portText==='simd',calls: [], runs: [], ownCpuCalls: 0};
 writeFileSync(reportPath, JSON.stringify(report), {flag: 'wx'});
 const save = () => writeFileSync(reportPath, JSON.stringify(report, (_key, value) =>
   typeof value === 'bigint' ? String(value) : value, 2) + '\n');
@@ -266,8 +266,8 @@ try {
       assert.equal(new DataView(memory.buffer).getUint32(cache.tables.ram+DIRECTORY+(dense>>>22)*4,true)&32,0);
       report.densePteValidation.push({lane,before,after:version(),scannedPtes:cache.tables.lastDirtyScanCount});save();
     }
-  } else if(portText==='inline' || portText==='direct') {
-    const directMode=portText==='direct';
+  } else if(portText==='inline' || portText==='direct' || portText==='direct-bindings') {
+    const directMode=portText!=='inline',bindingMode=portText==='direct-bindings';
     stage=directMode?'direct scalar API continuation':'inline native API continuation';
     engine.ok('protect',0x601000,1,3);
     const entries=new Map();
@@ -282,6 +282,8 @@ try {
     const programPc=0x600900,output=0x601900,stack=0x601800,initialError=0xf1234567,nextError=0x10203040,tlsValue=0x55aa7788;
     const savedBanks=banks(),atomicSupported=typeof engine.api.component_cpu_try_inline_gate==='function';
     if(directMode)assert.equal(typeof engine.api.component_cpu_try_direct_gate,'function');
+    const directOperation=typeof engine.api.component_cpu_try_direct_gate_mask==='function'?'component_cpu_try_direct_gate_mask':'component_cpu_try_direct_gate';
+    if(bindingMode)assert.equal(directOperation,'component_cpu_try_direct_gate_mask');
     let allow=true,clockCalls=0,bankExports=0,bankTagReads=0,stateFlagUpdates=0;
     cache.inlineOwner={canContinue:()=>allow,observeClock(){clockCalls++;engine.ok('observe_cpu_clock',0,0);return 0n;}};
     assert.equal(cache.configurePortGates(true,{paused:true,open:cache.open}),true);
@@ -314,13 +316,15 @@ try {
     invoke(ids.slow);program.push(0xeb,0xfe);upload(programPc,program);
     cache.budget=100002;
     const inlineReport=report[directMode?'direct':'inline']={tlsIndex,programPc,afterGet,afterSlow,atomicSupported,
-      directMode,authoredLoopPrefixInstructions:40001,authoredFirstOuterInstructions:40018,runs:[],
+      directMode,bindingMode,directOperation,requestedMask:bindingMode?0x7ff:0xff,
+      bindingCoverage:'mask selection and existing scalar continuation only; no D3D device is provisioned by this fixture',
+      authoredLoopPrefixInstructions:40001,authoredFirstOuterInstructions:40018,runs:[],
       semantics:directMode?'direct calls preserve canonical State/Exit/banks/R3WK and return scalars; only the completed outer main_loop is published and charged':'all intermediate gate publications carry zero credits; only completed outer main_loop deltas are charged'};
     const reset=()=>{nativeCall(ids.set,[initialError]);for(let index=0;index<5;index++)put(output+index*4,0);seed(programPc);};
     const workPacket=()=>engine.get(4604);
     const execute=(label)=>{
       const original=engine.ok,originalStatus=engine.status,originalContinue=cache.traps.continueGate,
-        publications=[],atomicCalls=[],directCalls=[],directResults=[],continuations=[],before=cache.stats(),
+        publications=[],atomicCalls=[],directCalls=[],directMasks=[],directResults=[],continuations=[],before=cache.stats(),
         counter=cpuViews(memory).data.getUint32(664,true),exportsBefore=bankExports;
       if(directMode)cache.traps.continueGate=trap=>{
         const exported=bankExports,tags=bankTagReads,updates=stateFlagUpdates,observed=clockCalls;
@@ -335,15 +339,18 @@ try {
       const snapshot=()=>Buffer.concat([Buffer.from(new Uint8Array(memory.buffer,engine.base,96)),
         engine.take(112),banks(),Buffer.from(new Uint8Array(memory.buffer,engine.base+4588,24))]);
       engine.status=function(operation,...args) {
-        const watched=operation==='component_cpu_try_inline_gate' || operation==='component_cpu_try_direct_gate';
+        const watched=operation==='component_cpu_try_inline_gate' || operation===directOperation;
         const previous=watched?snapshot():null;
-        const canonical=operation==='component_cpu_try_direct_gate'?Buffer.concat([
+        const canonical=operation===directOperation?Buffer.concat([
           Buffer.from(new Uint8Array(memory.buffer,engine.base,140)),
           Buffer.from(new Uint8Array(memory.buffer,engine.base+172,engine.api.arena_len()-172)),
         ]):null;
         const exported=bankExports,observed=clockCalls;
         const status=originalStatus.call(this,operation,...args);
-        if(operation==='component_cpu_try_direct_gate') {
+        if(operation===directOperation) {
+          if(operation==='component_cpu_try_direct_gate_mask') {
+            assert.equal(args[5],bindingMode?0x7ff:0xff);directMasks.push(args[5]);
+          }
           directCalls.push(status);
           assert.equal(bankExports,exported,'native direct call invokes no guest FP export helpers');
           assert.equal(clockCalls,observed,'native direct call does not observe the clock');
@@ -380,8 +387,9 @@ try {
       try {cache.import();run=cache.execute(cache.select());cache.publish();}
       finally {engine.ok=original;engine.status=originalStatus;cache.traps.continueGate=originalContinue;}
       const after=cache.stats(),delta=(cpuViews(memory).data.getUint32(664,true)-counter)>>>0;
-      const row={label,run,publications,atomicCalls,directCalls,directResults,continuations,bankExports:bankExports-exportsBefore,beforeCounter:counter,delta,inlineCompletions:after.inlineCompletions-before.inlineCompletions,
+      const row={label,run,publications,atomicCalls,directCalls,directMasks,directResults,continuations,bankExports:bankExports-exportsBefore,beforeCounter:counter,delta,inlineCompletions:after.inlineCompletions-before.inlineCompletions,
         directCompletions:(after.directCompletions??0)-(before.directCompletions??0),directDeclines:(after.directDeclines??0)-(before.directDeclines??0),
+        directBindingCompletions:(after.directBindingCompletions??0)-(before.directBindingCompletions??0),
         runs:after.runs-before.runs,regions:after.regions-before.regions,gates:after.gates-before.gates,workPacket:workPacket(),clockCalls};
       assert.equal(run.work,delta);assert.equal(workPacket(),delta);
       assert.equal(after.work-before.work,delta);assert.equal(after.retired-before.retired,run.retired);
@@ -406,6 +414,8 @@ try {
       if(directMode) {
         assert.deepEqual(row.directCalls,[0,0,0,256]);assert.deepEqual(row.atomicCalls,[]);
         assert.equal(row.directCompletions,3);assert.equal(row.directDeclines,1);assert.equal(clockCalls,0);
+        assert.equal(row.directBindingCompletions,0);
+        assert.deepEqual(row.directMasks,directOperation==='component_cpu_try_direct_gate_mask'?Array(4).fill(bindingMode?0x7ff:0xff):[]);
         assert.deepEqual(row.directResults.map(result=>result.id),[ids.get,ids.set,ids.tlsGet]);
       } else if(atomicSupported){assert.deepEqual(row.atomicCalls,[0,0,0,256]);assert.equal(row.publications.filter(p=>p.source==='js-publication').length,1);}
       assert.equal(row.delta,40018);assert.equal(row.run.retired,40018);
@@ -416,6 +426,7 @@ try {
     };
     cache.configureInlineGates(true,{paused:true,open:cache.open});
     if(directMode)cache.configureDirectGates(true,{paused:true,open:cache.open});
+    if(bindingMode)cache.configureDirectBindings(true,{paused:true,open:cache.open});
     const wm=cache.cpu.wm,originalExports=wm.exports,exportDescriptor=Object.getOwnPropertyDescriptor(wm,'exports');
     const observedExports={...originalExports,fpu_load_status_word(...args){bankExports++;return originalExports.fpu_load_status_word(...args);},
       fpu_load_tag_word(...args){bankTagReads++;return originalExports.fpu_load_tag_word(...args);}};
@@ -458,7 +469,7 @@ try {
       assert.equal(resumed.run.detail,ids.slow);assert.equal(resumed.inlineCompletions,2);
       assert.equal(yielded.delta+resumed.delta,40018);
       stage='captured inline Busy is terminal';reset();const status=engine.status,before=cache.stats();let captures=0,failure;
-      const completionOperation=directMode?'component_cpu_try_direct_gate':atomicSupported?'component_cpu_try_inline_gate':'component_cpu_try_complete_gate';
+      const completionOperation=directMode?directOperation:atomicSupported?'component_cpu_try_inline_gate':'component_cpu_try_complete_gate';
       engine.status=function(operation,...args) {
         if(operation===completionOperation) {
           if(directMode) {

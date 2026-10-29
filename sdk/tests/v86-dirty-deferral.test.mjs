@@ -210,15 +210,16 @@ test('atomic unexpected completion IDs and committed errors remain sticky failur
   }
 });
 
-function directFixture({status=0,recordId=0x10001,grow=false,allow=()=>true,...options}={}) {
+function directFixture({status=0,recordId=0x10001,grow=false,allow=()=>true,masked=false,bindings=false,...options}={}) {
   const f=inlineFixture({atomic:true,allow,...options}),c=f.cache,h=c.engine;
-  Object.assign(c,{directGates:true,directCompletions:0,directDeclines:0});
+  Object.assign(c,{directGates:true,directCompletions:0,directDeclines:0,directBindings:bindings,directBindingCompletions:0});
   h.api.component_cpu_try_direct_gate=()=>{};
+  if(masked)h.api.component_cpu_try_direct_gate_mask=()=>{};
   const previous=h.status,calls=[];
   h.status=(operation,...args)=>{
-    if(operation!=='component_cpu_try_direct_gate')return previous(operation,...args);
+    if(operation!==(masked?'component_cpu_try_direct_gate_mask':'component_cpu_try_direct_gate'))return previous(operation,...args);
     assert.equal(c.dirtyPending,true,'guest evidence must survive a native dispatch failure');
-    calls.push(args.slice(-3));
+    calls.push(args.slice(masked?-4:-3));
     if(grow)c.memory.grow(1);
     if(status!==0)return status;
     const result=h.resultView(32);
@@ -289,6 +290,41 @@ test('direct configuration is opt-in and requires a supported native export and 
   assert.equal(c.configureDirectGates(false,owner),false);
   delete c.engine.api.component_cpu_try_direct_gate;
   assert.throws(()=>c.configureDirectGates(true,owner),/unsupported/);assert.equal(c.directGates,false);
+});
+
+test('masked direct binding requests admit only the selected three binding IDs and count them separately',()=>{
+  for(const recordId of [0x4023d,0x40253,0x40255]) {
+    const f=directFixture({masked:true,bindings:true,recordId});
+    assert.equal(f.cache.tryInlineGate(f.trap()),true);
+    assert.deepEqual(f.directCalls,[[0x1000,0,0,0x7ff]]);
+    assert.equal(f.cache.directBindingCompletions,1);assert.equal(f.cache.directCompletions,1);
+    assert.equal(f.cache.inlineCompletions,1);assert.deepEqual(f.events,[]);
+  }
+});
+
+test('masked direct8 requests cannot accept binding results and unsupported binding hosts cannot fall back',()=>{
+  const oldHost=directFixture({bindings:true});let failure;
+  assert.throws(()=>oldHost.cache.tryInlineGate(oldHost.trap()),error=>{failure=error;return /unsupported/.test(error.message);});
+  assert.equal(oldHost.directCalls.length,0);assert.equal(oldHost.cache.inlineFailure,failure);
+  for(const recordId of [0x4023d,0x40253,0x40255,0x40246]) {
+    const f=directFixture({masked:true,recordId});
+    assert.throws(()=>f.cache.tryInlineGate(f.trap()),/invalid v86 direct completion record/);
+    assert.deepEqual(f.directCalls,[[0x1000,0,0,0xff]]);
+    assert.equal(f.cache.directBindingCompletions,0);assert.equal(f.cache.directCompletions,0);
+  }
+  const getter=directFixture({masked:true});assert.equal(getter.cache.tryInlineGate(getter.trap()),true);
+  assert.equal(getter.directCalls[0][3],0xff);assert.equal(getter.cache.directBindingCompletions,0);
+});
+
+test('binding opt-in requires a masked host and publishes pending evidence without requiring active direct mode',()=>{
+  const f=directFixture({masked:true}),c=f.cache;c.directGates=false;
+  for(const owner of [undefined,{paused:false,open:false},{paused:true,open:true}])
+    assert.throws(()=>c.configureDirectBindings(true,owner),/paused/);
+  const owner={paused:true,open:false};c.dirtyPending=true;
+  assert.equal(c.configureDirectBindings(true,owner),true);assert.equal(c.tables.calls,1);
+  assert.equal(c.configureDirectBindings(false,owner),false);
+  delete c.engine.api.component_cpu_try_direct_gate_mask;
+  assert.throws(()=>c.configureDirectBindings(true,owner),/unsupported/);assert.equal(c.directBindings,false);
 });
 
 test('inline eligibility does not expand with future native safe flags or stale ownership',()=>{

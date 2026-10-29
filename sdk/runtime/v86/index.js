@@ -6,6 +6,7 @@ import {Traps} from './traps.js';
 import {cpuViews,importState,exportState,rememberStateBanks,forgetStateBanks,validateSegmentSelectors} from './state.js';
 
 const INLINE_GATE_IDS=new Set([0x10001,0x10002,0xf000b,0x40225,0x4022a,0x4022e,0x40232,0x4023f]);
+const DIRECT_BINDING_GATE_IDS=new Set([0x4023d,0x40253,0x40255]);
 
 export async function prepareV86(options={}, {signal}={}) {
   const memorySize=options.memorySize??PHYSICAL_BYTES;
@@ -82,6 +83,7 @@ export class V86CodeCache {
     this.portGates=false;this.portGateModeTouched=false;this.portGateCalls=0;this.deniedPortCalls=0;
     this.inlineGates=false;this.inlineCompletions=0;this.inlineYields=0;this.inlineFailure=null;
     this.directGates=false;this.directCompletions=0;this.directDeclines=0;
+    this.directBindings=false;this.directBindingCompletions=0;
   }
   get pc() {return this.engine.get(48);}
   readCodeByte(address) {
@@ -234,18 +236,24 @@ export class V86CodeCache {
     const h=this.engine;this.dirtyPending=true;
     try {
       validateSegmentSelectors(h,this.cpu,trap);
-      const before=cpuViews(this.memory),status=h.status('component_cpu_try_direct_gate',...KEY,trap.pc,before.regs[4],before.regs[0]);
+      const before=cpuViews(this.memory),bindings=this.directBindings===true,
+        masked=typeof h.api.component_cpu_try_direct_gate_mask==='function';
+      if(bindings && !masked)throw new Error('native v86 direct bindings are unsupported');
+      const status=masked?h.status('component_cpu_try_direct_gate_mask',...KEY,trap.pc,before.regs[4],before.regs[0],bindings?0x7ff:0xff)
+        :h.status('component_cpu_try_direct_gate',...KEY,trap.pc,before.regs[4],before.regs[0]);
       if(status===256){this.directDeclines++;return false;}
       if(status!==0)throw Object.assign(new Error(`v86 direct gate completion failed ${status}`),{status,pc:trap.pc});
       const record=h.resultView(32),id=record.getUint32(16,true);
       if(record.getUint32(0,true)!==0x46493352 || record.getUint32(4,true)!==0x10001 ||
-          record.getUint32(8,true)!==32 || record.getUint32(12,true)!==0 || !INLINE_GATE_IDS.has(id))
+          record.getUint32(8,true)!==32 || record.getUint32(12,true)!==0 ||
+          !(INLINE_GATE_IDS.has(id) || bindings && DIRECT_BINDING_GATE_IDS.has(id)))
         throw new Error('invalid v86 direct completion record');
       const returned=cpuViews(this.memory);
       returned.regs[0]=record.getUint32(20,true);returned.regs[4]=record.getUint32(28,true);
       const pc=record.getUint32(24,true);
       returned.data.setUint32(556,pc,true);returned.data.setUint32(560,pc,true);returned.data.setUint32(620,0xffffffff,true);
       this.directCompletions++;this.inlineCompletions++;this.gates++;this.portGateCalls++;this.deferredDirtyPublications++;
+      if(DIRECT_BINDING_GATE_IDS.has(id))this.directBindingCompletions++;
       if(!this.inlineOwner.canContinue()){this.inlineYields++;return 'yield';}
       return true;
     } catch(error){this.inlineFailure=error;throw error;}
@@ -257,6 +265,14 @@ export class V86CodeCache {
     if(enabled && typeof this.engine.api.component_cpu_try_direct_gate!=='function')
       throw new Error('native v86 direct gates are unsupported');
     this.publish();this.directGates=enabled;return enabled;
+  }
+  configureDirectBindings(enabled,owner) {
+    if(owner?.paused!==true || owner?.open!==false || this.open || this.closed || typeof enabled!=='boolean')
+      throw new Error('v86 direct binding changes require a closed paused owner');
+    if(this.inlineFailure)throw this.inlineFailure;
+    if(enabled && typeof this.engine.api.component_cpu_try_direct_gate_mask!=='function')
+      throw new Error('native v86 direct bindings are unsupported');
+    this.publish();this.directBindings=enabled;return enabled;
   }
   configureInlineGates(enabled,owner) {
     if(owner?.paused!==true || owner?.open!==false || this.open || this.closed || typeof enabled!=='boolean')
@@ -315,6 +331,7 @@ export class V86CodeCache {
       portGates:this.portGates,portGateCalls:this.portGateCalls,deniedPortCalls:this.deniedPortCalls,
       inlineGates:this.inlineGates,inlineCompletions:this.inlineCompletions,inlineYields:this.inlineYields,
       directGates:this.directGates,directCompletions:this.directCompletions,directDeclines:this.directDeclines,
+      directBindings:this.directBindings,directBindingCompletions:this.directBindingCompletions,
       inlineFailed:!!this.inlineFailure,
       deferredDirtyPublications:this.deferredDirtyPublications,wasmMemoryBytes:this.memory.buffer.byteLength,
       executePermissionEnforcement:false,faultAccessLength:'one-byte conservative fault span',
