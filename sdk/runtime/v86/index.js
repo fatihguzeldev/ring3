@@ -91,6 +91,7 @@ export class V86CodeCache {
     this.tables=new PageTables(engine,cpu);
     try {this.traps=new Traps(cpu,address=>this.readCodeByte(address));}catch(error){this.tables.rollback(error);throw error;}
     this.imported=false;this.closed=false;this.open=false;
+    this.budgetStateReuse=false;this.budgetStateReuses=0;this.pendingBudgetContinuation=false;
     this.runs=0;this.regions=0;this.retired=0;this.work=0;this.gates=0;this.faults=0;
     this.dirtyPages=0;this.cowFaults=0;
     this.deferDirty=true;this.dirtyPending=false;this.deferredDirtyPublications=0;
@@ -198,20 +199,32 @@ export class V86CodeCache {
     return views.bytes[tables.ram+BACKING_BASE+(mapped-1)*PAGE+(address&4095)];
   }
   import() {
+    this.pendingBudgetContinuation=false;this.imported=false;
     if(this.inlineFailure)throw this.inlineFailure;
     if(this.closed)throw new Error('v86 adapter is closed');
     this.tables.refresh();
     importState(this.engine,this.cpu,this.traps,this.relaxedFpu);
     this.traps.pending=null;this.imported=true;
   }
-  select() {
+  select(allowBudgetContinuation=false) {
+    const pending=this.pendingBudgetContinuation;
+    this.pendingBudgetContinuation=false;
     if(this.inlineFailure)throw this.inlineFailure;
+    if(this.closed)throw new Error('v86 adapter is closed');
+    if(this.open)throw new Error('cannot select an active v86 adapter');
+    if(allowBudgetContinuation===true && this.budgetStateReuse===true && pending && !this.imported) {
+      this.imported=true;this.budgetStateReuses++;
+    }
     if(!this.imported)this.import();
     return {id:'v86',pc:this.pc};
   }
   execute() {
+    this.pendingBudgetContinuation=false;
     if(this.inlineFailure)throw this.inlineFailure;
+    if(this.closed)throw new Error('v86 adapter is closed');
+    if(this.open)throw new Error('cannot execute an active v86 adapter');
     if(!this.imported)this.import();
+    this.imported=false;
     const cpu=this.cpu,h=this.engine,hp=cpu.wm.exports.get_hypercall_page_ptr()>>>0;
     let work=0,retired=0,stop=2,detail=0,auxiliary=0,vector=0,trap=null,deferAllowed=false;
     for(let attempt=0;attempt<8;attempt++) {
@@ -245,7 +258,7 @@ export class V86CodeCache {
       if(trap?.vector===14 && (trap.error&2) && this.tables.isCopyOnWrite(trap.address)) {
         this.publish();
         h.ok('component_cpu_write_fault',...KEY,trap.address);
-        this.cowFaults++;this.import();
+        this.cowFaults++;this.import();this.imported=false;
         if(attempt===7)throw new Error('v86 repeated copy-on-write fault');
         continue;
       }
@@ -279,6 +292,7 @@ export class V86CodeCache {
     if(this.deferDirty && stop===7 && deferAllowed)this.deferredDirtyPublications++;
     else this.publish();
     h.ok('component_cpu_publish',...KEY,stop,detail,auxiliary,vector,retired,work);
+    this.pendingBudgetContinuation=this.budgetStateReuse===true && trap===null && stop===2;
     this.imported=false;this.traps.pending=null;this.runs++;this.regions++;
     this.retired+=retired;this.work+=work;
     return {pc:this.pc,coreReason:stop,reason:h.get(72),detail:h.get(80),retired,work,
@@ -493,6 +507,7 @@ export class V86CodeCache {
       admissions:counters.generatedModules,generatedModuleBytes:counters.generatedModuleBytes,
       installedUnits:counters.finalizedModules,v86:counters,jitConfig:this.runtime.jitConfig,
       workBudget:this.budget,gates:this.gates,faults:this.faults,cowFaults:this.cowFaults,
+      budgetStateReuse:this.budgetStateReuse,budgetStateReuses:this.budgetStateReuses,
       dirtyPages:this.dirtyPages,deferDirty:this.deferDirty,
       portGates:this.portGates,portGateCalls:this.portGateCalls,deniedPortCalls:this.deniedPortCalls,
       portGateMode:this.portGateMode,portGatePatchedCount:this.portGatePatchedCount,
@@ -512,6 +527,7 @@ export class V86CodeCache {
       preciseRuns:0,preciseRetired:0,preciseWork:0,chainEnabled:true};
   }
   close() {
+    this.pendingBudgetContinuation=false;
     if(this.closed)return;
     if(this.open)throw new Error('cannot close an active v86 adapter');
     this.harvestPortBridge();this.portBridge?.disarm();this.wasmPortsActive=false;

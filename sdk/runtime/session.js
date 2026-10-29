@@ -401,9 +401,11 @@ export class Session {
       const start = performance.now();
       this.inlineQuantumDeadline=start+6;
       do {
+        const allowBudgetContinuation=this.backend==='v86' && !this.measurements && !this.callDiagnostics &&
+          !this.frameProbe && !globalThis.__r3PhaseWindow;
         const unit = this.measurements
-            ? this.measurements.run("entry", () => this.code.select())
-            : this.code.select(),
+            ? this.measurements.run("entry", () => this.code.select(false))
+            : this.code.select(allowBudgetContinuation),
           callback = this.stack().at(-1);
         const measurements = this.measurements,
           probe = this.frameProbe?.measurements === measurements ? this.frameProbe : null,

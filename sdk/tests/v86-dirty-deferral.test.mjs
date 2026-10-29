@@ -62,6 +62,53 @@ function fixture(traps, gate = 0x40232) {
 
 const gateTrap = () => ({vector: 6, pc: 0x1000, flags: 2, esp: 0, cs: 0, ss: 0});
 
+function budgetFixture() {
+  const f=fixture([]),c=f.cache,d=new DataView(c.memory.buffer);
+  Object.assign(c,{budgetStateReuse:false,budgetStateReuses:0,pendingBudgetContinuation:false});
+  delete c.import;
+  c.tables.refresh=()=>f.events.push('refresh');
+  c.traps.setDescriptor=()=>{};c.cpu.update_state_flags=()=>f.events.push('state-import');
+  d.setUint16(c.engine.base+SEGMENTS+4,1,true);d.setUint16(c.engine.base+X87+20,0xffff,true);
+  for(const [i,selector] of [0x23,0x1b,0x23,0x23,0x33,0].entries())d.setUint16(c.engine.base+SEGMENTS+16+i*2,selector,true);
+  c.import();f.events.length=0;
+  return f;
+}
+
+test('pure budget continuation is opt-in and consumes one inner-turn permission without skipping publication',()=>{
+  const f=budgetFixture(),c=f.cache;
+  c.execute();c.select(true);
+  assert.equal(c.budgetStateReuses,0);assert(f.events.includes('refresh'));
+  c.budgetStateReuse=true;f.events.length=0;
+  c.execute();assert.equal(c.imported,false);assert.equal(c.pendingBudgetContinuation,true);
+  assert.deepEqual(f.events,['cpu','dirty','publish']);
+  c.select(true);assert.equal(c.budgetStateReuses,1);assert.equal(c.pendingBudgetContinuation,false);
+  c.select(true);assert.equal(c.budgetStateReuses,1);
+  c.execute();c.select();assert.equal(c.budgetStateReuses,1);
+  assert.deepEqual(f.events.slice(-2),['refresh','state-import']);
+  c.execute();c.import();assert.equal(c.pendingBudgetContinuation,false);
+  c.select(true);assert.equal(c.budgetStateReuses,1,'outer import revokes the previous permission');
+});
+
+test('budget continuation cannot survive gate exits, publication errors, active or closed owners',()=>{
+  for(const boundary of ['gate','yield','dirty-error','native-error','cpu-error']) {
+    const f=budgetFixture(),c=f.cache;c.budgetStateReuse=true;
+    if(boundary==='gate')c.cpu.main_loop=()=>{new DataView(c.memory.buffer).setUint32(664,3,true);c.traps.pending={...gateTrap(),cs:0x1b,ss:0x23};};
+    if(boundary==='yield')c.cpu.main_loop=()=>{new DataView(c.memory.buffer).setUint32(664,3,true);c.traps.pending={...gateTrap(),cs:0x1b,ss:0x23,budgetYield:true,privateInstructions:0};};
+    if(boundary==='dirty-error')c.tables.fail=true;
+    if(boundary==='native-error')c.engine.ok=()=>{throw Error('native publish failed');};
+    if(boundary==='cpu-error')c.cpu.main_loop=()=>{throw Error('cpu failed');};
+    if(boundary.endsWith('error'))assert.throws(()=>c.execute(),/failed/);else c.execute();
+    assert.equal(c.pendingBudgetContinuation,false,boundary);assert.equal(c.imported,false,boundary);
+  }
+  for(const boundary of ['open','closed','inlineFailure']) {
+    const f=budgetFixture(),c=f.cache;c.budgetStateReuse=true;c.execute();
+    c[boundary]=boundary==='inlineFailure'?Error('poisoned'):true;
+    assert.throws(()=>c.select(true),/active|closed|poisoned/);assert.equal(c.pendingBudgetContinuation,false);
+  }
+  const f=budgetFixture();f.cache.budgetStateReuse=true;f.cache.execute();f.cache.close();
+  assert.equal(f.cache.pendingBudgetContinuation,false);assert.throws(()=>f.cache.select(true),/closed/);
+});
+
 test('relaxed FPU boot is boolean-only before fetch and strict-compatible when omitted',async()=>{
   const original=globalThis.fetch;let fetches=0;
   globalThis.fetch=async()=>{fetches++;return {ok:false,status:418};};

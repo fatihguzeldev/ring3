@@ -297,3 +297,22 @@ test('an inline completion yield returns to the host before another CPU entry or
   await session.loop();
   assert.equal(executions,1);assert.equal(published,2);assert.equal(waits,1);
 });
+
+test('only an unobserved v86 inner entry permits budget state reuse',async()=>{
+  const prior=globalThis.__r3PhaseWindow;
+  try {for(const mode of ['plain','core','measurements','callDiagnostics','frameProbe','phase']) {
+    const allowed=[],session=Object.assign(Object.create(Session.prototype),{
+      backend:mode==='core'?'core':'v86',running:true,paused:false,stopped:false,lastSchedule:Infinity,lastStatus:Infinity,
+      recent:[],thread:1,blocked:new Map(),exits:new Map(),
+      engine:{get:()=>3,api:{pending_windows_thread_schedule:()=>0}},
+      media:{update(){},async graphicsOutput(){},graphicsTransport:{}},
+      code:{publish(){},import(){},select(value){allowed.push(value);return null;},execute(){session.running=false;return{coreReason:2};}},
+      async providers(){return false;},observeClock:()=>0n,initializer:()=>null,stack:()=>[],async wait(){},
+    });
+    if(mode==='measurements')session.measurements={run:(_name,fn)=>fn(),runAsync:(_name,fn)=>fn()};
+    if(mode==='callDiagnostics')session.callDiagnostics={};
+    if(mode==='frameProbe')session.frameProbe={measurements:Symbol('other')};
+    globalThis.__r3PhaseWindow=mode==='phase';
+    await session.loop();assert.deepEqual(allowed,[mode==='plain'],mode);
+  }} finally {if(prior===undefined)delete globalThis.__r3PhaseWindow;else globalThis.__r3PhaseWindow=prior;}
+});
