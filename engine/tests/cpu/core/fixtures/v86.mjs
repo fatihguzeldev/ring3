@@ -11,7 +11,7 @@ import {image as moduleImage} from '../../../loader/modules/wasm/fixtures/runtim
 
 const [enginePath, reportPath, permissionText = '1', portText = ''] = process.argv.slice(2);
 assert(enginePath && reportPath, 'usage: v86.mjs imported-engine.wasm fresh-report.json');
-assert(['', 'port', 'inline', 'direct', 'direct-bindings', 'direct-state-inputs', 'wasm-ports', 'guest-ret', 'global', 'overlap', 'simd', 'targeted-dirty', 'relaxed-fpu', 'relaxed-fpu-boot'].includes(portText));
+assert(['', 'port', 'inline', 'direct', 'direct-bindings', 'direct-state-inputs', 'wasm-ports', 'guest-ret', 'global', 'overlap', 'simd', 'targeted-dirty', 'budget-dirty', 'relaxed-fpu', 'relaxed-fpu-boot'].includes(portText));
 const relaxedBoot=portText==='relaxed-fpu-boot';
 const wasmRelaxed=portText==='wasm-ports';
 const targetedMode=portText==='targeted-dirty';
@@ -30,7 +30,7 @@ const save = () => writeFileSync(reportPath, JSON.stringify(report, (_key, value
   typeof value === 'bigint' ? String(value) : value, 2) + '\n');
 let runtime, engine, cache, stage = 'prepare';
 try {
-  runtime = await prepareV86({wasmUrl: 'data:application/wasm;base64,' + cpuBytes.toString('base64'), sha256: hash(cpuBytes),wasmPorts:wasmRelaxed,relaxedFpu:relaxedBoot||wasmRelaxed});
+  runtime = await prepareV86({wasmUrl: 'data:application/wasm;base64,' + cpuBytes.toString('base64'), sha256: hash(cpuBytes),wasmPorts:wasmRelaxed,relaxedFpu:relaxedBoot||wasmRelaxed||portText==='budget-dirty'});
   report.wasmPortBridgeInstalled=!!runtime.portBridge;
   assert.equal(report.wasmPortBridgeInstalled,portText==='wasm-ports','the Wasm IO import shim requires explicit boot opt-in');
   if(portText!=='wasm-ports')assert.equal(runtime.portBridgeFallback,undefined);
@@ -467,7 +467,43 @@ try {
     } finally {cache.cpu.full_clear_tlb=full;cache.cpu.clear_tlb=partial;}
     engine.ok('protect',0x600000,1,7);cache.tables.refresh();
   }
-  if(portText==='simd') {
+  if(portText==='budget-dirty') {
+    stage='pure Budget dirty evidence stays pending until the outer boundary';
+    const addresses=[0x6d0000,0xad0000],pc=0x600f00,owner={paused:true,open:false},t=cache.tables;
+    for(const address of addresses){engine.ok('map',address,1,3);put(address,0);}
+    upload(pc,[0xff,0x05,...u32(addresses[0]),0xff,0x05,...u32(addresses[1]),0xeb,0xf2]);
+    cache.tables.refresh();cache.budget=600;let uninterrupted=true;
+    cache.inlineOwner={canContinue:()=>true,canBridge:()=>uninterrupted};
+    assert.equal(cache.budgetDirtyDeferral,false);assert.equal(cache.configureBudgetDirtyDeferral(true,owner),true);
+    const d=()=>new DataView(memory.buffer),slots=addresses.map(address=>d().getUint32(t.maps+(address>>>12)*4,true)-1);
+    const versions=()=>slots.map(slot=>d().getBigUint64(t.physicalVersions+slot*16+8,true));
+    const values=()=>slots.map(slot=>d().getUint32(t.ram+0x1000000+slot*4096,true));
+    const evidence=()=>addresses.map(address=>({dirty:!!(d().getUint32(t.pte(address>>>12),true)&64),
+      accessed:!!(d().getUint32(t.ram+DIRECTORY+(address>>>22)*4,true)&32)}));
+    const live=()=>{const v=cpuViews(memory);return {registers:Array.from(v.regs),pc:v.data.getUint32(556,true),
+      flags:cache.cpu.wm.exports.get_eflags()>>>0,counter:v.data.getUint32(664,true),numeric:Buffer.from(v.bytes.slice(816,1280))};};
+    const initialVersions=versions(),initialBanks=banks();d().setUint32(engine.base+48,pc,true);
+    report.budgetDirty={addresses,mode:cache.cpu.wm.exports.get_relaxed_fpu(),initialVersions,runs:[]};
+    for(let n=0;n<3;n++) {
+      cache.import();const run=cache.execute(cache.select(true));assert.equal(run.coreReason,2);assert(run.work>0);
+      assert.equal(cache.dirtyPending,true);assert.equal(cache.budgetDirtyDeferrals,n+1);
+      assert.deepEqual(versions(),initialVersions);assert(evidence().every(row=>row.dirty&&row.accessed));
+      assert.deepEqual(banks(),initialBanks);assert.deepEqual(Array.from(cpuViews(memory).regs),Array.from({length:8},(_,i)=>engine.get(16+i*4)));
+      assert.equal(engine.get(4604),run.work);report.budgetDirty.runs.push({run,values:values(),evidence:evidence(),versions:versions()});
+    }
+    const before=live(),canonical=Buffer.from(new Uint8Array(memory.buffer,engine.base,96)),written=values();
+    cache.publish();assert.equal(cache.dirtyPending,false);assert(evidence().every(row=>!row.dirty&&!row.accessed));
+    assert.deepEqual(live(),before);assert.deepEqual(Buffer.from(new Uint8Array(memory.buffer,engine.base,96)),canonical);
+    assert.deepEqual(banks(),initialBanks);assert.deepEqual(values(),written);assert(versions().every((value,i)=>value>initialVersions[i]));
+    assert.deepEqual(addresses.map(read),written);report.budgetDirty.outer={values:written,versions:versions(),evidence:evidence(),fullStatePreserved:true};
+    uninterrupted=false;const published=versions();cache.import();const boundary=cache.execute(cache.select(true));
+    assert.equal(boundary.coreReason,2);assert.equal(cache.dirtyPending,false);assert.equal(cache.budgetDirtyDeferrals,3);
+    assert(versions().every((value,i)=>value>published[i]));assert(evidence().every(row=>!row.dirty&&!row.accessed));
+    const epoch=t.mappingEpoch;engine.ok('protect',addresses[1],1,1);cache.import();assert.notEqual(t.mappingEpoch,epoch);
+    assert.equal(d().getUint32(t.pte(addresses[1]>>>12),true)&66,0,'a host mapping boundary follows publication, never pending evidence');
+    assert.equal(cache.configureBudgetDirtyDeferral(false,owner),false);
+    report.budgetDirty.boundary={run:boundary,mappingChanged:true,dirtyPending:false,restored:true};save();
+  } else if(portText==='simd') {
     stage='dense read-only PTE validation';
     const dense=0x6c0000,pc=0x600d00,code=[];
     engine.ok('map',dense,4,3);

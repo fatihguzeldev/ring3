@@ -64,7 +64,8 @@ const gateTrap = () => ({vector: 6, pc: 0x1000, flags: 2, esp: 0, cs: 0, ss: 0})
 
 function budgetFixture() {
   const f=fixture([]),c=f.cache,d=new DataView(c.memory.buffer);
-  Object.assign(c,{budgetStateReuse:false,budgetStateReuses:0,pendingBudgetContinuation:false});
+  Object.assign(c,{budgetStateReuse:false,budgetStateReuses:0,pendingBudgetContinuation:false,
+    budgetDirtyDeferral:false,budgetDirtyDeferrals:0});
   delete c.import;
   c.tables.refresh=()=>f.events.push('refresh');
   c.traps.setDescriptor=()=>{};c.cpu.update_state_flags=()=>f.events.push('state-import');
@@ -73,6 +74,45 @@ function budgetFixture() {
   c.import();f.events.length=0;
   return f;
 }
+
+test('unobserved inner Budget exits defer dirty scans only with explicit owner permission and flush on disable',()=>{
+  const f=budgetFixture(),c=f.cache,owner={paused:true,open:false};
+  c.inlineOwner={canContinue:()=>true,canBridge:()=>true};
+  c.execute();assert.equal(c.tables.calls,1);assert.equal(c.dirtyPending,false);
+  c.budgetDirtyDeferral=true;f.events.length=0;
+  c.execute();c.select(true);c.execute();
+  assert.equal(c.budgetDirtyDeferrals,2);assert.equal(c.dirtyPending,true);assert.equal(c.tables.calls,1);
+  assert.equal(f.events.filter(event=>event==='publish').length,2,'native Budget publications remain per batch');
+  assert.equal(f.events.filter(event=>event==='state-import').length,2,'normal canonical state import remains');
+  assert.equal(c.configureBudgetDirtyDeferral(false,owner),false);assert.equal(c.tables.calls,2);assert.equal(c.dirtyPending,false);
+  assert.equal(c.configureBudgetDirtyDeferral(true,owner),true);
+  for(const invalid of [undefined,{paused:false,open:false},{paused:true,open:true}])
+    assert.throws(()=>c.configureBudgetDirtyDeferral(true,invalid),/paused/);
+  c.open=true;assert.throws(()=>c.configureBudgetDirtyDeferral(true,owner),/paused/);c.open=false;
+  c.closed=true;assert.throws(()=>c.configureBudgetDirtyDeferral(true,owner),/paused/);
+});
+
+test('Budget dirty deferral keeps observer, deadline, non-Budget and native-error publication barriers',()=>{
+  for(const barrier of ['missing-owner','deadline','observer','no-bridge','no-dirty-policy','yield','fault','gate']) {
+    const f=budgetFixture(),c=f.cache;c.budgetDirtyDeferral=true;
+    c.inlineOwner={canContinue:()=>barrier!=='deadline',canBridge:()=>barrier!=='observer'};
+    if(barrier==='missing-owner')delete c.inlineOwner;
+    if(barrier==='no-bridge')delete c.inlineOwner.canBridge;
+    if(barrier==='no-dirty-policy')c.deferDirty=false;
+    if(['yield','fault','gate'].includes(barrier)) {
+      f.setGate(0x10001,0);
+      c.cpu.main_loop=()=>{new DataView(c.memory.buffer).setUint32(664,3,true);
+        c.traps.pending={...gateTrap(),cs:0x1b,ss:0x23,
+          ...(barrier==='yield'?{budgetYield:true,privateInstructions:0}:barrier==='fault'?{vector:13,error:0}:{})};};
+    }
+    c.execute();assert.equal(c.tables.calls,1,barrier);assert.equal(c.dirtyPending,false,barrier);
+    assert.equal(c.budgetDirtyDeferrals,0,barrier);
+  }
+  const f=budgetFixture(),c=f.cache;c.budgetDirtyDeferral=true;c.inlineOwner={canContinue:()=>true,canBridge:()=>true};
+  const original=c.engine.ok;c.engine.ok=function(operation,...args){if(operation==='component_cpu_publish')throw Error('native Budget failure');return original.call(this,operation,...args);};
+  assert.throws(()=>c.execute(),/native Budget failure/);assert.equal(c.tables.calls,1);assert.equal(c.dirtyPending,false);
+  assert.equal(c.budgetDirtyDeferrals,0);assert.equal(c.imported,false);
+});
 
 test('pure budget continuation is opt-in and consumes one inner-turn permission without skipping publication',()=>{
   const f=budgetFixture(),c=f.cache;

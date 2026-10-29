@@ -92,6 +92,7 @@ export class V86CodeCache {
     try {this.traps=new Traps(cpu,address=>this.readCodeByte(address));}catch(error){this.tables.rollback(error);throw error;}
     this.imported=false;this.closed=false;this.open=false;
     this.budgetStateReuse=false;this.budgetStateReuses=0;this.pendingBudgetContinuation=false;
+    this.budgetDirtyDeferral=false;this.budgetDirtyDeferrals=0;
     this.runs=0;this.regions=0;this.retired=0;this.work=0;this.gates=0;this.faults=0;
     this.dirtyPages=0;this.cowFaults=0;
     this.deferDirty=true;this.dirtyPending=false;this.deferredDirtyPublications=0;
@@ -298,9 +299,16 @@ export class V86CodeCache {
       } else throw new Error(`unsupported v86 CPU exception ${vector} at0x${trap.pc.toString(16)}`);
     }
     if(work>0xffffffff || retired>work)throw new Error('invalid v86 execution accounting');
+    const budgetOwner=this.inlineOwner,deferBudget=this.budgetDirtyDeferral===true && this.deferDirty &&
+      trap===null && stop===2 && budgetOwner?.canContinue?.()===true && budgetOwner?.canBridge?.()===true;
     if(this.deferDirty && stop===7 && deferAllowed)this.deferredDirtyPublications++;
-    else this.publish();
-    h.ok('component_cpu_publish',...KEY,stop,detail,auxiliary,vector,retired,work);
+    else if(!deferBudget)this.publish();
+    try {h.ok('component_cpu_publish',...KEY,stop,detail,auxiliary,vector,retired,work);}
+    catch(error) {
+      if(deferBudget)try{this.publish();}catch(cleanup){error.cleanupFailure=cleanup.message;}
+      throw error;
+    }
+    if(deferBudget)this.budgetDirtyDeferrals++;
     this.pendingBudgetContinuation=this.budgetStateReuse===true && trap===null && stop===2;
     this.imported=false;this.traps.pending=null;this.runs++;this.regions++;
     this.retired+=retired;this.work+=work;
@@ -479,6 +487,12 @@ export class V86CodeCache {
     if(!this.dirtyPending)return;
     this.dirtyPages+=this.tables.publishDirty();this.dirtyPending=false;
   }
+  configureBudgetDirtyDeferral(enabled,owner) {
+    if(owner?.paused!==true || owner?.open!==false || this.open || this.closed || typeof enabled!=='boolean')
+      throw new Error('v86 Budget dirty changes require a closed paused owner');
+    if(this.inlineFailure)throw this.inlineFailure;
+    this.publish();this.budgetDirtyDeferral=enabled;return enabled;
+  }
   configureDirtyDeferral(enabled,owner) {
     if(owner?.paused!==true || owner?.open!==false || typeof enabled!=='boolean')
       throw new Error('v86 dirty deferral changes require a closed paused owner');
@@ -517,6 +531,7 @@ export class V86CodeCache {
       installedUnits:counters.finalizedModules,v86:counters,jitConfig:this.runtime.jitConfig,
       workBudget:this.budget,gates:this.gates,faults:this.faults,cowFaults:this.cowFaults,
       budgetStateReuse:this.budgetStateReuse,budgetStateReuses:this.budgetStateReuses,
+      budgetDirtyDeferral:this.budgetDirtyDeferral,budgetDirtyDeferrals:this.budgetDirtyDeferrals,
       dirtyPages:this.dirtyPages,deferDirty:this.deferDirty,
       portGates:this.portGates,portGateCalls:this.portGateCalls,deniedPortCalls:this.deniedPortCalls,
       portGateMode:this.portGateMode,portGatePatchedCount:this.portGatePatchedCount,
