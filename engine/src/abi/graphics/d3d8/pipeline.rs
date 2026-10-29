@@ -23,9 +23,11 @@ pub(super) fn encode(output: &mut Encoder<'_>, state: &PipelineState) -> Result<
     }
     output.count(selected.len())?;
     output.words(&selected)?;
-    for (index, transform) in state.transforms.iter().enumerate() {
-        if selected[index / 32] & (1 << (index % 32)) != 0 {
-            output.words(&transform.0)?;
+    for (word, mut remaining) in selected.into_iter().enumerate() {
+        while remaining != 0 {
+            let index = word * 32 + remaining.trailing_zeros() as usize;
+            remaining &= remaining - 1;
+            output.words(&state.transforms[index].0)?;
         }
     }
     output.words(&state.material.diffuse)?;
