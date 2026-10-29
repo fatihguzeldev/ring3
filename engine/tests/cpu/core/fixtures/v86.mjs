@@ -13,6 +13,7 @@ const [enginePath, reportPath, permissionText = '1', portText = ''] = process.ar
 assert(enginePath && reportPath, 'usage: v86.mjs imported-engine.wasm fresh-report.json');
 assert(['', 'port', 'inline', 'direct', 'direct-bindings', 'direct-state-inputs', 'wasm-ports', 'guest-ret', 'global', 'overlap', 'simd', 'targeted-dirty', 'relaxed-fpu', 'relaxed-fpu-boot'].includes(portText));
 const relaxedBoot=portText==='relaxed-fpu-boot';
+const wasmRelaxed=portText==='wasm-ports';
 const targetedMode=portText==='targeted-dirty';
 const deniedPermission = Number(permissionText);
 assert([0,1].includes(deniedPermission));
@@ -29,7 +30,7 @@ const save = () => writeFileSync(reportPath, JSON.stringify(report, (_key, value
   typeof value === 'bigint' ? String(value) : value, 2) + '\n');
 let runtime, engine, cache, stage = 'prepare';
 try {
-  runtime = await prepareV86({wasmUrl: 'data:application/wasm;base64,' + cpuBytes.toString('base64'), sha256: hash(cpuBytes),wasmPorts:portText==='wasm-ports',relaxedFpu:relaxedBoot});
+  runtime = await prepareV86({wasmUrl: 'data:application/wasm;base64,' + cpuBytes.toString('base64'), sha256: hash(cpuBytes),wasmPorts:wasmRelaxed,relaxedFpu:relaxedBoot||wasmRelaxed});
   report.wasmPortBridgeInstalled=!!runtime.portBridge;
   assert.equal(report.wasmPortBridgeInstalled,portText==='wasm-ports','the Wasm IO import shim requires explicit boot opt-in');
   if(portText!=='wasm-ports')assert.equal(runtime.portBridgeFallback,undefined);
@@ -84,6 +85,10 @@ try {
   const init = {token: initializer.getBigUint64(24, true), returnPc: initializer.getUint32(44, true), id: initializer.getUint32(48, true)};
   stage = 'attach while DLL initializer is pending';
   cache = await runtime.attach(engine, {budget: 1000});
+  if(wasmRelaxed) {
+    assert.equal(runtime.relaxedFpu,true);assert.equal(cache.relaxedFpu,true);assert.equal(cache.cpu.wm.exports.get_relaxed_fpu(),1);
+    report.wasmPortFpu={bootMode:1,initialControl:new DataView(memory.buffer).getUint16(engine.base+4252,true)};
+  }
   if(relaxedBoot) {
     assert.equal(runtime.relaxedFpu,true);assert.equal(cache.relaxedFpu,true);assert.equal(cache.cpu.wm.exports.get_relaxed_fpu(),1);
     report.relaxedBoot={initialMode:1,initialControl:new DataView(memory.buffer).getUint16(engine.base+4252,true)};
@@ -503,7 +508,7 @@ try {
     const ids={get:0x10001,set:0x10002,allocate:0xf0009,tlsGet:0xf000b,tlsSet:0xf000c,slow:0xc0002};
     for(const id of Object.values(ids))assert(entries.has(id),`real registered gate ${id.toString(16)}`);
     const programPc=0x600900,output=0x601900,stack=0x601800,initialError=0xf1234567,nextError=0x10203040,tlsValue=0x55aa7788;
-    const savedBanks=banks(),atomicSupported=typeof engine.api.component_cpu_try_inline_gate==='function';
+    let savedBanks=banks();const atomicSupported=typeof engine.api.component_cpu_try_inline_gate==='function';
     if(directMode)assert.equal(typeof engine.api.component_cpu_try_direct_gate,'function');
     const directOperation=typeof engine.api.component_cpu_try_direct_gate_mask==='function'?'component_cpu_try_direct_gate_mask':'component_cpu_try_direct_gate';
     if(bindingMode)assert.equal(directOperation,'component_cpu_try_direct_gate_mask');
@@ -530,7 +535,20 @@ try {
     };
     const tlsIndex=nativeCall(ids.allocate);assert(tlsIndex<1088);
     assert.equal(nativeCall(ids.tlsSet,[tlsIndex,tlsValue]),1);
-    const threadId=nativeCall(ids.slow),program=[0xb9,...u32(20000),0x49,0x75,0xfd];
+    const threadId=nativeCall(ids.slow);
+    if(wasmRelaxed) {
+      const fpPc=0x600880,fp=engine.base+4236;
+      upload(fpPc,[0xdb,0xe3,0xd9,0xe8,0xd9,0xe8,0xde,0xc1,0xb8,...u32(entries.get(ids.slow)),0xff,0xe0]);
+      seed(fpPc);cache.import();const run=cache.execute(cache.select());cache.publish();assert.equal(run.detail,ids.slow);
+      const live=cpuViews(memory),slot=live.bytes[1032]&7;
+      assert.equal(live.data.getUint16(1160+slot*16,true),0x7ffe);
+      assert.equal(live.data.getUint16(fp+16,true),0x37f);assert.equal(live.data.getUint16(fp+48+slot*10,true),0x4000);
+      assert.equal(live.data.getBigUint64(fp+40+slot*10,true),0x8000000000000000n);
+      savedBanks=banks();Object.assign(report.wasmPortFpu,{slot,liveTag:0x7ffe,controlWord:0x37f,
+        canonicalMantissa:'9223372036854775808',canonicalExponent:0x4000,value:2,
+        coverage:'nonempty tagged live x87 survives cold/caller-JIT campaigns and exact full canonical-bank comparisons at every slow boundary'});
+    }
+    const program=[0xb9,...u32(20000),0x49,0x75,0xfd];
     const invoke=id=>program.push(0xb8,...u32(entries.get(id)),0xff,0xd0);
     invoke(ids.get);const afterGet=programPc+program.length;program.push(0xa3,...u32(output));
     program.push(0x68,...u32(nextError));invoke(ids.set);program.push(0xa3,...u32(output+4));
@@ -618,7 +636,12 @@ try {
         return result;
       };
       let run;
-      try {cache.import();run=cache.execute(cache.select());cache.publish();}
+      try {
+        cache.import();const numeric=wasmRelaxed?cpuViews(memory).bytes.slice(816,1280):null;
+        if(wasmRelaxed)assert.equal(cpuViews(memory).data.getUint16(1160+report.wasmPortFpu.slot*16,true),0x7ffe);
+        run=cache.execute(cache.select());cache.publish();
+        if(wasmRelaxed)assert.deepEqual(cpuViews(memory).bytes.slice(816,1280),numeric,'Wasm/JS checkpoints preserve live tagged FP/SIMD/CW exactly');
+      }
       finally {engine.ok=original;engine.status=originalStatus;cache.traps.continueGate=originalContinue;}
       const after=cache.stats(),delta=(cpuViews(memory).data.getUint32(664,true)-counter)>>>0;
       const row={label,run,publications,atomicCalls,directCalls,directMasks,directResults,continuations,bankExports:bankExports-exportsBefore,beforeCounter:counter,delta,inlineCompletions:after.inlineCompletions-before.inlineCompletions,
@@ -789,7 +812,7 @@ try {
           if(directMode) {
             const views=cpuViews(memory);
             exportState(this,cache.cpu,{pc:args[2],esp:args[3],flags:cache.cpu.wm.exports.get_eflags(),
-              cs:views.selectors[1],ss:views.selectors[2]});
+              cs:views.selectors[1],ss:views.selectors[2]},cache.relaxedFpu);
           }
           if(atomicSupported || directMode)status.call(this,'component_cpu_publish',...KEY,7,0,0,ids.get,0,0);
           captures++;status.call(this,'core_capture_windows_call');return 12;

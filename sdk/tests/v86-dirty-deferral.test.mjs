@@ -310,12 +310,12 @@ test('experimental relaxed FPU transitions publish the live owner and import can
   assert.equal(d.getUint32(664,true),123);assert.equal(c.work,0);assert.equal(c.retired,0);assert.equal(clears,2);
 });
 
-test('relaxed FPU rejects open owners and unsupported modes, disables Wasm ports and poisons failed transitions',()=>{
+test('relaxed FPU rejects open owners and unsupported modes and poisons failed transitions',()=>{
   const f=wasmPortFixture(),c=f.cache;c.relaxedFpu=false;
   for(const owner of [undefined,{paused:false,open:false},{paused:true,open:true}])
     assert.throws(()=>c.configureRelaxedFpu(true,owner),/paused/);
   assert.throws(()=>c.configureRelaxedFpu(true,{paused:true,open:false}),/unsupported/);
-  c.wasmPorts=true;assert.equal(c.canUseWasmPorts(),true);c.relaxedFpu=true;assert.equal(c.canUseWasmPorts(),false);c.relaxedFpu=false;
+  c.wasmPorts=true;assert.equal(c.canUseWasmPorts(),true);c.relaxedFpu=true;assert.equal(c.canUseWasmPorts(),true);c.relaxedFpu=false;
   c.cpu.wm.exports.get_relaxed_fpu=()=>0;c.cpu.wm.exports.set_relaxed_fpu=()=>{};c.cpu.jit_clear_cache=()=>{};
   let failure;assert.throws(()=>c.configureRelaxedFpu(true,{paused:true,open:false}),error=>{failure=error;return /readback/.test(error.message);});
   assert.equal(c.inlineFailure,failure);
@@ -461,9 +461,28 @@ function wasmPortFixture() {
     harvest(){bridgeEvents.push('harvest');const result=counts;counts={completed:0,declined:0,bindings:0,stateInputs:0,checkpoints:0,declinedPc:null};return result;},
     disarm(){bridgeEvents.push('disarm');return false;},close(){bridgeEvents.push('close');}};
   Object.assign(c,{portBridge:bridge,portBridgeBound:true,wasmPorts:false,wasmPortsActive:false,
-    wasmPortCompletions:0,wasmPortDeclines:0,wasmPortCheckpoints:0,portBridgeDeclinedPc:null,portGateCalls:0});
+    wasmPortCompletions:0,wasmPortDeclines:0,wasmPortCheckpoints:0,portBridgeDeclinedPc:null,portGateCalls:0,relaxedFpu:false});
+  c.cpu.wm.exports.get_relaxed_fpu=()=>c.relaxedFpu?1:0;
   return {...f,bridgeEvents,counts(value){Object.assign(counts,value);}};
 }
+
+test('Wasm ports admit relaxed banks only after a cold mode-owner check without adding hot getter calls',()=>{
+  const f=wasmPortFixture(),c=f.cache,d=new DataView(c.memory.buffer);let reads=0,mode=1;
+  c.relaxedFpu=true;c.cpu.wm.exports.get_relaxed_fpu=()=>{reads++;return mode;};
+  assert.equal(c.configureWasmPorts(true,{paused:true,open:false}),true);
+  c.cpu.main_loop=()=>{c.traps.pending=f.trap();d.setUint32(664,d.getUint32(664,true)+7,true);};
+  for(let n=0;n<2;n++){assert.equal(c.canUseWasmPorts(),true);c.execute();}
+  assert.equal(reads,1);assert.equal(c.wasmPortsActive,false);
+  c.relaxedFpu=false;mode=0;c.execute();assert.equal(reads,2,'a changed mode is rechecked once before arming');
+  const invalid=wasmPortFixture(),bad=invalid.cache;bad.relaxedFpu=true;bad.dirtyPending=true;
+  bad.cpu.wm.exports.get_relaxed_fpu=()=>0;
+  assert.throws(()=>bad.configureWasmPorts(true,{paused:true,open:false}),/FPU mode owner changed/);
+  assert.equal(bad.wasmPorts,false);assert.equal(bad.tables.calls,0);assert(bad.inlineFailure);
+  const initial=wasmPortFixture(),first=initial.cache;first.wasmPorts=true;first.relaxedFpu=true;
+  first.cpu.wm.exports.get_relaxed_fpu=()=>2;
+  assert.throws(()=>first.execute(),/FPU mode owner changed/);
+  assert.equal(initial.events.includes('cpu'),false);assert.equal(initial.bridgeEvents.length,0);
+});
 
 test('a runtime without the optional Wasm port bridge executes and closes through its ordinary owner',()=>{
   const f=wasmPortFixture(),c=f.cache;c.portBridge=undefined;c.portBridgeBound=false;

@@ -105,7 +105,7 @@ export class V86CodeCache {
     this.guestReturns=false;this.guestReturnCompletions=0;
     this.graphicsOverlap=false;
     this.relaxedFpu=runtime.relaxedFpu===true;
-    this.portBridge=null;this.portBridgeBound=false;this.wasmPorts=false;this.wasmPortsActive=false;
+    this.portBridge=null;this.portBridgeBound=false;this.wasmPorts=false;this.wasmPortsActive=false;this.wasmPortFpuMode=null;
     this.wasmPortCompletions=0;this.wasmPortDeclines=0;this.wasmPortCheckpoints=0;this.portBridgeDeclinedPc=null;
     this.executionPolicyInitialized=false;
   }
@@ -157,17 +157,25 @@ export class V86CodeCache {
     } catch(error){this.inlineFailure=error;throw error;}
   }
   get wasmPortsSupported() {return this.portBridgeBound===true && this.tables.dirtyGateFlagsSupported===true && typeof this.engine.api.component_cpu_try_direct_gate_mask==='function';}
+  validateWasmPortFpuMode() {
+    try {
+      const mode=this.relaxedFpu===true;
+      if(this.cpu.wm.exports.get_relaxed_fpu?.()!==(mode?1:0))throw new Error('v86 FPU mode owner changed');
+      this.wasmPortFpuMode=mode;
+    } catch(error){this.inlineFailure??=error;throw this.inlineFailure;}
+  }
   configureWasmPorts(enabled,owner) {
     if(owner?.paused!==true || owner?.open!==false || this.open || this.closed || typeof enabled!=='boolean')
       throw new Error('v86 Wasm port changes require a closed paused owner');
     if(this.inlineFailure)throw this.inlineFailure;
     if(enabled && !this.wasmPortsSupported)throw new Error('native v86 Wasm ports are unsupported');
+    if(enabled)this.validateWasmPortFpuMode();
     this.publish();this.harvestPortBridge();this.portBridge?.disarm();this.wasmPortsActive=false;
     this.wasmPorts=enabled;return enabled;
   }
   canUseWasmPorts() {
     const owner=this.inlineOwner;
-    return this.wasmPorts && this.wasmPortsSupported && !this.closed && !this.inlineFailure && !this.relaxedFpu &&
+    return this.wasmPorts && this.wasmPortsSupported && !this.closed && !this.inlineFailure &&
       this.portGates && this.portGateMode===1 && !this.guestReturns && this.inlineGates && this.directGates && this.deferDirty &&
       !!owner?.canContinue() && (typeof owner.canBridge!=='function' || owner.canBridge());
   }
@@ -234,6 +242,7 @@ export class V86CodeCache {
       this.open=true;
       try {
         if(this.canUseWasmPorts()) {
+          if(this.wasmPortFpuMode!==(this.relaxedFpu===true))this.validateWasmPortFpuMode();
           this.dirtyPending=true;this.wasmPortsActive=true;bridgeRun=true;
           if(this.portBridge.arm((this.directBindings?0x7ff:0xff)|(this.directStateInputs?0x1800:0))!==true)
             throw new Error('v86 Wasm port bridge failed to arm');
