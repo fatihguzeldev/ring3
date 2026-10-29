@@ -232,6 +232,38 @@ function directFixture({status=0,recordId=0x10001,grow=false,allow=()=>true,mask
   return {...f,directCalls:calls};
 }
 
+test('experimental relaxed FPU transitions publish the live owner and import canonical state without changing credits or CW',()=>{
+  const f=inlineFixture(),c=f.cache,d=new DataView(c.memory.buffer),v=cpuViews(c.memory),b=c.engine.base;
+  c.relaxedFpu=false;let mode=0,clears=0;
+  c.cpu.wm.exports.get_relaxed_fpu=()=>mode;
+  c.cpu.wm.exports.set_relaxed_fpu=value=>{f.events.push('mode'+value);mode=value;};
+  c.cpu.jit_clear_cache=()=>{clears++;};
+  d.setUint16(b+4,3,true);d.setUint32(b+52,2,true);d.setUint16(b+X87+16,0x7f,true);d.setUint16(1036,0x7f,true);
+  v.regs[0]=0x12345678;v.regs[4]=0x6000;d.setUint32(556,0x401000,true);d.setUint32(664,123,true);c.dirtyPending=true;
+  assert.equal(c.configureRelaxedFpu(true,{paused:true,open:false}),true);
+  assert.equal(c.engine.get(16),0x12345678);assert.equal(d.getUint32(556,true),0x401000);
+  assert.equal(d.getUint16(b+X87+16,true),0x7f);assert.equal(d.getUint16(1036,true),0x7f);
+  assert(f.events.indexOf('dirty')<f.events.indexOf('mode1'));assert.equal(c.relaxedFpu,true);
+  c.imported=false;v.regs[0]=0xdeadbeef;d.setUint32(b+16,0x87654321,true);
+  const canonical=v.bytes.slice(b,b+8192);
+  assert.equal(c.configureRelaxedFpu(false,{paused:true,open:false}),false);
+  assert.equal(v.regs[0],0x87654321,'a non-imported CPU cannot overwrite newer canonical state');
+  assert.deepEqual(v.bytes.slice(b,b+8192),canonical);assert.equal(d.getUint16(1036,true),0x7f);
+  assert.equal(d.getUint32(664,true),123);assert.equal(c.work,0);assert.equal(c.retired,0);assert.equal(clears,2);
+});
+
+test('relaxed FPU rejects open owners and unsupported modes, disables Wasm ports and poisons failed transitions',()=>{
+  const f=wasmPortFixture(),c=f.cache;c.relaxedFpu=false;
+  for(const owner of [undefined,{paused:false,open:false},{paused:true,open:true}])
+    assert.throws(()=>c.configureRelaxedFpu(true,owner),/paused/);
+  assert.throws(()=>c.configureRelaxedFpu(true,{paused:true,open:false}),/unsupported/);
+  c.wasmPorts=true;assert.equal(c.canUseWasmPorts(),true);c.relaxedFpu=true;assert.equal(c.canUseWasmPorts(),false);c.relaxedFpu=false;
+  c.cpu.wm.exports.get_relaxed_fpu=()=>0;c.cpu.wm.exports.set_relaxed_fpu=()=>{};c.cpu.jit_clear_cache=()=>{};
+  let failure;assert.throws(()=>c.configureRelaxedFpu(true,{paused:true,open:false}),error=>{failure=error;return /readback/.test(error.message);});
+  assert.equal(c.inlineFailure,failure);
+  for(const method of ['import','select','execute'])assert.throws(()=>V86CodeCache.prototype[method].call(c),error=>error===failure);
+});
+
 test('direct gates change only live return registers across native growth without exporting banks or observing clocks',()=>{
   for(const grow of [false,true]) {
     const f=directFixture({grow}),c=f.cache,v=cpuViews(c.memory),b=c.engine.base;

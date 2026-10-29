@@ -101,6 +101,7 @@ export class V86CodeCache {
     this.directStateInputs=false;this.directStateInputCompletions=0;
     this.guestReturns=false;this.guestReturnCompletions=0;
     this.graphicsOverlap=false;
+    this.relaxedFpu=false;
     this.portBridge=null;this.portBridgeBound=false;this.wasmPorts=false;this.wasmPortsActive=false;
     this.wasmPortCompletions=0;this.wasmPortDeclines=0;this.wasmPortCheckpoints=0;this.portBridgeDeclinedPc=null;
     this.executionPolicyInitialized=false;
@@ -133,6 +134,25 @@ export class V86CodeCache {
   get pc() {return this.engine.get(48);}
   get guestReturnsSupported() {return this.tables.guestReturnsSupported===true;}
   get directStateInputsSupported() {return this.tables.directStateInputsSupported===true && typeof this.engine.api.component_cpu_try_direct_gate_mask==='function';}
+  configureRelaxedFpu(enabled,owner) {
+    if(owner?.paused!==true || owner?.open!==false || this.open || this.closed || typeof enabled!=='boolean')
+      throw new Error('v86 FPU changes require a closed paused owner');
+    if(this.inlineFailure)throw this.inlineFailure;
+    const ex=this.cpu.wm.exports;
+    if(typeof ex.get_relaxed_fpu!=='function' || typeof ex.set_relaxed_fpu!=='function' || typeof this.cpu.jit_clear_cache!=='function')
+      throw new Error('v86 relaxed FPU is unsupported');
+    if(ex.get_relaxed_fpu()!==(this.relaxedFpu?1:0))throw this.inlineFailure=new Error('v86 FPU mode owner changed');
+    if(enabled===this.relaxedFpu)return enabled;
+    try {
+      this.publish();
+      if(this.imported)exportState(this.engine,this.cpu,null,this.relaxedFpu);
+      ex.set_relaxed_fpu(enabled?1:0);
+      if(ex.get_relaxed_fpu()!==(enabled?1:0))throw new Error('v86 FPU mode readback mismatch');
+      this.cpu.jit_clear_cache();forgetStateBanks(this.cpu);
+      importState(this.engine,this.cpu,this.traps,enabled);
+      this.relaxedFpu=enabled;this.imported=true;return enabled;
+    } catch(error){this.inlineFailure=error;throw error;}
+  }
   get wasmPortsSupported() {return this.portBridgeBound===true && this.tables.dirtyGateFlagsSupported===true && typeof this.engine.api.component_cpu_try_direct_gate_mask==='function';}
   configureWasmPorts(enabled,owner) {
     if(owner?.paused!==true || owner?.open!==false || this.open || this.closed || typeof enabled!=='boolean')
@@ -144,7 +164,7 @@ export class V86CodeCache {
   }
   canUseWasmPorts() {
     const owner=this.inlineOwner;
-    return this.wasmPorts && this.wasmPortsSupported && !this.closed && !this.inlineFailure &&
+    return this.wasmPorts && this.wasmPortsSupported && !this.closed && !this.inlineFailure && !this.relaxedFpu &&
       this.portGates && this.portGateMode===1 && !this.guestReturns && this.inlineGates && this.directGates && this.deferDirty &&
       !!owner?.canContinue() && (typeof owner.canBridge!=='function' || owner.canBridge());
   }
@@ -179,7 +199,7 @@ export class V86CodeCache {
     if(this.inlineFailure)throw this.inlineFailure;
     if(this.closed)throw new Error('v86 adapter is closed');
     this.tables.refresh();
-    importState(this.engine,this.cpu,this.traps);
+    importState(this.engine,this.cpu,this.traps,this.relaxedFpu);
     this.traps.pending=null;this.imported=true;
   }
   select() {
@@ -216,7 +236,7 @@ export class V86CodeCache {
       work+=delta;retired+=Math.max(0,delta-(trap?.privateInstructions??(trap?2:0)));
       if(trap?.registers)cpuViews(this.memory).regs.set(trap.registers);
       if(!(trap?.portGate && trap.privateInstructions===0 && trap.canonicalExported===true)) {
-        exportState(h,cpu,trap);
+        exportState(h,cpu,trap,this.relaxedFpu);
         if(this.reuseNumericState!==false)rememberStateBanks(h,cpu);
       }
       this.dirtyPending=true;
@@ -277,7 +297,7 @@ export class V86CodeCache {
     if(!this.inlineGates || !this.portGates || !this.deferDirty ||
         this.tables.dirtyGateFlagsSupported!==true || !owner?.canContinue())return false;
     if(this.directGates)return this.tryDirectGate(trap);
-    exportState(h,this.cpu,trap);
+    exportState(h,this.cpu,trap,this.relaxedFpu);
     if(this.reuseNumericState!==false)rememberStateBanks(h,this.cpu);
     if(trap.portGate && trap.privateInstructions===0)trap.canonicalExported=true;
     this.dirtyPending=true;
@@ -315,7 +335,7 @@ export class V86CodeCache {
       }
       if(status!==0 || h.get(72)!==3 || (!atomic && this.inlineNativePending()))
         throw Object.assign(new Error(`v86 inline gate completion failed ${status}`),{status,id,pc:trap.pc});
-      importState(h,this.cpu,this.traps);
+      importState(h,this.cpu,this.traps,this.relaxedFpu);
       this.inlineCompletions++;this.gates++;this.portGateCalls++;this.deferredDirtyPublications++;
       if(!owner.canContinue()) {this.inlineYields++;return 'yield';}
       return true;
@@ -465,7 +485,7 @@ export class V86CodeCache {
   coldDiagnostics() {return null;}
   stats() {
     const counters=this.runtime.counters();
-    return {backend:'v86',cpuHash:this.runtime.hash,fpuMode:'strict',hle:false,
+    return {backend:'v86',cpuHash:this.runtime.hash,fpuMode:this.relaxedFpu?'relaxed-experimental':'strict',relaxedFpu:this.relaxedFpu===true,hle:false,
       runs:this.runs,regions:this.regions,retired:this.retired,work:this.work,
       retirementSemantics:'v86 instruction counter; private handler instructions removed, guest retirement is approximate',
       admissions:counters.generatedModules,generatedModuleBytes:counters.generatedModuleBytes,
