@@ -13,6 +13,70 @@ pub(in crate::process) struct PreparedCoreExit32 {
 }
 
 impl EngineInstance {
+    #[cfg(feature = "external-cpu")]
+    pub(in crate::process) fn try_inline_external_cpu_gate_with(
+        &mut self,
+        pc: u32,
+        complete: impl FnOnce(&mut Self, u32) -> Result<(), HostError>,
+    ) -> Result<bool, HostError> {
+        use crate::abi::{arena::*, x86::*};
+        use crate::cpu::{ExecutionExit, ExitReason};
+        if self.pending_call.is_some()
+            || self.pending_windows_thread_schedule().is_some()
+            || self.pending_windows_callback().is_some()
+        {
+            return Ok(false);
+        }
+        let Some((id, true)) = self.external_cpu_gate_match(pc) else {
+            return Ok(false);
+        };
+        if !matches!(
+            id,
+            0x10001 | 0x10002 | 0xf000b | 0x40225 | 0x4022a | 0x4022e | 0x40232 | 0x4023f
+        ) || !self.external_cpu_can_defer_gate(pc, id)
+        {
+            return Ok(false);
+        }
+        let arena = self.arena();
+        let state = decode_state(&arena[STATE_OFFSET..STATE_OFFSET + STATE_SIZE])
+            .map_err(|_| HostError::InvalidRequest)?;
+        let x87 = decode_x87(&arena[X87_OFFSET..X87_OFFSET + X87_SIZE])
+            .map_err(|_| HostError::InvalidRequest)?;
+        let simd = decode_simd(&arena[SIMD_OFFSET..SIMD_OFFSET + SIMD_SIZE])
+            .map_err(|_| HostError::InvalidRequest)?;
+        let ymm = decode_ymm(&arena[YMM_OFFSET..YMM_OFFSET + YMM_SIZE])
+            .map_err(|_| HostError::InvalidRequest)?;
+        let segments = self.segment_context()?;
+        let prepared = self.prepare_core_exit(
+            state,
+            ExecutionExit {
+                retired: 0,
+                reason: ExitReason::Gate { id },
+            },
+            0,
+            None,
+            None,
+            (x87, simd, ymm, segments),
+        )?;
+        self.commit_core_exit(prepared);
+        // after publication, every unexpected outcome is terminal to the inline caller.
+        if self.try_complete_external_cpu_gate_with(complete) != Ok(true)
+            || self.guard_core_entry().is_err()
+            || self.callback.is_some()
+            || self.pending_windows_callback().is_some()
+            || !matches!(
+                decode_exit(&self.arena()[EXIT_OFFSET..EXIT_OFFSET + EXIT_SIZE]),
+                Ok(ExecutionExit {
+                    retired: 0,
+                    reason: ExitReason::NeedCode
+                })
+            )
+        {
+            return Err(HostError::Call(CallError::Busy));
+        }
+        Ok(true)
+    }
+
     #[cfg(all(feature = "external-cpu", test))]
     pub(in crate::process) fn try_complete_external_cpu_gate(&mut self) -> Result<bool, HostError> {
         self.try_complete_external_cpu_gate_with(|instance, token| {

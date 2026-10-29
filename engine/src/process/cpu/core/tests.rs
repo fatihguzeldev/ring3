@@ -292,6 +292,166 @@ fn prepare_external_fast_gate(engine: &mut EngineInstance, id: u32) {
 
 #[cfg(feature = "external-cpu")]
 #[test]
+fn external_inline_gate_publishes_zero_work_and_completes_original_getter_once() {
+    let mut engine = fixture();
+    call(&mut engine, WindowsApi32::SetLastError, &[0xf1234567]);
+    prepare_external_fast_gate(&mut engine, WindowsApi32::GetLastError.id());
+    engine.set_external_cpu_gate_mode(1).unwrap();
+    let pc = state(&engine).eip;
+    let stack = state(&engine).registers[4];
+    encode_exit_v3(
+        &ExecutionExit {
+            retired: 7,
+            reason: ExitReason::Budget,
+        },
+        &mut engine.arena.as_mut().get_mut()[EXIT_OFFSET..EXIT_OFFSET + EXIT_SIZE],
+    )
+    .unwrap();
+    let epoch = engine.core_epoch;
+    let token = engine.call_token;
+    let banks = crate::process::cpu::context::ExtendedCpuState::capture(engine.arena()).unwrap();
+    assert!(
+        engine
+            .try_inline_external_cpu_gate_with(pc, |engine, token| {
+                engine.complete_core_windows_call(token)
+            })
+            .unwrap()
+    );
+    assert_eq!(state(&engine).registers[0], 0xf1234567);
+    assert_eq!(state(&engine).eip, 0x401000);
+    assert_eq!(state(&engine).registers[4], stack + 4);
+    assert_eq!(engine.core_epoch, epoch + 1);
+    assert_eq!(engine.call_token, token + 1);
+    assert_eq!(
+        u32::from_le_bytes(
+            engine.arena()[WORK_OFFSET + 16..WORK_OFFSET + 20]
+                .try_into()
+                .unwrap()
+        ),
+        0
+    );
+    assert_eq!(
+        decode_exit(&engine.arena()[EXIT_OFFSET..EXIT_OFFSET + EXIT_SIZE]).unwrap(),
+        ExecutionExit {
+            retired: 0,
+            reason: ExitReason::NeedCode
+        }
+    );
+    assert!(banks.matches(engine.arena()));
+    assert!(engine.pending_call.is_none());
+    let record = crate::abi::call_frame::decode_call_frame(
+        &engine.arena()[TRANSFER_OFFSET..TRANSFER_OFFSET + 112],
+    )
+    .unwrap();
+    assert_eq!(record.id, WindowsApi32::GetLastError.id());
+    assert_eq!(record.token, token + 1);
+    let arena = engine.arena().to_vec();
+    assert!(
+        !engine
+            .try_inline_external_cpu_gate_with(pc, |_, _| panic!("completed gate replayed"))
+            .unwrap()
+    );
+    assert_eq!(engine.arena(), arena);
+    assert_eq!(engine.call_token, token + 1);
+}
+
+#[cfg(feature = "external-cpu")]
+#[test]
+fn external_inline_gate_declines_unowned_unsupported_and_stale_inputs_without_mutation() {
+    for (id, port, offset, guarded) in [
+        (WindowsApi32::GetLastError.id(), false, 0, false),
+        (
+            crate::windows::process::ProcessApi32::GetCurrentThreadId.id(),
+            true,
+            0,
+            false,
+        ),
+        (WindowsApi32::GetLastError.id(), true, 1, false),
+        (WindowsApi32::GetLastError.id(), true, 0, true),
+    ] {
+        let mut engine = fixture();
+        prepare_external_fast_gate(&mut engine, id);
+        if port {
+            engine.set_external_cpu_gate_mode(1).unwrap();
+        }
+        let guarded_page = guarded.then(|| {
+            crate::memory::PageRange::new(
+                GuestAddress(engine.module_teb_address().unwrap() & !4095),
+                1,
+            )
+            .unwrap()
+        });
+        if let Some(page) = guarded_page {
+            engine
+                .memory
+                .as_mut()
+                .unwrap()
+                .protect(page, crate::memory::Permissions::READ_WRITE.with_guard())
+                .unwrap();
+        }
+        let pc = state(&engine).eip + offset;
+        let arena = engine.arena().to_vec();
+        let epoch = engine.core_epoch;
+        let token = engine.call_token;
+        assert!(
+            !engine
+                .try_inline_external_cpu_gate_with(pc, |_, _| panic!("decline captured a call"))
+                .unwrap()
+        );
+        assert_eq!(engine.arena(), arena);
+        assert_eq!(engine.core_epoch, epoch);
+        assert_eq!(engine.call_token, token);
+        assert!(engine.pending_call.is_none());
+        if let Some(page) = guarded_page {
+            assert_eq!(
+                engine
+                    .memory()
+                    .unwrap()
+                    .permissions_at(GuestAddress((page.first * 4096) as u32))
+                    .unwrap(),
+                crate::memory::Permissions::READ_WRITE.with_guard()
+            );
+        }
+    }
+}
+
+#[cfg(feature = "external-cpu")]
+#[test]
+fn external_inline_gate_post_capture_busy_is_terminal_and_preserves_original_capture() {
+    let mut engine = fixture();
+    prepare_external_fast_gate(&mut engine, WindowsApi32::GetLastError.id());
+    engine.set_external_cpu_gate_mode(1).unwrap();
+    let pc = state(&engine).eip;
+    let epoch = engine.core_epoch;
+    let token = engine.call_token;
+    assert_eq!(
+        engine.try_inline_external_cpu_gate_with(pc, |engine, captured| {
+            assert_eq!(engine.pending_call.as_ref().unwrap().token, captured);
+            engine.arena.as_mut().get_mut()[TRANSFER_OFFSET..TRANSFER_OFFSET + 112].fill(0xcc);
+            Err(HostError::Call(CallError::Busy))
+        }),
+        Err(HostError::Call(CallError::Busy))
+    );
+    assert_eq!(engine.core_epoch, epoch + 1);
+    assert_eq!(engine.call_token, token + 1);
+    let record = crate::abi::call_frame::decode_call_frame(
+        &engine.arena()[TRANSFER_OFFSET..TRANSFER_OFFSET + 112],
+    )
+    .unwrap();
+    assert_eq!(record.id, WindowsApi32::GetLastError.id());
+    assert_eq!(engine.pending_call.as_ref().unwrap().token, record.token);
+    let arena = engine.arena().to_vec();
+    assert!(
+        !engine
+            .try_inline_external_cpu_gate_with(pc, |_, _| panic!("captured Busy replayed"))
+            .unwrap()
+    );
+    assert_eq!(engine.arena(), arena);
+    assert_eq!(engine.call_token, token + 1);
+}
+
+#[cfg(feature = "external-cpu")]
+#[test]
 fn external_fast_gate_completes_getter_and_preserves_work_and_numeric_banks() {
     let mut engine = fixture();
     call(&mut engine, WindowsApi32::SetLastError, &[0xf1234567]);
@@ -429,7 +589,11 @@ fn external_fast_gate_completes_another_registered_process_api() {
 #[cfg(feature = "external-cpu")]
 fn external_gate_bytes(engine: &EngineInstance, pc: u32) -> [u8; 2] {
     let mut bytes = [0; 2];
-    engine.memory().unwrap().fetch(GuestAddress(pc), &mut bytes).unwrap();
+    engine
+        .memory()
+        .unwrap()
+        .fetch(GuestAddress(pc), &mut bytes)
+        .unwrap();
     bytes
 }
 
@@ -441,35 +605,76 @@ fn external_port_gate_mode_patches_rx_and_lazily_owns_new_module_gates() {
     engine.external_cpu_memory_pinned = true;
     let id = WindowsApi32::GetLastError.id();
     let pc = gate(&engine, id);
-    let rights = engine.memory().unwrap().permissions_at(GuestAddress(pc)).unwrap();
+    let rights = engine
+        .memory()
+        .unwrap()
+        .permissions_at(GuestAddress(pc))
+        .unwrap();
     assert_eq!(external_gate_bytes(&engine, pc), [0x0f, 0x0b]);
     let before = engine.memory().unwrap().code_validation_version();
     assert!(engine.set_external_cpu_gate_mode(2).is_err());
     assert_eq!(engine.memory().unwrap().code_validation_version(), before);
     let (mode, count) = engine.set_external_cpu_gate_mode(1).unwrap();
-    assert_eq!(mode, 1); assert!(count > 0);
+    assert_eq!(mode, 1);
+    assert!(count > 0);
     assert_eq!(external_gate_bytes(&engine, pc), [0xe6, 0xe1]);
     assert_eq!(engine.external_cpu_gate_match(pc), Some((id, true)));
-    assert_eq!(engine.memory().unwrap().permissions_at(GuestAddress(pc)).unwrap(), rights);
+    assert_eq!(
+        engine
+            .memory()
+            .unwrap()
+            .permissions_at(GuestAddress(pc))
+            .unwrap(),
+        rights
+    );
     assert!(engine.memory().unwrap().code_validation_version() > before);
     let unregistered = 0x690000;
-    engine.memory.as_mut().unwrap().map_zeroed(
-        PageRange::new(GuestAddress(unregistered), 1).unwrap(), Permissions::ALL).unwrap();
-    engine.memory.as_mut().unwrap().write(GuestAddress(unregistered), &[0xe6, 0xe1]).unwrap();
+    engine
+        .memory
+        .as_mut()
+        .unwrap()
+        .map_zeroed(
+            PageRange::new(GuestAddress(unregistered), 1).unwrap(),
+            Permissions::ALL,
+        )
+        .unwrap();
+    engine
+        .memory
+        .as_mut()
+        .unwrap()
+        .write(GuestAddress(unregistered), &[0xe6, 0xe1])
+        .unwrap();
     assert_eq!(engine.external_cpu_lookup_gate(unregistered).unwrap(), None);
     engine.register_user32_module(0x71000000).unwrap();
     engine.load_library_module("user32.dll", None).unwrap();
-    let new_gate = engine.module_gates().unwrap().into_iter()
-        .find(|gate| gate.id >> 16 == 2).unwrap();
+    let new_gate = engine
+        .module_gates()
+        .unwrap()
+        .into_iter()
+        .find(|gate| gate.id >> 16 == 2)
+        .unwrap();
     assert_eq!(external_gate_bytes(&engine, new_gate.entry.0), [0x0f, 0x0b]);
-    assert_eq!(engine.external_cpu_lookup_gate(new_gate.entry.0).unwrap(), Some((new_gate.id, false)),
-        "the first real UD2 retains its provenance while the next entry is patched");
-    assert_eq!(engine.external_cpu_gate_match(new_gate.entry.0), Some((new_gate.id, true)));
+    assert_eq!(
+        engine.external_cpu_lookup_gate(new_gate.entry.0).unwrap(),
+        Some((new_gate.id, false)),
+        "the first real UD2 retains its provenance while the next entry is patched"
+    );
+    assert_eq!(
+        engine.external_cpu_gate_match(new_gate.entry.0),
+        Some((new_gate.id, true))
+    );
     let before_restore = engine.memory().unwrap().code_validation_version();
     assert_eq!(engine.set_external_cpu_gate_mode(0).unwrap(), (0, 0));
     assert_eq!(external_gate_bytes(&engine, pc), [0x0f, 0x0b]);
     assert_eq!(external_gate_bytes(&engine, new_gate.entry.0), [0x0f, 0x0b]);
-    assert_eq!(engine.memory().unwrap().permissions_at(GuestAddress(pc)).unwrap(), rights);
+    assert_eq!(
+        engine
+            .memory()
+            .unwrap()
+            .permissions_at(GuestAddress(pc))
+            .unwrap(),
+        rights
+    );
     assert!(engine.memory().unwrap().code_validation_version() > before_restore);
 }
 
@@ -483,9 +688,24 @@ fn external_port_gate_restore_rejects_modified_bytes_without_partial_restore() {
     let other = gate(&engine, WindowsApi32::SetLastError.id());
     engine.set_external_cpu_gate_mode(1).unwrap();
     let page = PageRange::new(GuestAddress(pc & !4095), 1).unwrap();
-    engine.memory.as_mut().unwrap().protect(page, Permissions::ALL).unwrap();
-    engine.memory.as_mut().unwrap().write(GuestAddress(pc), &[0x90, 0x90]).unwrap();
-    engine.memory.as_mut().unwrap().protect(page, Permissions::READ_EXECUTE).unwrap();
+    engine
+        .memory
+        .as_mut()
+        .unwrap()
+        .protect(page, Permissions::ALL)
+        .unwrap();
+    engine
+        .memory
+        .as_mut()
+        .unwrap()
+        .write(GuestAddress(pc), &[0x90, 0x90])
+        .unwrap();
+    engine
+        .memory
+        .as_mut()
+        .unwrap()
+        .protect(page, Permissions::READ_EXECUTE)
+        .unwrap();
     let before = engine.memory().unwrap().transaction_version();
     assert!(engine.set_external_cpu_gate_mode(0).is_err());
     assert_eq!(external_gate_bytes(&engine, pc), [0x90, 0x90]);
@@ -504,9 +724,24 @@ fn external_port_gate_restore_rejects_same_va_remap_even_with_matching_port_byte
     engine.set_external_cpu_gate_mode(1).unwrap();
     let page = PageRange::new(GuestAddress(pc & !4095), 1).unwrap();
     engine.memory.as_mut().unwrap().unmap(page).unwrap();
-    engine.memory.as_mut().unwrap().map_zeroed(page, Permissions::ALL).unwrap();
-    engine.memory.as_mut().unwrap().write(GuestAddress(pc), &[0xe6, 0xe1]).unwrap();
-    engine.memory.as_mut().unwrap().protect(page, Permissions::READ_EXECUTE).unwrap();
+    engine
+        .memory
+        .as_mut()
+        .unwrap()
+        .map_zeroed(page, Permissions::ALL)
+        .unwrap();
+    engine
+        .memory
+        .as_mut()
+        .unwrap()
+        .write(GuestAddress(pc), &[0xe6, 0xe1])
+        .unwrap();
+    engine
+        .memory
+        .as_mut()
+        .unwrap()
+        .protect(page, Permissions::READ_EXECUTE)
+        .unwrap();
     let before = engine.memory().unwrap().transaction_version();
     assert_eq!(engine.external_cpu_gate_match(pc), None);
     assert!(engine.set_external_cpu_gate_mode(0).is_err());
