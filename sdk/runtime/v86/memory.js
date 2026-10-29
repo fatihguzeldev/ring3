@@ -19,6 +19,7 @@ export class PageTables {
     this.nativeDirtyEpochSupported=(info.mappingChangeFlags&4)!==0;
     this.dirtyGateFlagsSupported=(info.mappingChangeFlags&8)!==0;
     this.globalCodeSupported=(info.mappingChangeFlags&32)!==0 && typeof cpu.clear_tlb==='function';
+    this.guestReturnsSupported=(info.mappingChangeFlags&64)!==0;
     this.nativeDirty=options.nativeDirty??this.nativeDirtySupported;
     if(typeof this.nativeDirty!=='boolean' || (this.nativeDirty && !this.nativeDirtySupported))
       throw new Error('unsupported v86 native dirty collector');

@@ -210,9 +210,10 @@ test('atomic unexpected completion IDs and committed errors remain sticky failur
   }
 });
 
-function directFixture({status=0,recordId=0x10001,grow=false,allow=()=>true,masked=false,bindings=false,...options}={}) {
+function directFixture({status=0,recordId=0x10001,grow=false,allow=()=>true,masked=false,bindings=false,guestReturns=false,...options}={}) {
   const f=inlineFixture({atomic:true,allow,...options}),c=f.cache,h=c.engine;
   Object.assign(c,{directGates:true,directCompletions:0,directDeclines:0,directBindings:bindings,directBindingCompletions:0});
+  Object.assign(c,{guestReturns,guestReturnCompletions:0,portGateMode:guestReturns?2:1,portGatePatchedCount:12});
   h.api.component_cpu_try_direct_gate=()=>{};
   if(masked)h.api.component_cpu_try_direct_gate_mask=()=>{};
   const previous=h.status,calls=[];
@@ -325,6 +326,51 @@ test('binding opt-in requires a masked host and publishes pending evidence witho
   assert.equal(c.configureDirectBindings(false,owner),false);
   delete c.engine.api.component_cpu_try_direct_gate_mask;
   assert.throws(()=>c.configureDirectBindings(true,owner),/unsupported/);assert.equal(c.directBindings,false);
+});
+
+test('owned guest RET continuations change EAX only for the exact nine neutral APIs',()=>{
+  for(const recordId of [0x10001,0x40225,0x4022a,0x4022e,0x40232,0x4023f,0x4023d,0x40253,0x40255]) {
+    const f=directFixture({masked:true,bindings:true,guestReturns:true,recordId}),v=cpuViews(f.cache.memory);
+    v.regs[4]=0x6000;v.data.setUint32(556,0x1002,true);v.data.setUint32(560,0x1000,true);v.data.setUint32(620,0x1234,true);
+    assert.equal(f.cache.tryInlineGate(f.trap()),true);assert.equal(v.regs[0],0x89abcdef);
+    assert.equal(v.regs[4],0x6000);assert.equal(v.data.getUint32(556,true),0x1002);
+    assert.equal(v.data.getUint32(560,true),0x1000);assert.equal(v.data.getUint32(620,true),0x1234);
+    assert.equal(f.cache.guestReturnCompletions,1);
+  }
+});
+
+test('TEB writers and completed deadline yields keep manual returns even in guest RET mode',()=>{
+  for(const options of [{recordId:0x10002},{recordId:0xf000b},{recordId:0x10001,allow:check=>check<2}]) {
+    const f=directFixture({guestReturns:true,...options}),v=cpuViews(f.cache.memory);
+    assert.equal(f.cache.tryInlineGate(f.trap()),options.allow?'yield':true);
+    assert.equal(v.regs[4],0x6100);assert.equal(v.data.getUint32(556,true),0x2000);
+    assert.equal(f.cache.guestReturnCompletions,0);
+  }
+});
+
+test('guest RET mode changes commit SDK state only after successful native ownership validation',()=>{
+  const f=directFixture(),c=f.cache;c.guestReturns=false;c.tables.guestReturnsSupported=true;
+  c.tables.refresh=()=>{};c.cpu.full_clear_tlb=()=>{};c.traps.configurePortGates=()=>{};
+  c.engine.api.component_cpu_set_gate_mode=()=>{};
+  c.engine.api.component_cpu_gate_mode=()=>{};
+  const ordinary=c.engine.ok;let busy=false,nativeMode=1;
+  c.engine.ok=(operation,...args)=>{
+    if(operation==='component_cpu_gate_mode') {
+      const result=c.engine.resultView(16);[nativeMode,12,nativeMode===2?9:0,busy?1:0].forEach((value,i)=>result.setUint32(i*4,value,true));return;
+    }
+    if(operation!=='component_cpu_set_gate_mode')return ordinary(operation,...args);
+    if(busy)throw Object.assign(new Error('pending guest RET'),{status:12});
+    nativeMode=args[2];
+    const result=c.engine.resultView(8);result.setUint32(0,args[2],true);result.setUint32(4,args[2]?12:0,true);
+  };
+  const owner={paused:true,open:false};
+  assert.throws(()=>c.configureGuestReturns(true,{paused:false,open:false}),/paused/);
+  assert.equal(c.configureGuestReturns(true,owner),true);assert.equal(c.portGateMode,2);
+  busy=true;
+  assert.throws(()=>c.configureGuestReturns(false,owner),error=>error.status===12);
+  assert.equal(c.guestReturns,true);assert.equal(c.portGateMode,2);assert.equal(c.portGatePatchedCount,12);
+  busy=false;assert.equal(c.configureGuestReturns(false,owner),false);assert.equal(c.portGateMode,1);
+  c.tables.guestReturnsSupported=false;assert.throws(()=>c.configureGuestReturns(true,owner),/unsupported/);
 });
 
 test('inline eligibility does not expand with future native safe flags or stale ownership',()=>{

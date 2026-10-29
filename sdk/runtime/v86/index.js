@@ -7,6 +7,7 @@ import {cpuViews,importState,exportState,rememberStateBanks,forgetStateBanks,val
 
 const INLINE_GATE_IDS=new Set([0x10001,0x10002,0xf000b,0x40225,0x4022a,0x4022e,0x40232,0x4023f]);
 const DIRECT_BINDING_GATE_IDS=new Set([0x4023d,0x40253,0x40255]);
+const GUEST_RETURN_GATE_IDS=new Set([0x10001,0x40225,0x4022a,0x4022e,0x40232,0x4023f,0x4023d,0x40253,0x40255]);
 
 export async function prepareV86(options={}, {signal}={}) {
   const memorySize=options.memorySize??PHYSICAL_BYTES;
@@ -81,11 +82,14 @@ export class V86CodeCache {
     this.deferDirty=true;this.dirtyPending=false;this.deferredDirtyPublications=0;
     this.reuseNumericState=true;
     this.portGates=false;this.portGateModeTouched=false;this.portGateCalls=0;this.deniedPortCalls=0;
+    this.portGateMode=0;this.portGatePatchedCount=0;
     this.inlineGates=false;this.inlineCompletions=0;this.inlineYields=0;this.inlineFailure=null;
     this.directGates=false;this.directCompletions=0;this.directDeclines=0;
     this.directBindings=false;this.directBindingCompletions=0;
+    this.guestReturns=false;this.guestReturnCompletions=0;
   }
   get pc() {return this.engine.get(48);}
+  get guestReturnsSupported() {return this.tables.guestReturnsSupported===true;}
   readCodeByte(address) {
     const {memory,tables}=this,page=address>>>12,buffer=memory.buffer;
     let views=this.codeByteViews;
@@ -248,13 +252,17 @@ export class V86CodeCache {
           record.getUint32(8,true)!==32 || record.getUint32(12,true)!==0 ||
           !(INLINE_GATE_IDS.has(id) || bindings && DIRECT_BINDING_GATE_IDS.has(id)))
         throw new Error('invalid v86 direct completion record');
-      const returned=cpuViews(this.memory);
-      returned.regs[0]=record.getUint32(20,true);returned.regs[4]=record.getUint32(28,true);
-      const pc=record.getUint32(24,true);
-      returned.data.setUint32(556,pc,true);returned.data.setUint32(560,pc,true);returned.data.setUint32(620,0xffffffff,true);
+      const returned=cpuViews(this.memory),continued=this.inlineOwner.canContinue(),
+        guestReturn=this.guestReturns && this.portGateMode===2 && GUEST_RETURN_GATE_IDS.has(id) && continued;
+      returned.regs[0]=record.getUint32(20,true);
+      if(guestReturn)this.guestReturnCompletions++;
+      else {
+        returned.regs[4]=record.getUint32(28,true);const pc=record.getUint32(24,true);
+        returned.data.setUint32(556,pc,true);returned.data.setUint32(560,pc,true);returned.data.setUint32(620,0xffffffff,true);
+      }
       this.directCompletions++;this.inlineCompletions++;this.gates++;this.portGateCalls++;this.deferredDirtyPublications++;
       if(DIRECT_BINDING_GATE_IDS.has(id))this.directBindingCompletions++;
-      if(!this.inlineOwner.canContinue()){this.inlineYields++;return 'yield';}
+      if(!continued){this.inlineYields++;return 'yield';}
       return true;
     } catch(error){this.inlineFailure=error;throw error;}
   }
@@ -273,6 +281,23 @@ export class V86CodeCache {
     if(enabled && typeof this.engine.api.component_cpu_try_direct_gate_mask!=='function')
       throw new Error('native v86 direct bindings are unsupported');
     this.publish();this.directBindings=enabled;return enabled;
+  }
+  gateMode() {
+    this.engine.ok('component_cpu_gate_mode',...KEY);const d=this.engine.resultView(16),
+      mode=d.getUint32(0,true),total=d.getUint32(4,true),guestRetSites=d.getUint32(8,true),pendingRet=d.getUint32(12,true);
+    if(mode>2 || guestRetSites>total || pendingRet>1)throw new Error('invalid native v86 gate mode');
+    return {mode,total,guestRetSites,pendingRet};
+  }
+  configureGuestReturns(enabled,owner) {
+    if(owner?.paused!==true || owner?.open!==false || this.open || this.closed || typeof enabled!=='boolean')
+      throw new Error('v86 guest return changes require a closed paused owner');
+    if(this.inlineFailure)throw this.inlineFailure;
+    if(enabled===this.guestReturns)return enabled;
+    if(!this.guestReturnsSupported || typeof this.engine.api.component_cpu_gate_mode!=='function')
+      throw new Error('native v86 guest returns are unsupported');
+    const current=this.gateMode();
+    if(current.mode!==this.portGateMode)throw new Error('native v86 gate mode owner changed');
+    this.applyPortGates(true,enabled?2:1);return enabled;
   }
   configureInlineGates(enabled,owner) {
     if(owner?.paused!==true || owner?.open!==false || this.open || this.closed || typeof enabled!=='boolean')
@@ -296,17 +321,18 @@ export class V86CodeCache {
       throw new Error('v86 dirty deferral changes require a closed paused owner');
     this.publish();this.deferDirty=enabled;return enabled;
   }
-  applyPortGates(enabled) {
+  applyPortGates(enabled,mode=enabled?(this.guestReturns?2:1):0) {
     if(typeof this.engine.api.component_cpu_set_gate_mode!=='function') {
       if(!enabled && !this.portGates)return false;
       throw new Error('native v86 port gates are unsupported');
     }
     this.publish();this.tables.refresh();
-    this.engine.ok('component_cpu_set_gate_mode',...KEY,enabled?1:0);
+    this.engine.ok('component_cpu_set_gate_mode',...KEY,mode);
     this.portGateModeTouched=true;
-    const result=this.engine.resultView(8),mode=result.getUint32(0,true),count=result.getUint32(4,true);
-    if(mode!==(enabled?1:0) || (!enabled && count))throw new Error('invalid native v86 gate mode result');
-    this.portGates=enabled;this.traps.configurePortGates(enabled);
+    const result=this.engine.resultView(8),actual=result.getUint32(0,true),count=result.getUint32(4,true);
+    if(actual!==mode || (!enabled && count))throw new Error('invalid native v86 gate mode result');
+    this.portGates=enabled;this.guestReturns=mode===2;this.portGateMode=mode;this.portGatePatchedCount=count;
+    this.traps.configurePortGates(enabled);
     // the native version change conservatively invalidates affected executable content.
     this.tables.refresh();this.cpu.full_clear_tlb();
     return enabled;
@@ -329,6 +355,8 @@ export class V86CodeCache {
       workBudget:this.budget,gates:this.gates,faults:this.faults,cowFaults:this.cowFaults,
       dirtyPages:this.dirtyPages,deferDirty:this.deferDirty,
       portGates:this.portGates,portGateCalls:this.portGateCalls,deniedPortCalls:this.deniedPortCalls,
+      portGateMode:this.portGateMode,portGatePatchedCount:this.portGatePatchedCount,
+      guestReturns:this.guestReturns,guestReturnsSupported:this.guestReturnsSupported,guestReturnCompletions:this.guestReturnCompletions,
       inlineGates:this.inlineGates,inlineCompletions:this.inlineCompletions,inlineYields:this.inlineYields,
       directGates:this.directGates,directCompletions:this.directCompletions,directDeclines:this.directDeclines,
       directBindings:this.directBindings,directBindingCompletions:this.directBindingCompletions,
