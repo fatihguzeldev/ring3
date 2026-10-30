@@ -2,7 +2,10 @@ use std::collections::{BTreeSet, VecDeque};
 
 use crate::{
     cpu::x86::{
-        decode::{DecodeError, DecodedInstruction, decode_one},
+        decode::{
+            BoundDecode, DecodeAuthority, DecodeError, DecodePolicy, DecodedOperation,
+            decode_for_compilation,
+        },
         ir::{BranchTarget, Operation},
     },
     memory::{AddressSpace, CodeSnapshot, GuestAddress, MemoryError},
@@ -35,7 +38,7 @@ impl CompiledUnit {
 
 struct Block {
     pc: u32,
-    instructions: Vec<DecodedInstruction>,
+    instructions: Vec<DecodedOperation>,
     gate: Option<u32>,
 }
 
@@ -68,6 +71,7 @@ pub fn compile_with_gates(
         let mut instructions = Vec::new();
         let mut gate = None;
         let mut current = entry;
+        let mut source_length = 0;
         while count < limit && instructions.len() < 64 {
             let mut matches = gates.iter().filter(|(address, _)| address.0 == current);
             if let Some(&(_, id)) = matches.next() {
@@ -81,17 +85,20 @@ pub fn compile_with_gates(
                 if stub != [0x0f, 0x0b] {
                     return Err(CompileError::InvalidLimits);
                 }
-                sources.push(
-                    memory
-                        .snapshot_code(GuestAddress(current), 2)
-                        .map_err(CompileError::Memory)?,
-                );
+                source_length += 2;
                 gate = Some(id);
                 count += 1;
                 break;
             }
-            let instruction = match decode_one(memory, GuestAddress(current)) {
-                Ok(instruction) => instruction,
+            let instruction = match decode_for_compilation(
+                memory,
+                GuestAddress(current),
+                DecodePolicy::Strict,
+                None,
+                DecodeAuthority::default(),
+            ) {
+                Ok(BoundDecode::Instruction(instruction)) => instruction,
+                Ok(BoundDecode::CodeFault(_)) => return Err(CompileError::InvalidLimits),
                 Err(error) if blocks.is_empty() && instructions.is_empty() => {
                     return Err(CompileError::Decode(error));
                 }
@@ -99,11 +106,7 @@ pub fn compile_with_gates(
             };
             let next = instruction.next_pc().0;
             let operation = *instruction.operation();
-            sources.push(
-                memory
-                    .snapshot_code(instruction.pc(), instruction.length() as usize)
-                    .map_err(|error| CompileError::Decode(DecodeError::Infrastructure(error)))?,
-            );
+            source_length += usize::from(instruction.length());
             instructions.push(instruction);
             count += 1;
             let terminal = match operation {
@@ -135,6 +138,17 @@ pub fn compile_with_gates(
             }
         }
         if !instructions.is_empty() || gate.is_some() {
+            sources.push(
+                memory
+                    .snapshot_code_wrapping(GuestAddress(entry), source_length)
+                    .map_err(|error| {
+                        if gate.is_some() {
+                            CompileError::Memory(error)
+                        } else {
+                            CompileError::Decode(DecodeError::Infrastructure(error))
+                        }
+                    })?,
+            );
             blocks.push(Block {
                 pc: entry,
                 instructions,
@@ -161,6 +175,8 @@ mod flags_tests;
 mod memory_tests;
 #[cfg(test)]
 mod multiply_tests;
+#[cfg(test)]
+mod source_tests;
 #[cfg(test)]
 mod string_tests;
 #[cfg(test)]
