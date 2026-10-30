@@ -52,7 +52,7 @@ pub struct CpuState {
     pub directory: u32,
     pub directory_mask: u32,
     pub segment_mask: u32,
-    pub reserved: u32,
+    pub transaction_version: u32,
 }
 
 impl Default for CpuState {
@@ -88,7 +88,7 @@ impl Default for CpuState {
             directory: 0,
             directory_mask: 0,
             segment_mask: 0x1f,
-            reserved: 0,
+            transaction_version: 0,
         }
     }
 }
@@ -127,6 +127,7 @@ mod tests {
         assert_eq!(std::mem::offset_of!(CpuState, mapping_epoch), 128);
         assert_eq!(std::mem::offset_of!(CpuState, directory), 144);
         assert_eq!(std::mem::offset_of!(CpuState, segment_mask), 152);
+        assert_eq!(std::mem::offset_of!(CpuState, transaction_version), 156);
     }
     #[test]
     fn compiled_segment_profile_preserves_full_limits_and_tls_bases() {

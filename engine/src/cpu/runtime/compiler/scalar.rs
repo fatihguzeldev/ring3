@@ -5,8 +5,10 @@ use wasm_encoder::{
     ImportSection, InstructionSink, MemArg, MemoryType, Module, TypeSection, ValType,
 };
 
+mod memory;
 mod multiply;
 mod narrow;
+mod string;
 
 const FLAGS: u32 = 9;
 const PC: u32 = 10;
@@ -38,6 +40,7 @@ fn reg(register: Register32) -> u32 {
 pub(super) fn supports(operation: &Operation) -> bool {
     narrow::supports(operation)
         || multiply::supports(operation)
+        || string::supports(operation)
         || matches!(
             operation,
             Operation::Nop
@@ -109,7 +112,7 @@ pub(super) fn emit(blocks: &[Block]) -> Vec<u8> {
     exports.export("run", ExportKind::Func, 2);
     module.section(&exports);
     let mut out = Output {
-        function: Function::new([(24, ValType::I32), (1, ValType::I64)]),
+        function: Function::new([(24, ValType::I32), (1, ValType::I64), (8, ValType::I32)]),
     };
     out.c()
         .local_get(0)
@@ -263,28 +266,10 @@ impl Output {
         }
     }
     fn read(&mut self, width: u32, destination: u32) {
-        self.segment(width & 255, width & 0x100 != 0);
-        self.c()
-            .local_get(0)
-            .local_get(ADDRESS)
-            .i32_const(width as i32)
-            .call(0)
-            .local_set(destination)
-            .local_get(0)
-            .i32_load(mem(52))
-            .local_set(TEMP);
-        self.failed(TEMP, false);
+        memory::read(self, width, destination);
     }
     fn write(&mut self, width: u32, value: u32) {
-        self.segment(width, true);
-        self.c()
-            .local_get(0)
-            .local_get(ADDRESS)
-            .i32_const(width as i32)
-            .local_get(value)
-            .call(1)
-            .local_set(WRITE_STATUS);
-        self.failed(WRITE_STATUS, true);
+        memory::write(self, width, value);
     }
     fn value(&mut self, value: Value32, destination: u32) {
         match value {
@@ -887,7 +872,10 @@ impl Output {
                 self.c().local_set(FLAGS);
             }
             _ => {
-                if !narrow::emit(self, operation) && !multiply::emit(self, operation) {
+                if !narrow::emit(self, operation)
+                    && !multiply::emit(self, operation)
+                    && !string::emit(self, operation)
+                {
                     return false;
                 }
             }

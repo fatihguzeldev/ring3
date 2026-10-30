@@ -42,7 +42,11 @@ impl AddressSpace {
         width: u32,
         value: u32,
     ) -> Result<bool, MemoryError> {
-        if !matches!(width, 1 | 2 | 4) || dirty.bits.len() != self.capacity_pages() as usize {
+        if !matches!(width, 1 | 2 | 4)
+            || dirty.bits.len() != self.capacity_pages() as usize
+            || dirty.slots.len() != dirty.bits.len()
+            || dirty.len as usize > dirty.slots.len()
+        {
             return Err(MemoryError::InvalidRange);
         }
         self.cpu_check_span(GuestAddress(address), width as usize, Access::Write)?;
@@ -211,8 +215,12 @@ mod tests {
     #[test]
     fn malformed_dirty_shape_is_rejected_before_publication() {
         let mut memory = AddressSpace::new(2).unwrap();
-        memory.map_zeroed(range(0x1000), Permissions::READ_WRITE).unwrap();
-        memory.map_zeroed(range(0x5000), Permissions::READ_WRITE).unwrap();
+        memory
+            .map_zeroed(range(0x1000), Permissions::READ_WRITE)
+            .unwrap();
+        memory
+            .map_zeroed(range(0x5000), Permissions::READ_WRITE)
+            .unwrap();
         let version = memory.transaction_version();
         let mut dirty = DirtyPages::new(1).unwrap();
         dirty.slots[0] = 1;
@@ -220,5 +228,25 @@ mod tests {
         assert_eq!(dirty.publish(&mut memory), Err(MemoryError::InvalidRange));
         assert_eq!(memory.transaction_version(), version);
         assert_eq!(dirty.len, 1);
+    }
+
+    #[test]
+    fn malformed_dirty_length_rejects_a_repeated_slot_before_store() {
+        let mut memory = AddressSpace::new(2).unwrap();
+        memory
+            .map_zeroed(range(0x1000), Permissions::READ_WRITE)
+            .unwrap();
+        let mut dirty = DirtyPages::new(2).unwrap();
+        memory
+            .runtime_store(&mut dirty, 0x1000, 4, 0x11223344)
+            .unwrap();
+        let version = memory.transaction_version();
+        dirty.len = 3;
+        assert_eq!(
+            memory.runtime_store(&mut dirty, 0x1000, 4, 0xaabbccdd),
+            Err(MemoryError::InvalidRange)
+        );
+        assert_eq!(memory.core_read(0x1000, 4).unwrap(), 0x11223344);
+        assert_eq!(memory.transaction_version(), version);
     }
 }
