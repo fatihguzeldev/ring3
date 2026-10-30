@@ -1,7 +1,7 @@
 import { createSession, selectedFolder } from "/sdk/index.js";
 import { VisibilityController } from "./visibility.js";
 import { CategoryPicker } from "./observability/categories.js";
-import { commandLineForArguments } from "./command-line.js";
+import { launchOptions } from "./launch.js";
 import { frameRateLabel } from "./frame-rate.js";
 
 const $ = (id) => document.getElementById(id);
@@ -47,6 +47,7 @@ let game = null,
   sessionExists = false,
   lastStatus = "",
   lastDiagnostic = 0;
+let serverRuntime = { backend: "core" };
 let visibility;
 let frameRateTimer;
 const serialize = (value) =>
@@ -168,6 +169,7 @@ async function loadGame(body) {
   const result = await response.json();
   if (!response.ok)
     throw new Error(result.error || result.message || `game host returned HTTP${response.status}`);
+  serverRuntime = result.runtime ?? { backend: "core" };
   return showGame(result);
 }
 function showGame(result) {
@@ -222,15 +224,13 @@ ui.run.addEventListener("click", () => {
   };
   if (observability.level === "off") ui["observation-path"].textContent = "recording off";
   session
-    .launch({
+    .launch(launchOptions(game, {
+      runtime: serverRuntime,
       executable: ui.executable.value,
-      commandLine: commandLineForArguments(ui.executable.value, ui["command-line"].value),
-      engineUrl: game.engineUrl || "/engine.wasm",
-      manifest: game.manifest,
-      localFiles: game.localFiles,
+      argumentsText: ui["command-line"].value,
       observability,
       frameProbe: new URLSearchParams(location.search).get("frameProbe") === "1",
-    })
+    }))
     .catch((error) => log(error.message));
 });
 ui["observation-level"].addEventListener("change", () =>

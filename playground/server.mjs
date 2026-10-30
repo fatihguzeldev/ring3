@@ -1,10 +1,11 @@
 import { createServer } from "node:http";
-import { open, readdir, realpath, stat } from "node:fs/promises";
+import { open, readFile, readdir, realpath, stat } from "node:fs/promises";
 import { createReadStream } from "node:fs";
 import { dirname, extname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
+import { engineRuntime } from "./engine-runtime.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const observabilityRoot = resolve(here, "../observability/typescript");
@@ -39,6 +40,11 @@ const traceRequest = createTraceHttpHandler(traceStore, {
 const wasm = resolve(
   option("--engine", join(here, "../target/wasm32-unknown-unknown/release/ring3_engine.wasm")),
 );
+const engineBytes = await readFile(wasm);
+const runtime = engineRuntime(await WebAssembly.compile(engineBytes), {
+  relaxedFpu: args.includes("--relaxed-fpu"),
+  fastPreset: args.includes("--fast-preset"),
+});
 const mime = new Map([
   [".html", "text/html; charset=utf-8"],
   [".js", "text/javascript"],
@@ -107,6 +113,7 @@ function game() {
       .map((file) => ({ path: file.path, label: file.path })),
     selectedExecutable: mount.executable,
     engineUrl: "/engine.wasm",
+    runtime,
   };
 }
 function json(response, value, status = 200) {
@@ -223,7 +230,14 @@ const server = createServer(async (request, response) => {
       }
       return;
     }
-    if (url.pathname === "/engine.wasm") return await serve(response, wasm);
+    if (url.pathname === "/engine.wasm") {
+      response.writeHead(200, {
+        "Content-Type": "application/wasm",
+        "Content-Length": engineBytes.byteLength,
+      });
+      response.end(engineBytes);
+      return;
+    }
     if (url.pathname.startsWith("/sdk/")) {
       const root = resolve(here, "../sdk"),
         source = resolve(root, decodeURIComponent(url.pathname.slice("/sdk/".length)));
