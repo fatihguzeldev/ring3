@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {createGraphicsHost} from '../graphics/index.js';
 import {Session} from '../browser/session.js';
+import {stateBytes} from '../graphics/shaders.js';
 
 const deferred=()=>{let resolve,reject;const promise=new Promise((yes,no)=>{resolve=yes;reject=no;});return {promise,resolve,reject};};
 const turn=()=>new Promise(resolve=>setImmediate(resolve));
@@ -223,7 +224,8 @@ test('deferred buffer retirement is bounded and texture or retained-index upload
 test('batched state uploads preserve aligned draw ranges and upload each encoder before submission',async t=>{
   const {host,events}=await graphicsFixture(t);await host.consume(packet([[1,definition]]));
   const renderer=host.sessions.get(1n),device=host.device,writes=[],entries=[],state=pipelineState();
-  device.limits.maxStorageBufferBindingSize=37888;
+  const stateSize=stateBytes(state).byteLength,stride=Math.ceil(stateSize/256)*256;
+  device.limits.maxStorageBufferBindingSize=stride*2;
   device.queue.writeBuffer=(buffer,offset,bytes,dataOffset=0,size=bytes.byteLength)=>{events.push('state-upload');writes.push({buffer,offset,bytes:bytes.slice(dataOffset,dataOffset+size)});};
   device.createBindGroup=descriptor=>{entries.push(descriptor.entries[0].resource);return {};};
   renderer.state=()=>state;renderer.renderTargets=()=>({color:{view:{}}});
@@ -240,7 +242,7 @@ test('batched state uploads preserve aligned draw ranges and upload each encoder
   assert.equal(writes.length,0,'draw staging must not upload until the shared encoder flushes');
   assert.throws(()=>renderer.configureStateUploadBatch(false),/idle renderer/);
   state.vc[0][0]=99;renderer.flush();
-  assert.equal(writes.length,2);assert.deepEqual(entries.map(row=>[row.offset,row.size]),[[0,18768],[18944,18768],[0,18768]]);
+  assert.equal(writes.length,2);assert.deepEqual(entries.map(row=>[row.offset,row.size]),[[0,stateSize],[stride,stateSize],[0,stateSize]]);
   assert.equal(entries[0].buffer,entries[1].buffer);assert.notEqual(entries[0].buffer,entries[2].buffer);
   for(const [i,entry] of entries.entries()){
     const write=writes.find(row=>row.buffer===entry.buffer),view=new DataView(write.bytes.buffer);
@@ -338,7 +340,7 @@ test('pipeline reuse crosses uniform-only snapshots without walking immutable sh
 test('pipeline input reuse preserves shader replacement, code inputs and descriptor validation',async t=>{
   const {renderer,run,targets}=await pipelineFixture(t),state=pipelineState(),first=await run(state);
   const moved=structuredClone(state);moved.viewport.width=2;
-  assert.notEqual(await run(moved),first);
+  assert.equal(await run(moved),first);
   assert.notEqual(await run(state,'line-list'),first);
   assert.notEqual(await run(state,'triangle-list',Array(8).fill(null),true),first);
   assert.notEqual(await run(state,'triangle-list',Array(8).fill(null),false,{color:{item:{gpuFormat:'bgra8unorm'}}}),first);
@@ -350,7 +352,10 @@ test('pipeline input reuse preserves shader replacement, code inputs and descrip
   const lit=structuredClone(state);lit.vertexShader=0x52;lit.render[137]=1;
   lit.lights=[{index:0,enabled:1,kind:3,direction:[0,0,-1],position:[0,0,0],range:1,falloff:1,attenuation:[1,0,0],theta:0,phi:0,diffuse:[1,1,1,1],specular:[0,0,0,0],ambient:[0,0,0,0]}];
   const lighting=await run(lit),changed=structuredClone(lit);changed.lights[0].diffuse[0]=0.5;
-  assert.notEqual(await run(changed),lighting);
+  assert.equal(await run(changed),lighting);
+  assert.notDeepEqual(stateBytes(changed),stateBytes(lit),'changing light values still reaches the GPU');
+  const point=structuredClone(lit);point.lights[0].kind=1;
+  assert.notEqual(await run(point),lighting,'light type remains shader structure');
   const shader={stage:1,program:null,declaration:{transformed:true,elements:[{stream:0,offset:0,register:0,kind:3}]}};
   state.vertexShader=0x80000001;renderer.shaders.set(state.vertexShader,shader);
   const original=await run(state),replacement=structuredClone(shader);replacement.declaration.elements[0].offset=4;
@@ -368,12 +373,61 @@ test('pipeline input memo stays bounded and cannot resurrect an evicted canonica
   for(let i=0;i<300;i++){const variant=structuredClone(state);variant.render[173]=i;await run(variant);}
   assert.equal(renderer.pipelines.size,1,'conservative input differences still use the canonical full key');
   assert.ok(renderer.pipelineInputs.size<=256);
-  state.render[15]=1;state.render[25]=2;
+  state.render[7]=1;state.render[14]=1;
+  const targets={color:{item:{gpuFormat:'rgba8unorm'}},depth:{item:{gpuFormat:'depth24plus-stencil8'}}};
+  const depthRun=variant=>run(variant,'triangle-list',Array(8).fill(null),false,targets);
   let first;
-  for(let i=0;i<129;i++){const variant=structuredClone(state);variant.render[24]=i;const gpu=await run(variant);if(i===0)first=gpu;}
+  for(let i=0;i<129;i++){const variant=structuredClone(state);variant.render[47]=i;const gpu=await depthRun(variant);if(i===0)first=gpu;}
   assert.equal(renderer.pipelines.size,128);
-  assert.notEqual(await run(state),first,'stale input memo must miss after canonical LRU eviction');
+  assert.notEqual(await depthRun(state),first,'stale input memo must miss after canonical LRU eviction');
   assert.ok(renderer.pipelineInputs.size<=256);
+});
+
+test('changing draw numbers updates storage while reusing the same lighting fog alpha and texture pipeline',async t=>{
+  const {host,renderer,run}=await pipelineFixture(t),state=pipelineState();renderer.pipelineInputMemoEnabled=false;
+  const bits=value=>new Uint32Array(new Float32Array([value]).buffer)[0];
+  Object.assign(state.render,{15:1,24:17,25:4,28:1,29:1,34:0xff223344,35:3,36:bits(2),37:bits(20),38:bits(0.25),60:0xff112233,137:1,139:0xff445566});
+  state.vertexShader=0x52;
+  Object.assign(state.stages[0],{1:4,2:2,3:3,4:14,5:3,6:2,13:4,14:4,15:0xff778899,19:bits(0.5)});
+  const light={enabled:1,index:9,kind:2,direction:[1,2,3],position:[4,5,6],range:30,falloff:2,attenuation:[1,0.5,0.25],theta:1,phi:1.5,
+    ambient:[0.1,0.2,0.3,1],diffuse:[0.4,0.5,0.6,1],specular:[0.7,0.8,0.9,1]};
+  state.lights=[light,{...light,index:1,enabled:0},{...structuredClone(light),index:2,kind:1},{...structuredClone(light),index:3,kind:3}];
+  const kinds=['2d',...Array(7).fill(null)],first=await run(state,'triangle-list',kinds),before=stateBytes(state);
+  for(let i=1;i<=30;i++){
+    state.render[24]=i;state.render[34]=0xff223300+i;state.render[60]=0xaa112200+i;state.render[139]=0xff445500+i;
+    state.render[37]=bits(20+i);state.render[38]=bits(i/100);state.viewport.width=640+i;
+    state.stages[0][15]=0xff778800+i;state.stages[0][19]=bits(i/10);
+    for(const l of state.lights){l.position[0]=i;l.direction[0]=i/2;l.range=30+i;l.diffuse[0]=i/40;l.theta=0.5+i/100;l.phi=1+i/100;}
+    assert.equal(await run(state,'triangle-list',kinds),first);
+  }
+  const packed=new Float32Array(stateBytes(state).buffer);
+  assert.notDeepEqual(stateBytes(state),before);assert.equal(host.snapshot().pipelineCacheMisses,1);
+  assert.equal(packed.length,(1194+3*7)*4);assert.equal(packed[1173*4+2],670);
+  assert.equal(packed[1177*4],50);assert.equal(packed[1177*4+1],48);
+  assert.equal(packed[1177*4+2],Math.fround(0.3));assert.equal(packed[1177*4+3],Math.fround(30/255));
+  assert.equal(packed[1178*4],3);assert.deepEqual([...packed.subarray(1194*4,1194*4+8)],[15,2,3,0,30,5,6,1]);
+  assert.equal(packed[(1194+5)*4+3],60);assert.equal(packed[(1194+7)*4],15,'disabled lights do not take storage slots');
+});
+
+test('spotlight derived values preserve JS arithmetic before their single float32 rounding',()=>{
+  const state=pipelineState(),theta=1,phi=1.0000001;
+  state.lights=[{enabled:1,kind:2,direction:[0,0,1],position:[0,0,0],theta,phi,falloff:4}];
+  const packed=new Float32Array(stateBytes(state).buffer),outer=Math.cos(phi/2),difference=Math.cos(theta/2)-outer;
+  assert.equal(packed[(1194+6)*4],Math.fround(outer));assert.equal(packed[(1194+6)*4+1],Math.fround(difference));
+  assert.notEqual(packed[(1194+6)*4+1],Math.fround(Math.cos(theta/2))-Math.fround(outer));
+  assert.equal(packed[(1194+6)*4+2],4);
+});
+
+test('moved draw constants keep consumed-value validation without rejecting unused float payloads',async t=>{
+  const {run}=await pipelineFixture(t),state=pipelineState();
+  state.render[38]=0x7f800000;
+  await run(state);assert.equal(new Float32Array(stateBytes(state).buffer)[1177*4+2],Infinity);
+  state.render[28]=1;state.render[35]=1;
+  await assert.rejects(run(state),/non-finite shader constant/);
+  state.render[35]=3;state.render[36]=0xff7fffff;state.render[37]=0x7f7fffff;
+  await assert.rejects(run(state),/non-finite shader constant/);
+  state.render[28]=0;state.stages[0][1]=2;state.stages[0][2]=2;state.stages[0][19]=0x7f800000;
+  await assert.rejects(run(state,'triangle-list',['2d',...Array(7).fill(null)]),/non-finite shader constant/);
 });
 
 test('submit ACK returns before Present completion while its fence owns metrics and uniforms',async t=>{

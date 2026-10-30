@@ -2,9 +2,12 @@ import {require} from './packet.js';
 
 export const floatBits = value => new Float32Array(new Uint32Array([value]).buffer)[0];
 export const number = value => { require(Number.isFinite(value),'non-finite shader constant');return Number.isInteger(value)?`${value}.0`:`${value}`; };
-const vec = a => `vec4<f32>(${a.map(number).join(',')})`;
 const rgba = c => [(c>>>16&255)/255,(c>>>8&255)/255,(c&255)/255,(c>>>24)/255];
 const lane='xyzw';
+const drawState={viewport:1173,ambient:1174,fogColor:1175,textureFactor:1176,fog:1177,stages:1178,lights:1194,lightVectors:7};
+const stateNumber=value=>require(Number.isFinite(value)&&Number.isFinite(Math.fround(value)),'non-finite shader constant');
+const stateVector=(index,values)=>{values.forEach(stateNumber);return `state[${index}u]`;};
+const stateFloat=(index,component,value)=>{stateNumber(value);return `state[${index}u].${component}`;};
 
 export function fvf(value) {
   const elements=[];let offset=0;
@@ -109,9 +112,9 @@ function sample(stage,coord,kinds,p){
   const modes=[stageState[13],stageState[14],stageState[25]],lanes='xyz';
   const components=Array.from({length:dimensions},(_,i)=>modes[i]===5?`abs((${coord}).${lanes[i]})`:`(${coord}).${lanes[i]}`);
   const uv=`vec${dimensions}<f32>(${components.join(',')})`;
-  const sampled=`textureSampleBias(tex${stage},samp${stage},${uv},${number(floatBits(stageState[19]))})`;
+  const sampled=`textureSampleBias(tex${stage},samp${stage},${uv},${stateFloat(drawState.stages+stage*2,'x',floatBits(stageState[19]))})`;
   const border=Array.from({length:dimensions},(_,i)=>i).filter(i=>modes[i]===4).map(i=>`((${coord}).${lanes[i]}>=0.0&&(${coord}).${lanes[i]}<=1.0)`);
-  return border.length?`select(${vec(rgba(stageState[15]))},${sampled},${border.join('&&')})`:sampled;
+  return border.length?`select(${stateVector(drawState.stages+stage*2+1,rgba(stageState[15]))},${sampled},${border.join('&&')})`:sampled;
 }
 
 const regs=`var temp:array<vec4<f32>,12>;var input:array<vec4<f32>,17>;var address:array<vec4<f32>,1>;var tex:array<vec4<f32>,8>;var raster:array<vec4<f32>,3>;var color:array<vec4<f32>,2>;var texout:array<vec4<f32>,8>;`;
@@ -119,7 +122,7 @@ const regs=`var temp:array<vec4<f32>,12>;var input:array<vec4<f32>,17>;var addre
 function fixedVertex(p,declaration){
   const rs=p.render,has=reg=>declaration.elements.some(e=>e.register===reg);let out='';
   if(declaration.transformed){
-    const v=p.viewport;out+=`let reciprocal=1.0/input[0].w;out.position=vec4<f32>((input[0].x-${number(v.x)}+0.5)/${number(v.width)}*2.0-1.0,1.0-(input[0].y-${number(v.y)}+0.5)/${number(v.height)}*2.0,input[0].z,1.0)*reciprocal;\n`;
+    const v=p.viewport;out+=`let viewport=${stateVector(drawState.viewport,[v.x,v.y,v.width,v.height])};let reciprocal=1.0/input[0].w;out.position=vec4<f32>((input[0].x-viewport.x+0.5)/viewport.z*2.0-1.0,1.0-(input[0].y-viewport.y+0.5)/viewport.w*2.0,input[0].z,1.0)*reciprocal;\n`;
   } else {
     out+='var world=matrix(10u);';
     if(rs[151]){
@@ -134,16 +137,16 @@ function fixedVertex(p,declaration){
       // row-vector normals use the inverse-transpose world transform, computed as cofactors.
       out+='let normalMatrix=matrix(0u)*world;let a=normalMatrix[0].xyz;let b=normalMatrix[1].xyz;let c=normalMatrix[2].xyz;let determinant=dot(a,cross(b,c));var normal=mat3x3<f32>(cross(b,c),cross(c,a),cross(a,b))*input[3].xyz/determinant;';
       if(rs[143])out+='normal=normalize(normal);';
-      out+=`var diffuse=(ma*${vec(rgba(rs[139]))}+me).xyz;var spec=vec3<f32>(0.0);\n`;
-      for(const light of p.lights.filter(l=>l.enabled)){
-        require([1,2,3].includes(light.kind),'light type');const id=light.index;
-        out+=`{let lightDirection=(matrix(0u)*${vec([...light.direction,0])}).xyz;var direction=normalize(-lightDirection);var attenuation=1.0;`;
-        if(light.kind!==3){out+=`let delta=(matrix(0u)*${vec([...light.position,1])}).xyz-viewPosition.xyz;let distance=length(delta);direction=normalize(delta);attenuation=select(0.0,1.0/max(dot(${vec([...light.attenuation,0])}.xyz,vec3<f32>(1.0,distance,distance*distance)),0.000001),distance<=${number(light.range)});`;
-          if(light.kind===2){const inner=Math.cos(light.theta/2),outer=Math.cos(light.phi/2);out+=`let spot=dot(-direction,normalize(lightDirection));attenuation*=pow(clamp((spot-${number(outer)})/max(${number(inner-outer)},0.000001),0.0,1.0),${number(light.falloff)});`;}
+      out+=`var diffuse=(ma*${stateVector(drawState.ambient,rgba(rs[139]))}+me).xyz;var spec=vec3<f32>(0.0);\n`;
+      for(const [ordinal,light] of p.lights.filter(l=>l.enabled).entries()){
+        require([1,2,3].includes(light.kind),'light type');const base=drawState.lights+ordinal*drawState.lightVectors;
+        out+=`{let lightDirection=(matrix(0u)*${stateVector(base,[...light.direction,0])}).xyz;var direction=normalize(-lightDirection);var attenuation=1.0;`;
+        if(light.kind!==3){out+=`let delta=(matrix(0u)*${stateVector(base+1,[...light.position,1])}).xyz-viewPosition.xyz;let distance=length(delta);direction=normalize(delta);attenuation=select(0.0,1.0/max(dot(${stateVector(base+5,[...light.attenuation,light.range])}.xyz,vec3<f32>(1.0,distance,distance*distance)),0.000001),distance<=${stateFloat(base+5,'w',light.range)});`;
+          if(light.kind===2){const inner=Math.cos(light.theta/2),outer=Math.cos(light.phi/2);out+=`let spot=dot(-direction,normalize(lightDirection));attenuation*=pow(clamp((spot-${stateFloat(base+6,'x',outer)})/max(${stateFloat(base+6,'y',inner-outer)},0.000001),0.0,1.0),${stateFloat(base+6,'z',light.falloff)});`;}
         }
-        out+=`let ndl=max(dot(normal,direction),0.0);diffuse+=attenuation*(${vec(light.ambient)}.xyz*ma.xyz+${vec(light.diffuse)}.xyz*md.xyz*ndl);`;
-        if(rs[29]){out+=`let eye=${rs[142]?'normalize(-viewPosition.xyz)':'vec3<f32>(0.0,0.0,-1.0)'};spec+=attenuation*${vec(light.specular)}.xyz*ms.xyz*select(0.0,pow(max(dot(normal,normalize(direction+eye)),0.0),state[1172u].x),ndl>0.0);`;}
-        out+='}\n';void id;
+        out+=`let ndl=max(dot(normal,direction),0.0);diffuse+=attenuation*(${stateVector(base+2,light.ambient)}.xyz*ma.xyz+${stateVector(base+3,light.diffuse)}.xyz*md.xyz*ndl);`;
+        if(rs[29]){out+=`let eye=${rs[142]?'normalize(-viewPosition.xyz)':'vec3<f32>(0.0,0.0,-1.0)'};spec+=attenuation*${stateVector(base+4,light.specular)}.xyz*ms.xyz*select(0.0,pow(max(dot(normal,normalize(direction+eye)),0.0),state[1172u].x),ndl>0.0);`;}
+        out+='}\n';
       }
       out+='out.diffuse=vec4<f32>(clamp(diffuse,vec3<f32>(0.0),vec3<f32>(1.0)),md.w);out.specular=vec4<f32>(clamp(spec,vec3<f32>(0.0),vec3<f32>(1.0)),0.0);';
     }
@@ -160,10 +163,10 @@ function fixedVertex(p,declaration){
   return out;
 }
 
-function fog(destination,z,mode,p){const rs=p.render;switch(mode){case 1:return `${destination}=clamp(exp(-${number(floatBits(rs[38]))}*${z}),0.0,1.0);`;case 2:return `${destination}=clamp(exp(-pow(${number(floatBits(rs[38]))}*${z},2.0)),0.0,1.0);`;case 3:return `${destination}=clamp((${number(floatBits(rs[37]))}-${z})/(${number(floatBits(rs[37])-floatBits(rs[36]))}),0.0,1.0);`;default:return '';}}
+function fog(destination,z,mode,p){const rs=p.render;switch(mode){case 1:return `${destination}=clamp(exp(-${stateFloat(drawState.fog,'z',floatBits(rs[38]))}*${z}),0.0,1.0);`;case 2:return `${destination}=clamp(exp(-pow(${stateFloat(drawState.fog,'z',floatBits(rs[38]))}*${z},2.0)),0.0,1.0);`;case 3:return `${destination}=clamp((${stateFloat(drawState.fog,'x',floatBits(rs[37]))}-${z})/(${stateFloat(drawState.fog,'y',floatBits(rs[37])-floatBits(rs[36]))}),0.0,1.0);`;default:return '';}}
 
-function textureArgument(arg,stage,p){let result;switch(arg&15){case 0:result='input[0]';break;case 1:result='current';break;case 2:result=`sample${stage}`;break;case 3:result=vec(rgba(p.render[60]));break;case 4:result='input[1]';break;case 5:result='temporary';break;default:throw new Error(`D3D8 host: texture argument ${arg}`);}if(arg&32)result=`vec4<f32>(${result}.w)`;if(arg&16)result=`(vec4<f32>(1.0)-${result})`;return result;}
-function textureOperation(op,args,stage,p){const [a,b,c]=args;switch(op){case 2:return a;case 3:return b;case 4:return `(${a}*${b})`;case 5:return `(${a}*${b}*2.0)`;case 6:return `(${a}*${b}*4.0)`;case 7:return `(${a}+${b})`;case 8:return `(${a}+${b}-vec4<f32>(0.5))`;case 9:return `((${a}+${b}-vec4<f32>(0.5))*2.0)`;case 10:return `(${a}-${b})`;case 11:return `(${a}+${b}-${a}*${b})`;case 12:return `mix(${b},${a},input[0].w)`;case 13:return `mix(${b},${a},sample${stage}.w)`;case 14:return `mix(${b},${a},${number(rgba(p.render[60])[3])})`;case 15:return `(${a}+${b}*(1.0-sample${stage}.w))`;case 16:return `mix(${b},${a},current.w)`;case 18:return `(${a}+${a}.w*${b})`;case 19:return `vec4<f32>(${a}.xyz*${b}.xyz+vec3<f32>(${a}.w),${a}.w*${b}.w)`;case 20:return `(${a}+(1.0-${a}.w)*${b})`;case 21:return `vec4<f32>((vec3<f32>(1.0)-${a}.xyz)*${b}.xyz+vec3<f32>(${a}.w),${a}.w*${b}.w)`;case 24:return `vec4<f32>(dot(${a}.xyz*2.0-vec3<f32>(1.0),${b}.xyz*2.0-vec3<f32>(1.0)))`;case 25:return `(${a}*${b}+${c})`;case 26:return `(${a}*${b}+(vec4<f32>(1.0)-${a})*${c})`;default:throw new Error(`D3D8 host: texture operation ${op} is not implemented`);}}
+function textureArgument(arg,stage,p){let result;switch(arg&15){case 0:result='input[0]';break;case 1:result='current';break;case 2:result=`sample${stage}`;break;case 3:result=stateVector(drawState.textureFactor,rgba(p.render[60]));break;case 4:result='input[1]';break;case 5:result='temporary';break;default:throw new Error(`D3D8 host: texture argument ${arg}`);}if(arg&32)result=`vec4<f32>(${result}.w)`;if(arg&16)result=`(vec4<f32>(1.0)-${result})`;return result;}
+function textureOperation(op,args,stage,p){const [a,b,c]=args;switch(op){case 2:return a;case 3:return b;case 4:return `(${a}*${b})`;case 5:return `(${a}*${b}*2.0)`;case 6:return `(${a}*${b}*4.0)`;case 7:return `(${a}+${b})`;case 8:return `(${a}+${b}-vec4<f32>(0.5))`;case 9:return `((${a}+${b}-vec4<f32>(0.5))*2.0)`;case 10:return `(${a}-${b})`;case 11:return `(${a}+${b}-${a}*${b})`;case 12:return `mix(${b},${a},input[0].w)`;case 13:return `mix(${b},${a},sample${stage}.w)`;case 14:return `mix(${b},${a},${stateFloat(drawState.textureFactor,'w',rgba(p.render[60])[3])})`;case 15:return `(${a}+${b}*(1.0-sample${stage}.w))`;case 16:return `mix(${b},${a},current.w)`;case 18:return `(${a}+${a}.w*${b})`;case 19:return `vec4<f32>(${a}.xyz*${b}.xyz+vec3<f32>(${a}.w),${a}.w*${b}.w)`;case 20:return `(${a}+(1.0-${a}.w)*${b})`;case 21:return `vec4<f32>((vec3<f32>(1.0)-${a}.xyz)*${b}.xyz+vec3<f32>(${a}.w),${a}.w*${b}.w)`;case 24:return `vec4<f32>(dot(${a}.xyz*2.0-vec3<f32>(1.0),${b}.xyz*2.0-vec3<f32>(1.0)))`;case 25:return `(${a}*${b}+${c})`;case 26:return `(${a}*${b}+(vec4<f32>(1.0)-${a})*${c})`;default:throw new Error(`D3D8 host: texture operation ${op} is not implemented`);}}
 
 export function buildShader(p,vertex,pixel,textureKinds,options={}) {
   const declaration=vertex?.declaration??fvf(p.vertexShader);require(declaration.elements?.length,'empty vertex declaration');
@@ -191,8 +194,8 @@ export function buildShader(p,vertex,pixel,textureKinds,options={}) {
     if(p.render[29])fragment+='current=vec4<f32>(current.xyz+in.specular.xyz,current.w);';
   }
   const rs=p.render;
-  if(rs[15]){const comparisons=['false',null,'<','==','<=','>','!=','>=',null],ref=number((rs[24]&255)/255),op=rs[25];require(op>=1&&op<=8,'alpha compare');fragment+=op===1?'discard;':op===8?'':`if(!(current.w ${comparisons[op]} ${ref})){discard;}`;}
-  if(rs[28]){fragment+='var factor=in.fog;';if(rs[35])fragment+=fog('factor','in.position.z',rs[35],p);fragment+=`current=vec4<f32>(mix(${vec(rgba(rs[34]))}.xyz,current.xyz,factor),current.w);`;}
+  if(rs[15]){const comparisons=['false',null,'<','==','<=','>','!=','>=',null],ref=stateFloat(drawState.fog,'w',(rs[24]&255)/255),op=rs[25];require(op>=1&&op<=8,'alpha compare');fragment+=op===1?'discard;':op===8?'':`if(!(current.w ${comparisons[op]} ${ref})){discard;}`;}
+  if(rs[28]){fragment+='var factor=in.fog;';if(rs[35])fragment+=fog('factor','in.position.z',rs[35],p);fragment+=`current=vec4<f32>(mix(${stateVector(drawState.fogColor,rgba(rs[34]))}.xyz,current.xyz,factor),current.w);`;}
   fragment+='return current;';
   return `${declarations}\n@vertex fn vs(@builtin(vertex_index) vertex:u32)->Output{${vertexBody}}\n@fragment fn fs(in:Output)->@location(0) vec4<f32>{${fragment}}`;
 }
@@ -201,7 +204,9 @@ const identityState=new Float32Array(1173*4);
 for(let i=0;i<266;i++)for(let lane=0;lane<4;lane++)identityState[(104+i*4+lane)*4+lane]=1;
 
 export function stateBytes(p,vertex,pixel){
-  const mask=p.transformMask,out=mask?new Float32Array(identityState):new Float32Array(1173*4);p.vc.forEach((v,i)=>out.set(v,i*4));p.pc.forEach((v,i)=>out.set(v,(96+i)*4));
+  const mask=p.transformMask,lights=p.lights?.filter(l=>l.enabled)??[],out=new Float32Array((drawState.lights+lights.length*drawState.lightVectors)*4);
+  if(mask)out.set(identityState);
+  p.vc.forEach((v,i)=>out.set(v,i*4));p.pc.forEach((v,i)=>out.set(v,(96+i)*4));
   for(const [i,c] of vertex?.declaration?.constants??[])out.set(c,i*4);
   for(const [i,c] of vertex?.program?.constants??[])out.set(c,i*4);
   for(const [i,c] of pixel?.program?.constants??[])out.set(c,(96+i)*4);
@@ -211,5 +216,17 @@ export function stateBytes(p,vertex,pixel){
   }}
   else p.transforms.forEach((m,i)=>out.set(m,(104+i*4)*4));
   out.set(p.material,1168*4);
+  const rs=p.render??[],v=p.viewport??{};
+  out.set([v.x??0,v.y??0,v.width??0,v.height??0],drawState.viewport*4);
+  out.set(rgba(rs[139]),drawState.ambient*4);out.set(rgba(rs[34]),drawState.fogColor*4);out.set(rgba(rs[60]),drawState.textureFactor*4);
+  out.set([floatBits(rs[37]),floatBits(rs[37])-floatBits(rs[36]),floatBits(rs[38]),(rs[24]&255)/255],drawState.fog*4);
+  for(let i=0;i<8;i++){const s=p.stages?.[i]??[];out[(drawState.stages+i*2)*4]=floatBits(s[19]);out.set(rgba(s[15]),(drawState.stages+i*2+1)*4);}
+  lights.forEach((light,i)=>{
+    const base=(drawState.lights+i*drawState.lightVectors)*4,outer=Math.cos(light.phi/2);
+    out.set([...(light.direction??[0,0,0]),0],base);out.set([...(light.position??[0,0,0]),1],base+4);
+    out.set(light.ambient??[0,0,0,0],base+8);out.set(light.diffuse??[0,0,0,0],base+12);out.set(light.specular??[0,0,0,0],base+16);
+    out.set([...(light.attenuation??[0,0,0]),light.range??0],base+20);
+    out.set([outer,Math.cos(light.theta/2)-outer,light.falloff??0,0],base+24);
+  });
   return new Uint8Array(out.buffer);
 }
