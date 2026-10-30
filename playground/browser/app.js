@@ -138,7 +138,7 @@ const session = createSession({
     ui.capture.textContent = value ? "release mouse" : "capture mouse";
     ui["pointer-status"].textContent = value
       ? "mouse captured · Esc releases it"
-      : "click the display to focus · Esc releases the mouse";
+      : "click the display to control the game · Esc releases the mouse";
   },
 });
 visibility = new VisibilityController(session, {

@@ -22,6 +22,9 @@ export class InputHost {
     this.blocked = false;
     this.focused = false;
     this.windowFocused = document.hasFocus();
+    this.cursorHidden = false;
+    this.capturePending = false;
+    this.automaticCapture = false;
     this.keys = new Set();
     this.buttons = new Set();
     this.relative = {dx:0,dy:0,wheel:0};
@@ -48,6 +51,14 @@ export class InputHost {
       canvas.focus();
       this.focus();
       if (!this.active) return;
+      if (this.cursorHidden && !this.locked) {
+        event.preventDefault();
+        if (event.button === 0) {
+          accepted = true;
+          void this.capture({automatic:true}).catch(error => this.onDiagnostic(`mouse capture: ${error.message}`));
+        }
+        return;
+      }
       const button = mouseButton[event.button];
       if (button === undefined || this.buttons.has(button)) return;
       const point = this.locked ? null : this.point(event);
@@ -78,7 +89,14 @@ export class InputHost {
     }, {...options,passive:false});
     canvas.addEventListener('contextmenu', event => event.preventDefault(), options);
     document.addEventListener('pointerlockchange', () => {
-      if (!this.locked) this.release(false);
+      this.capturePending = false;
+      if (this.locked && this.automaticCapture && !this.cursorHidden) {
+        document.exitPointerLock();
+        return;
+      }
+      this.clearMotion();
+      if (!this.locked) { this.automaticCapture = false; this.release(false); }
+      this.updateCursor();
       if (!this.physicalAvailable) this.release(true);
       else this.focus();
       const captured = this.active && this.locked;
@@ -86,7 +104,10 @@ export class InputHost {
       this.onCapture(captured);
       if (this.locked && !captured) document.exitPointerLock();
     }, options);
-    document.addEventListener('pointerlockerror', () => this.onDiagnostic('mouse capture was denied; click capture mouse to retry'), options);
+    document.addEventListener('pointerlockerror', () => {
+      this.capturePending = false; this.automaticCapture = false; this.updateCursor();
+      this.onDiagnostic('mouse capture was denied; click capture mouse to retry');
+    }, options);
   }
   get locked() { return document.pointerLockElement === this.canvas; }
   timestamp(event) {
@@ -151,6 +172,8 @@ export class InputHost {
   }
   disable({preserveFocus = false} = {}) {
     this.control('disable'); this.release(!preserveFocus); this.enabled = false; this.preserveFocus = preserveFocus;
+    if (!preserveFocus) this.cursorHidden = false;
+    this.updateCursor();
     if (this.locked) document.exitPointerLock();
   }
   focus() {
@@ -181,6 +204,7 @@ export class InputHost {
   }
   move(event) {
     if (!this.active || (!this.locked && event.target !== this.canvas)) return;
+    if (this.cursorHidden && !this.locked) return;
     if (!this.locked) {
       const point = this.point(event);
       if (!point) return;
@@ -202,6 +226,12 @@ export class InputHost {
     return {x:integer(x + Math.floor(localX * width / canvas.width)),y:integer(y + Math.floor(localY * height / canvas.height))};
   }
   schedule() { if (!this.frame) this.frame = requestAnimationFrame(() => this.flush()); }
+  clearMotion() {
+    cancelAnimationFrame(this.frame); this.frame = 0;
+    this.relative = {dx:0,dy:0,wheel:0};
+    this.absolute = null;
+    this.motionTimestampMs = undefined;
+  }
   flush() {
     cancelAnimationFrame(this.frame); this.frame = 0;
     if (!this.active) { this.relative = {dx:0,dy:0,wheel:0}; this.absolute = null; this.motionTimestampMs = undefined; return; }
@@ -229,16 +259,27 @@ export class InputHost {
     if ((this.enabled || this.preserveFocus) && events.length) this.sendTimed(events);
     if (blur) this.focused = false;
   }
-  async capture() {
+  async capture({automatic = false} = {}) {
     if (!this.enabled || this.blocked || !this.windowFocused || document.hidden || !document.hasFocus()) return;
     this.canvas.focus();
     this.focus();
-    if (!this.active) return;
+    if (!this.active || this.locked || this.capturePending) return;
     if (!this.canvas.requestPointerLock) throw new Error('pointer lock is unavailable in this browser');
-    await this.canvas.requestPointerLock();
+    this.capturePending = true;
+    this.automaticCapture = automatic;
+    try { await this.canvas.requestPointerLock(); }
+    catch (error) {
+      this.capturePending = false; this.automaticCapture = false; this.updateCursor();
+      throw error;
+    }
   }
   applyCursor(cursor) {
-    this.canvas.style.cursor = cursor.visible ? 'default' : 'none';
+    const hidden = !cursor.visible;
+    if (hidden !== this.cursorHidden) this.clearMotion();
+    this.cursorHidden = hidden;
+    if (!hidden && this.automaticCapture && this.locked) document.exitPointerLock();
+    this.updateCursor();
   }
+  updateCursor() { this.canvas.style.cursor = this.locked && this.cursorHidden ? 'none' : 'default'; }
   close() { this.disable(); this.abort.abort(); }
 }

@@ -46,7 +46,7 @@ function browserFixture(t) {
   const previous={window:globalThis.window,document:globalThis.document,requestAnimationFrame:globalThis.requestAnimationFrame,cancelAnimationFrame:globalThis.cancelAnimationFrame};
   const window=new EventTarget(),document=new EventTarget(),canvas=new EventTarget(),packets=[];
   Object.assign(document,{hasFocus:()=>true,hidden:false,activeElement:canvas,pointerLockElement:null});
-  Object.assign(canvas,{width:640,height:480,clientHeight:480,focus(){document.activeElement=canvas;},getBoundingClientRect:()=>({left:0,top:0,width:640,height:480})});
+  Object.assign(canvas,{width:640,height:480,clientHeight:480,style:{cursor:'default'},focus(){document.activeElement=canvas;},getBoundingClientRect:()=>({left:0,top:0,width:640,height:480})});
   Object.assign(globalThis,{window,document,requestAnimationFrame:()=>1,cancelAnimationFrame(){}});
   let now=100;
   t.mock.method(performance,'now',()=>now);
@@ -60,6 +60,81 @@ function browserFixture(t) {
   };
   return {host,packets,key,window,document,canvas,set:time=>{now=time;}};
 }
+
+function mouseDown(browser,button=0) {
+  const event=new Event('mousedown',{cancelable:true});
+  Object.defineProperties(event,{button:{value:button},clientX:{value:320},clientY:{value:240}});
+  browser.canvas.dispatchEvent(event);return event;
+}
+
+test('a hidden guest cursor uses the activation click for capture and keeps signed relative movement inside the game',async t=>{
+  const b=browserFixture(t);let requests=0;
+  b.canvas.requestPointerLock=async()=>{requests++;b.document.pointerLockElement=b.canvas;b.document.dispatchEvent(new Event('pointerlockchange'));};
+  b.document.exitPointerLock=()=>{b.document.pointerLockElement=null;b.document.dispatchEvent(new Event('pointerlockchange'));};
+  b.host.move({target:b.canvas,clientX:320,clientY:240,movementX:20,movementY:30});
+  b.host.applyCursor({visible:false,x:320,y:240});
+  assert.equal(b.canvas.style.cursor,'default','an unlocked OS cursor must remain visible');
+  const before=b.packets.length;
+  b.host.move({target:b.canvas,clientX:320,clientY:220,movementX:0,movementY:-20});b.host.flush();
+  assert.equal(b.packets.length,before,'uncaptured hidden-cursor motion cannot drift the guest pointer');
+  const activation=mouseDown(b);await Promise.resolve();
+  assert.equal(activation.defaultPrevented,true);assert.equal(requests,1);assert.equal(b.host.locked,true);
+  assert.equal(b.packets.slice(before).flat().some(event=>event.kind==='button'),false,'activation must not fire a shot');
+  assert.equal(b.packets.flat().at(-1).captured,true);
+  b.host.move({target:b.document,movementX:-4,movementY:-11});b.host.flush();
+  assert.deepEqual(b.packets.at(-1).map(({kind,dx,dy})=>({kind,dx,dy})),[{kind:'relative',dx:-4,dy:-11}]);
+  b.document.exitPointerLock();b.host.applyCursor({visible:false,x:1,y:1});
+  assert.equal(b.canvas.style.cursor,'default');assert.equal(requests,1,'Escape cannot trigger an automatic recapture');
+  const released=b.packets.length;
+  b.host.move({target:b.canvas,clientX:320,clientY:220,movementY:-20});b.host.flush();
+  assert.equal(b.packets.length,released);
+});
+
+test('ordinary visible cursors keep absolute click coordinates without pointer capture',t=>{
+  const b=browserFixture(t);let requests=0;
+  b.canvas.requestPointerLock=()=>{requests++;};b.host.applyCursor({visible:true,x:0,y:0});
+  mouseDown(b);
+  assert.equal(requests,0);
+  assert.deepEqual(b.packets.at(-1).map(({kind,x,y,button,down})=>({kind,x,y,button,down})),[
+    {kind:'pointer',x:320,y:240,button:undefined,down:undefined},
+    {kind:'button',x:undefined,y:undefined,button:0,down:true},
+  ]);
+});
+
+test('returning to a visible guest cursor releases only a lock acquired automatically',async t=>{
+  const b=browserFixture(t);
+  b.canvas.requestPointerLock=async()=>{b.document.pointerLockElement=b.canvas;b.document.dispatchEvent(new Event('pointerlockchange'));};
+  b.document.exitPointerLock=()=>{b.document.pointerLockElement=null;b.document.dispatchEvent(new Event('pointerlockchange'));};
+  b.host.applyCursor({visible:false});mouseDown(b);await Promise.resolve();
+  assert.equal(b.host.locked,true);
+  b.host.applyCursor({visible:true});assert.equal(b.host.locked,false);
+  await b.host.capture();b.host.applyCursor({visible:true});
+  assert.equal(b.host.locked,true,'manual capture remains under user control');
+});
+
+test('denied capture keeps the OS cursor visible and permits retry without injecting a button',async t=>{
+  const b=browserFixture(t);let attempts=0;
+  b.canvas.requestPointerLock=async()=>{attempts++;throw Error('denied');};
+  b.host.applyCursor({visible:false});const before=b.packets.length;
+  mouseDown(b);await new Promise(resolve=>setImmediate(resolve));
+  assert.equal(b.host.locked,false);assert.equal(b.canvas.style.cursor,'default');
+  mouseDown(b);await new Promise(resolve=>setImmediate(resolve));
+  assert.equal(attempts,2);assert.equal(b.packets.length,before);
+});
+
+for(const legacy of [false,true])test(`a late automatic lock cannot hide a now-visible guest cursor (${legacy?'legacy':'promise'} API)`,async t=>{
+  const b=browserFixture(t);let granted;
+  b.canvas.requestPointerLock=legacy?()=>undefined:()=>new Promise(resolve=>{granted=resolve;});
+  b.document.exitPointerLock=()=>{b.document.pointerLockElement=null;b.document.dispatchEvent(new Event('pointerlockchange'));};
+  b.host.applyCursor({visible:false});mouseDown(b);await Promise.resolve();
+  assert.equal(b.host.capturePending,true);
+  b.host.applyCursor({visible:true});
+  b.document.pointerLockElement=b.canvas;b.document.dispatchEvent(new Event('pointerlockchange'));granted?.();
+  await Promise.resolve();
+  assert.equal(b.host.locked,false);assert.equal(b.host.capturePending,false);
+  assert.equal(b.canvas.style.cursor,'default');
+  assert.equal(b.packets.flat().some(event=>event.kind==='capture'&&event.captured),false);
+});
 
 test('execution pause releases held inputs without manufacturing guest focus loss',async t=>{
   const b=browserFixture(t),messages=[];
