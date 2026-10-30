@@ -205,6 +205,17 @@ fn independent_generated_wasm_executes_integer_calls_and_precise_faults() {
         let unit = compile(&memory, GuestAddress(0x1000), 1).unwrap();
         fs::write(scratch.join(format!("{name}.wasm")), &unit.wasm).unwrap();
     }
+    for bits in [16, 32] {
+        let immediate = if bits == 16 { &[0x81, 0x80][..] } else { &[0x7f, 0, 0, 0x80][..] };
+        for (name, opcode) in [("rr", &[0x0f, 0xaf, 0xc2][..]), ("rm", &[0x0f, 0xaf, 0x03][..]), ("ri8", &[0x6b, 0xc2, 0xfd][..]), ("mi8", &[0x6b, 0x03, 0xfd][..]), ("ri", &[0x69, 0xc2][..]), ("mi", &[0x69, 0x03][..])] {
+            let mut code = if bits == 16 { vec![0x66] } else { Vec::new() };
+            code.extend_from_slice(opcode);
+            if name == "ri" || name == "mi" { code.extend_from_slice(immediate); }
+            memory.write(GuestAddress(0x1000), &code).unwrap();
+            let unit = compile(&memory, GuestAddress(0x1000), 1).unwrap();
+            fs::write(scratch.join(format!("imul{bits}-{name}.wasm")), &unit.wasm).unwrap();
+        }
+    }
     let result = Command::new("node").arg("--input-type=module").arg("-e").arg(r#"
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -252,6 +263,7 @@ initialize(0x1000,1);word(8,0x11227f44);word(16,0x556680ff);const high=await loa
 for(let condition=0;condition<16;condition++){const fn=await load(`setcc${condition}`);for(let row=0;row<32;row++){const[cf,pf,zf,sf,of]=[row&1,(row>>1)&1,(row>>2)&1,(row>>3)&1,(row>>4)&1],flags=0x412|cf|(pf<<2)|(zf<<6)|(sf<<7)|(of<<11),truth=[of,!of,cf,!cf,zf,!zf,cf||zf,!(cf||zf),sf,!sf,pf,!pf,sf!==of,sf===of,zf||sf!==of,!zf&&sf===of];initialize(0x1000,1);word(8,0x123456ab);word(44,flags);assert.equal(fn(ptr),0);assert.equal(get(8),0x12345600|Number(Boolean(truth[condition])),`setcc${condition} flags${flags.toString(16)}`);assert.equal(get(44),flags);assert.equal(get(56),1);}}
 for(const name of['cmov32','cmov16','cmov-memory32','cmov-memory16']){const fn=await load(name);for(const zero of[0,64]){initialize(0x1000,1);word(8,0x11223344);word(16,0x556680ff);word(20,0x3000);word(44,0x412|zero);data.setUint32(0x3000,0x556680ff,true);assert.equal(fn(ptr),0);assert.equal(get(8),zero?(name.endsWith('16')?0x112280ff:0x556680ff):0x11223344,name);assert.equal(get(44),0x412|zero);}if(name.includes('memory')){initialize(0x1000,1);word(8,0x11223344);word(20,0x1ffe);word(44,2);readFault=true;assert.equal(fn(ptr),3,`${name} untaken memory still faults`);assert.equal(get(8),0x11223344);assert.equal(get(40),0x1000);assert.equal(get(56),0);readFault=false;}}
 const setMemory=await load('setcc-memory');initialize(0x1000,1);word(20,0x3000);word(44,0x442);assert.equal(setMemory(ptr),0);assert.equal(data.getUint8(0x3000),1);assert.equal(get(44),0x442);initialize(0x1000,1);word(20,0x1ffe);word(44,0x442);fault=true;assert.equal(setMemory(ptr),3);assert.equal(get(56),0);assert.equal(get(40),0x1000);assert.equal(get(44),0x442);fault=false;
+for(const bits of[16,32]){const modulus=2**bits,sign=modulus/2,max=modulus-1,operands=[0,1,2,sign-1,sign,max,0x7f,0x80,0xff],prefix=bits===16?0x12340000:0,sx=value=>BigInt.asIntN(bits,BigInt(value));for(const form of['rr','rm','ri8','mi8','ri','mi']){const fn=await load(`imul${bits}-${form}`),two=form==='rr'||form==='rm',imm=form.endsWith('8')?-3n:sx(bits===16?0x8081:0x8000007f);for(const a of operands)for(const b of(two?operands:[0])){const product=two?sx(a)*sx(b):sx(a)*imm,result=Number(BigInt.asUintN(bits,product)),overflow=product< -BigInt(sign)||product>=BigInt(sign);initialize(0x1000,1);word(8,(prefix|a)>>>0);word(16,two?b:a);word(20,0x3000);word(44,0xcd7);if(bits===16)data.setUint16(0x3000,two?b:a,true);else data.setUint32(0x3000,two?b:a,true);assert.equal(fn(ptr),0,`imul${bits}-${form}`);assert.equal(get(8),(prefix|result)>>>0,`imul${bits}-${form} ${a.toString(16)} ${b.toString(16)} result`);assert.equal(get(44),0x402|(overflow?0x801:0),`imul${bits}-${form} flags`);assert.equal(get(56),1);assert.equal(get(48),0);}if(form.includes('m')){initialize(0x1000,1);word(8,0x12345678);word(20,0x1ffe);word(44,0xcd7);readFault=true;assert.equal(fn(ptr),3,`imul${bits}-${form} sourcefault`);assert.equal(get(8),0x12345678);assert.equal(get(44),0xcd7);assert.equal(get(40),0x1000);assert.equal(get(56),0);readFault=false;}}}
 console.log('independent integer/CALL/RET, quota, precise fault/SMC and 100000 Wasm unit handoffs passed');
 "#).arg(&scratch).output().unwrap();
     assert!(

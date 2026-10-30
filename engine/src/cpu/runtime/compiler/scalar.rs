@@ -5,6 +5,7 @@ use wasm_encoder::{
     ImportSection, InstructionSink, MemArg, MemoryType, Module, TypeSection, ValType,
 };
 
+mod multiply;
 mod narrow;
 
 const FLAGS: u32 = 9;
@@ -36,6 +37,7 @@ fn reg(register: Register32) -> u32 {
 
 pub(super) fn supports(operation: &Operation) -> bool {
     narrow::supports(operation)
+        || multiply::supports(operation)
         || matches!(
             operation,
             Operation::Nop
@@ -69,12 +71,12 @@ pub(super) fn supports(operation: &Operation) -> bool {
                 | Operation::SignExtendHighWord
                 | Operation::SignExtendHigh
                 | Operation::Shift { .. }
-            | Operation::SetByte { .. }
-            | Operation::MemorySetByte { .. }
-            | Operation::ConditionalMove { .. }
-            | Operation::ConditionalMoveWord { .. }
-            | Operation::ReadConditionalMove { .. }
-            | Operation::ReadConditionalMoveWord { .. }
+                | Operation::SetByte { .. }
+                | Operation::MemorySetByte { .. }
+                | Operation::ConditionalMove { .. }
+                | Operation::ConditionalMoveWord { .. }
+                | Operation::ReadConditionalMove { .. }
+                | Operation::ReadConditionalMoveWord { .. }
         )
 }
 
@@ -512,7 +514,10 @@ impl Output {
                 self.address(address);
                 self.write(2, R);
             }
-            Operation::SetByte { condition, destination } => {
+            Operation::SetByte {
+                condition,
+                destination,
+            } => {
                 self.condition(condition);
                 self.c().local_set(R);
                 self.store_byte(destination, R);
@@ -523,24 +528,48 @@ impl Output {
                 self.address(address);
                 self.write(1, R);
             }
-            Operation::ConditionalMove { condition, destination, source } => {
+            Operation::ConditionalMove {
+                condition,
+                destination,
+                source,
+            } => {
                 self.condition(condition);
-                self.c().if_(BlockType::Empty).local_get(reg(source)).local_set(reg(destination)).end();
+                self.c()
+                    .if_(BlockType::Empty)
+                    .local_get(reg(source))
+                    .local_set(reg(destination))
+                    .end();
             }
-            Operation::ConditionalMoveWord { condition, destination, source } => {
+            Operation::ConditionalMoveWord {
+                condition,
+                destination,
+                source,
+            } => {
                 self.condition(condition);
                 self.c().if_(BlockType::Empty);
                 self.word(WordValue::Register(source), R);
                 self.store_word(destination, R);
                 self.c().end();
             }
-            Operation::ReadConditionalMove { condition, destination, address } => {
+            Operation::ReadConditionalMove {
+                condition,
+                destination,
+                address,
+            } => {
                 self.address(address);
                 self.read(4, R);
                 self.condition(condition);
-                self.c().if_(BlockType::Empty).local_get(R).local_set(reg(destination)).end();
+                self.c()
+                    .if_(BlockType::Empty)
+                    .local_get(R)
+                    .local_set(reg(destination))
+                    .end();
             }
-            Operation::ReadConditionalMoveWord { condition, destination, address } => {
+            Operation::ReadConditionalMoveWord {
+                condition,
+                destination,
+                address,
+            } => {
                 self.address(address);
                 self.read(2, R);
                 self.condition(condition);
@@ -858,7 +887,7 @@ impl Output {
                 self.c().local_set(FLAGS);
             }
             _ => {
-                if !narrow::emit(self, operation) {
+                if !narrow::emit(self, operation) && !multiply::emit(self, operation) {
                     return false;
                 }
             }
