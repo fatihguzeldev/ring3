@@ -345,7 +345,7 @@ export async function createGraphicsHost(canvas,{onDiagnostic=()=>{}}={}) {
   const adapter=await navigator.gpu.requestAdapter({powerPreference:'high-performance'});require(adapter,'no WebGPU adapter');
   const device=await adapter.requestDevice({requiredLimits:{maxStorageBuffersPerShaderStage:Math.min(8,adapter.limits.maxStorageBuffersPerShaderStage),maxStorageBufferBindingSize:Math.min(128*1024*1024,adapter.limits.maxStorageBufferBindingSize)}});
   const context=canvas.getContext('webgpu');require(context,'WebGPU canvas unavailable');const format=navigator.gpu.getPreferredCanvasFormat();
-  const closedEpochs=new ClosedEpochs(),pendingPresents=new Set();let failed=null,closed=false,submissionAck=false,consuming=0;
+  const closedEpochs=new ClosedEpochs(),pendingPresents=new Set();let failed=null,closed=false,submissionAck=false,consuming=0,canvasConfigured=false;
   const fail=error=>{if(closed||failed)return;failed=error;onDiagnostic({type:'error',message:error.message});};
   device.lost.then(info=>fail(new Error(`WebGPU device lost: ${info.message}`)));
   device.addEventListener('uncapturederror',event=>fail(event.error));
@@ -357,7 +357,7 @@ export async function createGraphicsHost(canvas,{onDiagnostic=()=>{}}={}) {
       submissionAck=enabled;return enabled;
     },
     submissionStatus(){return {enabled:submissionAck,pendingPresentFences:pendingPresents.size,maximumPendingPresents:2,consuming,failed:!!failed};},
-    resize(width,height){require(width>0&&height>0&&width<=device.limits.maxTextureDimension2D&&height<=device.limits.maxTextureDimension2D,'canvas extent');if(canvas.width!==width||canvas.height!==height){canvas.width=width;canvas.height=height;}context.configure({device,format,alphaMode:'opaque'});},async blit(view,src,dst,info,gamma,frameProbe,completed){
+    resize(width,height){require(width>0&&height>0&&width<=device.limits.maxTextureDimension2D&&height<=device.limits.maxTextureDimension2D,'canvas extent');if(canvas.width!==width||canvas.height!==height){canvas.width=width;canvas.height=height;canvasConfigured=false;}if(!canvasConfigured){context.configure({device,format,alphaMode:'opaque'});canvasConfigured=true;}},async blit(view,src,dst,info,gamma,frameProbe,completed){
     if(!host.blitPipeline){
       const module=await checkedShader(device,`@group(0) @binding(0) var image:texture_2d<f32>;@group(0) @binding(1) var smp:sampler;@group(0) @binding(2) var<storage,read> values:array<f32>;
       struct V{@builtin(position)p:vec4<f32>,@location(0)uv:vec2<f32>};@vertex fn vs(@builtin(vertex_index)i:u32)->V{var v:V;let x=f32((i<<1u)&2u);let y=f32(i&2u);v.p=vec4<f32>(x*2.0-1.0,1.0-y*2.0,0.0,1.0);v.uv=vec2<f32>(x,y);return v;}

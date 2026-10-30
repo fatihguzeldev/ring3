@@ -52,6 +52,24 @@ async function graphicsFixture(t) {
   return {host,fence,mapping,events,presents,buffers,errors};
 }
 
+test('canvas configures once at its initial extent and again only after a real resize',async t=>{
+  const {host,fence,presents,events}=await graphicsFixture(t),configurations=[];
+  host.context.configure=descriptor=>configurations.push(descriptor);
+  host.resize(1,1);
+  assert.equal(configurations.length,1,'an already matching initial canvas still needs configuration');
+  for(let i=0;i<10;i++)host.resize(1,1);
+  assert.equal(configurations.length,1,'unchanged dimensions must not replace the canvas configuration');
+  host.resize(2,1);host.resize(2,1);
+  assert.equal(configurations.length,2);assert.equal(host.canvas.width,2);assert.equal(host.canvas.height,1);
+  host.resize(1,1);
+  assert.equal(configurations.length,3);
+  assert(configurations.every(row=>row.device===host.device&&row.format===host.format&&row.alphaMode==='opaque'));
+  fence.resolve();await host.consume(packet([[1,definition],[11,present],[11,present]]));
+  assert.equal(configurations.length,3,'same-size Presents retain the existing configuration');
+  assert.deepEqual(presents.map(row=>row.presents),[1,2]);
+  assert.equal(events.filter(row=>row==='fence').length,2,'each Present keeps its completion fence');
+});
+
 function pipelineState() {
   const render=Array(174).fill(0);
   for(const [index,value] of [[8,3],[19,2],[20,1],[22,1],[23,4],[25,8],[168,15],[171,1],[172,3]])render[index]=value;
