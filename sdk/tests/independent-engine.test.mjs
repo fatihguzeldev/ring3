@@ -651,6 +651,71 @@ test('actual compiled DIV memory source fault precedes division and preserves co
     [0xa1b20100, 0x33221100, 0xd5e6789a, 1, 0x2f00, 0x55443322, 0x66554433, 0x77665544], undefined, undefined, 5);
 });
 
+test('actual reached XCHG AL AH swaps only the aliased bytes and preserves FLAGS and RAM', {skip}, () => {
+  arithmetic([0x86, 0xe0],
+    [0xa1b2c3d4, 0x33221100, 0xd5e6789a, 0x12345678, 0x2f00, 0x55443322, 0x66554433, 0x77665544],
+    [0xa1b2d4c3, 0x33221100, 0xd5e6789a, 0x12345678, 0x2f00, 0x55443322, 0x66554433, 0x77665544]);
+});
+
+for (const readOnly of [false, true]) test(`actual XCHG memory EAX ${readOnly ? 'fault preserves the aliased address and complete state' : 'uses the address before exchanging EAX'}`, {skip}, () => {
+  const registers = [0x2000, 0x11223344, 0x22334455, 0x33445566, 0x2f00, 0x44556677, 0x55667788, 0x66778899];
+  const f = fixture([0x87, 0x00], {registers, data: dword(0x12345678).map((value, index) => [0x2000 + index, value]), execution: {budget: 1}});
+  try {
+    new DataView(f.engine.memory.buffer).setUint32(f.engine.base + 52, 0xcd7, true);
+    if (readOnly) f.engine.ok('protect', 0x2000, 1, 1);
+    const scalar = new Uint8Array(f.engine.memory.buffer, f.engine.base, 56).slice(), banks = processBanks(f);
+    if (!readOnly) {view(scalar).setUint32(16, 0x12345678, true); view(scalar).setUint32(48, 0x1002, true);}
+    f.cache.import(); const selected = f.cache.select(), state = f.slab();
+    const backing = state.getUint32(84, true), length = state.getUint32(88, true) * 4096;
+    const expected = new Uint8Array(f.engine.memory.buffer, backing, length).slice();
+    const slot = new DataView(f.engine.memory.buffer).getUint32(state.getUint32(76, true) + 2 * 4, true) - 1;
+    if (!readOnly) new DataView(expected.buffer).setUint32(slot * 4096, 0x2000, true);
+    const run = f.cache.execute(selected);
+    assert.deepEqual([run.reason, run.retired, run.work, run.pc], readOnly ? [5, 0, 0, 0x1000] : [1, 1, 1, 0x1002]);
+    assert.deepEqual(new Uint8Array(f.engine.memory.buffer, f.engine.base, 56), scalar);
+    assert.deepEqual(processBanks(f), banks);
+    assert.deepEqual(new Uint8Array(f.engine.memory.buffer, backing, length), expected);
+    assert.equal(f.slab().getUint32(48, true), readOnly ? 1 : 0);
+    assert.equal(f.slab().getUint32(108, true), 0);
+    if (readOnly) {
+      assert.deepEqual([f.engine.get(80), f.engine.get(84), f.engine.get(88), f.engine.get(92)], [2, 0x2000, 2, 4]);
+      event(f.engine, 0xffffffff, 0x1000, 0);
+    }
+  } finally {f.close();}
+});
+
+test('actual XCHG through an executable alias commits once using its original address then invalidates code', {skip}, () => {
+  const f = fixture(undefined, {windowsMappings: true, physicalPages: 1024, execution: {budget: 2}});
+  try {
+    const [writable, executable] = sharedViews(f, 0x40, [2, 0x24]);
+    f.engine.request(Uint8Array.from([0xb8, 1, 0, 0, 0, 0xeb, 0xf9])); f.engine.ok('upload', writable, 7);
+    new DataView(f.engine.memory.buffer).setUint32(f.engine.base + 48, executable, true);
+    const old = f.cache.select(); assert.equal(f.cache.execute(old).reason, 1);
+    replaceCode(f, [0x87, 0x00, 0x43]);
+    const arena = new DataView(f.engine.memory.buffer);
+    arena.setUint32(f.engine.base + 16, writable, true); arena.setUint32(f.engine.base + 28, 0x33445566, true);
+    arena.setUint32(f.engine.base + 48, 0x1000, true); arena.setUint32(f.engine.base + 52, 0xcd7, true);
+    const scalar = new Uint8Array(f.engine.memory.buffer, f.engine.base, 56).slice(), banks = processBanks(f);
+    view(scalar).setUint32(16, 0x1b8, true); view(scalar).setUint32(48, 0x1002, true);
+    const calls = memoryCalls(f);
+    const writer = f.cache.select(), state = f.slab(), backing = state.getUint32(84, true), length = state.getUint32(88, true) * 4096;
+    const mappings = state.getUint32(76, true), physical = new DataView(f.engine.memory.buffer);
+    const slot = physical.getUint32(mappings + (writable >>> 12) * 4, true) - 1;
+    assert.equal(physical.getUint32(mappings + (executable >>> 12) * 4, true) - 1, slot);
+    const expected = new Uint8Array(f.engine.memory.buffer, backing, length).slice();
+    new DataView(expected.buffer).setUint32(slot * 4096, writable, true);
+    const run = f.cache.execute(writer);
+    assert.deepEqual([run.coreReason, run.reason, run.retired, run.work, run.pc], [6, 6, 1, 1, 0x1002]);
+    assert.deepEqual(new Uint8Array(f.engine.memory.buffer, f.engine.base, 56), scalar);
+    assert.deepEqual(processBanks(f), banks);
+    assert.deepEqual(new Uint8Array(f.engine.memory.buffer, backing, length), expected);
+    assert(calls.write > 0, 'executable aliases retain the canonical helper and immediate source invalidation');
+    f.cache.import();
+    assert.equal(f.cache.table.get(old.slot), null);
+    assert.equal(f.cache.units.has(old.slot), false);
+  } finally {f.close();}
+});
+
 function processFixture(guest) {
   return fixture(undefined, {windowsMappings: true, moduleImage: guest, physicalPages: 1024,
     pc: guest.entry, registers: [0, 0x11223344, 0x22334455, 0x33445566, 0x7e004000, 0x44556677, 0x55667788, 0x66778899],

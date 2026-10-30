@@ -6,6 +6,7 @@ use wasm_encoder::{
 };
 
 mod bit;
+mod exchange;
 mod memory;
 mod multiply;
 mod narrow;
@@ -43,6 +44,7 @@ pub(super) fn supports(operation: &Operation) -> bool {
         || multiply::supports(operation)
         || string::supports(operation)
         || bit::supports(operation)
+        || exchange::supports(operation)
         || matches!(
             operation,
             Operation::Nop
@@ -884,6 +886,7 @@ impl Output {
                     && !multiply::emit(self, operation)
                     && !string::emit(self, operation)
                     && !bit::emit(self, operation)
+                    && !exchange::emit(self, operation)
                 {
                     return false;
                 }
