@@ -212,6 +212,34 @@ test('actual ordinary load RMW and stack operations preserve complete state with
   } finally {f.close();}
 });
 
+test('actual reached BTS stack operand updates canonical RAM through the inline dirty path', {skip}, () => {
+  const registers = [31, 0x11223344, 0x22334455, 0x33445566, 0x2f00, 0x44556677, 0x55667788, 0x66778899];
+  const f = fixture([0x0f, 0xab, 0x04, 0x24], {registers, data: [[0x2f00, 1]], execution: {budget: 1}});
+  const calls = memoryCalls(f);
+  try {
+    new DataView(f.engine.memory.buffer).setUint32(f.engine.base + 52, 0xcd7, true);
+    const scalar = new Uint8Array(f.engine.memory.buffer, f.engine.base, 56).slice();
+    view(scalar).setUint32(48, 0x1004, true); view(scalar).setUint32(52, 0xcd6, true);
+    const banks = [[4236, 352], [4612, 184]].map(([offset, length]) =>
+      new Uint8Array(f.engine.memory.buffer, f.engine.base + offset, length).slice());
+    f.cache.import(); const selected = f.cache.select(), state = f.slab();
+    const backing = state.getUint32(84, true), length = state.getUint32(88, true) * 4096;
+    const expected = new Uint8Array(f.engine.memory.buffer, backing, length).slice();
+    const slot = new DataView(f.engine.memory.buffer).getUint32(state.getUint32(76, true) + 2 * 4, true) - 1;
+    new DataView(expected.buffer).setUint32(slot * 4096 + 0xf00, 0x80000001, true);
+    calls.read = 0; calls.write = 0;
+    const run = f.cache.execute(selected);
+    assert.deepEqual([run.reason, run.retired, run.work, run.pc], [1, 1, 1, 0x1004]);
+    assert.deepEqual(new Uint8Array(f.engine.memory.buffer, f.engine.base, 56), scalar);
+    assert.deepEqual([[4236, 352], [4612, 184]].map(([offset, size]) =>
+      new Uint8Array(f.engine.memory.buffer, f.engine.base + offset, size)), banks);
+    assert.deepEqual(new Uint8Array(f.engine.memory.buffer, backing, length), expected);
+    assert.deepEqual(calls, {read: 0, write: 0});
+    assert.equal(f.slab().getUint32(48, true), 0);
+    assert.equal(f.slab().getUint32(108, true), 0);
+  } finally {f.close();}
+});
+
 test('actual read-only RMW preserves full state and RAM while retaining the native permission fault', {skip}, () => {
   const code = [0x01, 0x05, 0, 0x20, 0, 0];
   const registers = [5, 0, 0, 0, 0x2f00, 0, 0, 0];

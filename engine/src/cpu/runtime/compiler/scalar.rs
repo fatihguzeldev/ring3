@@ -5,6 +5,7 @@ use wasm_encoder::{
     ImportSection, InstructionSink, MemArg, MemoryType, Module, TypeSection, ValType,
 };
 
+mod bit;
 mod memory;
 mod multiply;
 mod narrow;
@@ -41,6 +42,7 @@ pub(super) fn supports(operation: &Operation) -> bool {
     narrow::supports(operation)
         || multiply::supports(operation)
         || string::supports(operation)
+        || bit::supports(operation)
         || matches!(
             operation,
             Operation::Nop
@@ -875,6 +877,7 @@ impl Output {
                 if !narrow::emit(self, operation)
                     && !multiply::emit(self, operation)
                     && !string::emit(self, operation)
+                    && !bit::emit(self, operation)
                 {
                     return false;
                 }
