@@ -5,7 +5,7 @@ import { dirname, extname, isAbsolute, join, relative, resolve, sep } from "node
 import { fileURLToPath } from "node:url";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { engineRuntime } from "./engine-runtime.mjs";
+import { engineRuntime, engineRuntimeOptions } from "./engine-runtime.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const observabilityRoot = resolve(here, "../observability/typescript");
@@ -41,10 +41,7 @@ const wasm = resolve(
   option("--engine", join(here, "../target/wasm32-unknown-unknown/release/ring3_engine.wasm")),
 );
 const engineBytes = await readFile(wasm);
-const runtime = engineRuntime(await WebAssembly.compile(engineBytes), {
-  relaxedFpu: args.includes("--relaxed-fpu"),
-  fastPreset: args.includes("--fast-preset"),
-});
+const runtime = engineRuntime(await WebAssembly.compile(engineBytes), engineRuntimeOptions(args));
 const mime = new Map([
   [".html", "text/html; charset=utf-8"],
   [".js", "text/javascript"],
