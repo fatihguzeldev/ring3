@@ -5,6 +5,8 @@ use wasm_encoder::{
     ImportSection, InstructionSink, MemArg, MemoryType, Module, TypeSection, ValType,
 };
 
+mod narrow;
+
 const FLAGS: u32 = 9;
 const PC: u32 = 10;
 const REMAIN: u32 = 11;
@@ -33,40 +35,41 @@ fn reg(register: Register32) -> u32 {
 }
 
 pub(super) fn supports(operation: &Operation) -> bool {
-    matches!(
-        operation,
-        Operation::Nop
-            | Operation::Move { .. }
-            | Operation::Binary { .. }
-            | Operation::Unary { .. }
-            | Operation::Lea { .. }
-            | Operation::Exchange { .. }
-            | Operation::Push { .. }
-            | Operation::Pop { .. }
-            | Operation::PushFlags
-            | Operation::Call { .. }
-            | Operation::Return { .. }
-            | Operation::Leave
-            | Operation::Jump { .. }
-            | Operation::ConditionalJump { .. }
-            | Operation::CountBranch { .. }
-            | Operation::Carry { .. }
-            | Operation::Direction { .. }
-            | Operation::MoveByte { .. }
-            | Operation::MoveWord { .. }
-            | Operation::LoadByte { .. }
-            | Operation::LoadWord { .. }
-            | Operation::StoreByte { .. }
-            | Operation::StoreWord { .. }
-            | Operation::Extend { .. }
-            | Operation::ExtendByteToWord { .. }
-            | Operation::ReadExtendByteToWord { .. }
-            | Operation::LeaWord { .. }
-            | Operation::SignExtendAccumulatorWord
-            | Operation::SignExtendHighWord
-            | Operation::SignExtendHigh
-            | Operation::Shift { .. }
-    )
+    narrow::supports(operation)
+        || matches!(
+            operation,
+            Operation::Nop
+                | Operation::Move { .. }
+                | Operation::Binary { .. }
+                | Operation::Unary { .. }
+                | Operation::Lea { .. }
+                | Operation::Exchange { .. }
+                | Operation::Push { .. }
+                | Operation::Pop { .. }
+                | Operation::PushFlags
+                | Operation::Call { .. }
+                | Operation::Return { .. }
+                | Operation::Leave
+                | Operation::Jump { .. }
+                | Operation::ConditionalJump { .. }
+                | Operation::CountBranch { .. }
+                | Operation::Carry { .. }
+                | Operation::Direction { .. }
+                | Operation::MoveByte { .. }
+                | Operation::MoveWord { .. }
+                | Operation::LoadByte { .. }
+                | Operation::LoadWord { .. }
+                | Operation::StoreByte { .. }
+                | Operation::StoreWord { .. }
+                | Operation::Extend { .. }
+                | Operation::ExtendByteToWord { .. }
+                | Operation::ReadExtendByteToWord { .. }
+                | Operation::LeaWord { .. }
+                | Operation::SignExtendAccumulatorWord
+                | Operation::SignExtendHighWord
+                | Operation::SignExtendHigh
+                | Operation::Shift { .. }
+        )
 }
 
 pub(super) fn emit(blocks: &[Block]) -> Vec<u8> {
@@ -812,7 +815,11 @@ impl Output {
                 }
                 self.c().local_set(FLAGS);
             }
-            _ => return false,
+            _ => {
+                if !narrow::emit(self, operation) {
+                    return false;
+                }
+            }
         }
         if !dynamic {
             self.c().i32_const(next as i32).local_set(PC);
