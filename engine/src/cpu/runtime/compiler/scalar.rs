@@ -681,7 +681,13 @@ impl Output {
                 self.value(source, B);
                 self.binary(kind);
                 if !matches!(kind, BinaryKind::Cmp | BinaryKind::Test) {
-                    self.store(destination, R);
+                    if matches!(destination, Location32::Memory(_))
+                        && matches!(source, Value32::Register(_) | Value32::Immediate(_))
+                    {
+                        memory::write_after_modify(self, 4, R);
+                    } else {
+                        self.store(destination, R);
+                    }
                 }
                 self.flags(kind, 32, false);
             }

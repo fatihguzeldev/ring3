@@ -209,6 +209,18 @@ fn admit_store(out: &mut Output) {
 pub(super) fn write(out: &mut Output, width: u32, value: u32) {
     out.segment(width, true);
     translate(out, width, 2);
+    store(out, width, value);
+}
+
+// only the paired store of the same instruction may consume this proof, with
+// the same width and address and no intervening access or helper. a slow read
+// leaves READY zero and takes the canonical write.
+pub(super) fn write_after_modify(out: &mut Output, width: u32, value: u32) {
+    store(out, width, value);
+    out.c().i32_const(0).local_set(READY);
+}
+
+fn store(out: &mut Output, width: u32, value: u32) {
     admit_store(out);
     out.c()
         .local_get(READY)
