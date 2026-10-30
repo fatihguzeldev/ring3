@@ -200,6 +200,10 @@ async function fusedGateCase(fusedStatus, backend = 'v86', observedClock, id = 0
       completed();
       return 0;
     },
+    cpu_capture_windows_call() { calls.push('cpu.capture'); capture(); return 0; },
+    cpu_complete_windows_call(actualToken) {
+      calls.push(['cpu.complete', actualToken]); completed(); return 0;
+    },
   }, memory, 'fixture');
   let executions = 0, clocks = 0, callbacks = 0, settled = 0, flushes = 0;
   const session = Object.assign(Object.create(Session.prototype), {
@@ -306,6 +310,12 @@ test('the core backend keeps the ordinary capture and completion path', async ()
   const {session, calls, clocks, token} = await fusedGateCase(0, 'core');
   assert.deepEqual(calls, ['schedule', 'capture', ['window', token], ['complete', token], 'schedule']);
   assert.equal(clocks, 2);
+  assert.equal(session.fastNativeCompletions, 0);
+});
+
+test('the independent backend captures and completes through its own process boundary', async () => {
+  const {session, calls, token} = await fusedGateCase(0, 'independent');
+  assert.deepEqual(calls, ['schedule', 'cpu.capture', ['window', token], ['cpu.complete', token], 'schedule']);
   assert.equal(session.fastNativeCompletions, 0);
 });
 

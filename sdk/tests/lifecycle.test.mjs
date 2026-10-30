@@ -110,3 +110,16 @@ test('an explicit CPU backend reaches the worker and its identity remains visibl
     assert.equal((await session.launch({})).backend,'core');
   });
 });
+
+test('the independent backend reaches the browser runtime and stays visible after stop', async () => {
+  await fixture({
+    async start(options) {
+      assert.equal(options.backend, 'independent');
+      this.status('running', 'running', {stats: {backend: 'independent'}});
+    },
+    async stop() {this.status('stopped');},
+  }, async session => {
+    assert.equal((await session.launch({backend: 'independent'})).backend, 'independent');
+    assert.equal((await session.stop()).backend, 'independent');
+  });
+});

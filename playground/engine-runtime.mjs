@@ -16,7 +16,10 @@ export function engineRuntime(module, {relaxedFpu, fastPreset} = {}) {
   );
   if (!external) {
     if (relaxedFpu || fastPreset) throw new Error('experimental CPU flags require an external CPU engine');
-    return {backend: 'core'};
+    const independent = WebAssembly.Module.exports(module).some(
+      item => item.kind === 'function' && item.name === 'ring3_abi_v1_cpu_abi',
+    );
+    return {backend: independent ? 'independent' : 'core'};
   }
   if (relaxedFpu === undefined) relaxedFpu = true;
   if (fastPreset === undefined) fastPreset = relaxedFpu;

@@ -1,5 +1,6 @@
 import { Engine, KEY, pair, view, RESIDENT_PAGES } from "./engine.js";
 import { CodeCache } from "./cache.js";
+import { IndependentCodeCache } from "./independent.js";
 import { callbackRecord } from "./callback.js";
 import { Files, launch } from "./files.js";
 import { configure, DEFAULT_EXECUTION } from "./configuration.js";
@@ -54,6 +55,7 @@ export class Session {
       state,
       message,
       backend: this.backend ?? "core",
+      engineHash: this.engine?.hash,
       cpuHash: this.externalCpu?.hash,
       fastPreset: this.externalCpu?.fastPreset===true,
       fastPresetApplied: this.fastPresetApplied,
@@ -78,7 +80,7 @@ export class Session {
   async initialize(options) {
     if (options.receiptMode !== undefined) throw new Error("execution receipt modes are not supported by the core SDK");
     this.backend = options.backend ?? "core";
-    if (!["core", "v86"].includes(this.backend)) throw new TypeError("unknown CPU backend");
+    if (!["core", "independent", "v86"].includes(this.backend)) throw new TypeError("unknown CPU backend");
     if (this.backend === "v86" && options.frameProbe) throw new Error("frame probing is unavailable for the v86 backend");
     this.observation = options.observation;
     this.frameProbeEnabled = options.frameProbe === true;
@@ -143,7 +145,8 @@ export class Session {
     h.ok("start_module_process", h.name(executable), 0, 0x7e000000, 256, 0x7f000000);
     while (await this.files.sourceProgress()) this.abort.signal.throwIfAborted();
     this.abort.signal.throwIfAborted();
-    this.code = this.externalCpu ? await this.externalCpu.attach(h, execution) : new CodeCache(h, execution);
+    this.code = this.externalCpu ? await this.externalCpu.attach(h, execution)
+      : this.backend === "independent" ? new IndependentCodeCache(h, execution) : new CodeCache(h, execution);
     this.initializeExecutionPolicy();
     this.abort.signal.throwIfAborted();
     this.observation?.observer.event("execution.backend", { backend: this.backend, callback_backend: this.backend,
@@ -200,6 +203,9 @@ export class Session {
     if (!this.callbacks.has(this.thread)) this.callbacks.set(this.thread, []);
     return this.callbacks.get(this.thread);
   }
+  cpuOperation(operation) {
+    return `${this.backend === "independent" ? "cpu" : "core"}_${operation}`;
+  }
   initializer() {
     this.engine.ok("module_initializer");
     const d = view(this.engine.take(72));
@@ -235,7 +241,7 @@ export class Session {
     if (!h.resultView(96).getUint32(12, true)) return false;
     const request = view(h.take(96));
     const returnPc = this.returnGate();
-    h.ok("core_begin_windows_callback", returnPc, 0xffffe);
+    h.ok(this.cpuOperation("begin_windows_callback"), returnPc, 0xffffe);
     const callback = callbackRecord(h.take(64), returnPc, 0xffffe);
     callback.activation = this.callDiagnostics?.activation.begin(request, this.thread);
     if (callback.activation)
@@ -453,7 +459,7 @@ export class Session {
         if (run.coreReason === 1 || run.coreReason === 2 || run.coreReason === 6) continue;
         if (run.reason === 9) break;
         if (faults.has(run.reason)) {
-          h.ok("core_dispatch_exception");
+          h.ok(this.cpuOperation("dispatch_exception"));
           this.handleException();
           break;
         }
@@ -471,7 +477,7 @@ export class Session {
           run.pc === callback.returnPc &&
           h.get(32) === callback.returnEsp
         ) {
-          h.ok("core_finish_windows_callback", callback.token);
+          h.ok(this.cpuOperation("finish_windows_callback"), callback.token);
           this.callDiagnostics?.activation.complete(callback.activation);
           if (callback.activation)
             this.observation.observer.event("windows.activation.end", callback.activation);
@@ -491,7 +497,7 @@ export class Session {
               operation: "component_cpu_try_complete_gate", status: fused, pc: run.pc, id: run.detail,
             });
         }
-        if (fused === 256) h.ok("core_capture_windows_call");
+        if (fused === 256) h.ok(this.cpuOperation("capture_windows_call"));
         const captured = h.resultView(112),
           token = captured.getUint32(16, true),
           args = Array.from({ length: captured.getUint32(28, true) }, (_, i) =>
@@ -502,7 +508,7 @@ export class Session {
           pc: run.pc,
           id: run.detail,
           callArgs: args,
-          operation: "core_complete_windows_call",
+          operation: this.cpuOperation("complete_windows_call"),
           args: [token],
         };
         this.windows.capture(receipt, captured, this.thread);
@@ -570,7 +576,7 @@ export class Session {
       eax: h.get(16),
     };
     try {
-      h.ok("core_finish_exception");
+      h.ok(this.cpuOperation("finish_exception"));
     } catch (error) {
       error.exception = snapshot;
       throw error;

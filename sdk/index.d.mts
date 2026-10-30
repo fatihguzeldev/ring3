@@ -1,6 +1,7 @@
 export interface SessionStatus {
   readonly state: string;
-  readonly backend: 'core'|'v86';
+  readonly backend: 'core'|'independent'|'v86';
+  readonly engineHash?: string;
   readonly cpuHash?: string;
   readonly fastPreset?: boolean;
   readonly fastPresetApplied?: boolean;
@@ -11,7 +12,7 @@ export interface SessionStatus {
 }
 export interface LaunchOptions {
   engineUrl?: string;
-  backend?: 'core'|'v86';
+  backend?: 'core'|'independent'|'v86';
   v86?: {wasmUrl?:string;sha256?:string;relaxedFpu?:boolean;fastPreset?:boolean};
   executable?: string;
   commandLine?: string;

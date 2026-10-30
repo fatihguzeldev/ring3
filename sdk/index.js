@@ -58,7 +58,7 @@ export function createSession({container, engineUrl = '/engine.wasm', onStatus =
     launch(options) {return operation(async () => {
       if (!['idle','stopped'].includes(state.state)) throw new Error('stop the current session before launching another');
       const backend = options?.backend ?? 'core';
-      if (!['core','v86'].includes(backend)) throw new TypeError('unknown CPU backend');
+      if (!['core','independent','v86'].includes(backend)) throw new TypeError('unknown CPU backend');
       selectedBackend = backend;
       const ready = changed(['running','exited'],120000);
       try {await runtime.start({...options,engineUrl:options?.engineUrl ?? engineUrl}); return await ready.promise;}

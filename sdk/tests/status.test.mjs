@@ -14,3 +14,11 @@ test('stopped acknowledgement never republishes unpublished work into a closed e
   assert.equal(emitted.state,'stopped');
   assert.equal(emitted.stats.backend,'core');
 });
+
+test('every runtime status retains the actual engine artifact identity', () => {
+  const emitted = [], hash = '12'.repeat(32);
+  const session = {backend: 'independent', engine: {hash, get: () => 0}, emit: value => emitted.push(value)};
+  for (const state of ['loading', 'running', 'paused', 'stopped'])
+    Session.prototype.status.call(session, state, state);
+  assert.deepEqual(emitted.map(value => value.engineHash), [hash, hash, hash, hash]);
+});
