@@ -10,6 +10,7 @@ export class PhaseMeasurements {
     this.observer?.event("measurement.schema", {
       unit: "ns",
       semantics: "cumulative inclusive elapsed time; not exclusive CPU time",
+      execution: "includes calls completed inside v86/Wasm; JavaScript host completions are measured in completion",
       clock: "performance.now; nanosecond values preserve its actual clock precision",
     });
   }

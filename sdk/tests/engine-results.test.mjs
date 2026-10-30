@@ -4,6 +4,14 @@ import {Engine} from '../runtime/engine.js';
 import {Session} from '../runtime/session.js';
 import {WindowPresentation} from '../runtime/windows.js';
 import {CompletedWindowsCalls} from '../runtime/session/diagnostics.js';
+import {PhaseMeasurements} from '../runtime/session/measurement.js';
+import {createCapture,categories} from '../../observability/typescript/dist/index.js';
+
+function recordSession(session,level) {
+  const capture=createCapture({level,output:{async write(){},async flush(){}}});
+  session.measurements=new PhaseMeasurements({capture,observer:capture.observer(categories.hostWorker)});
+  session.callDiagnostics=new CompletedWindowsCalls(session.engine);
+}
 
 test('an imported-memory engine requires an explicit external CPU owner before instantiation', async () => {
   const name=value=>[value.length,...new TextEncoder().encode(value)];
@@ -163,13 +171,14 @@ test('call capture consumes borrowed fields before native completion overwrites 
   assert.equal(engine.resultView(112).getUint32(0, true), 0xcccccccc);
 });
 
-async function fusedGateCase(fusedStatus, backend = 'v86', observedClock, id = 0x40232) {
+async function fusedGateCase(fusedStatus, backend = 'v86', observedClock, id = 0x40232, configure = () => {}) {
   const memory = new WebAssembly.Memory({initial: 1}), calls = [], token = 37;
   const state = new DataView(memory.buffer);
   state.setUint32(72, 3, true);
   function capture() {
     const record = new DataView(memory.buffer, 140, 112);
-    for (const [offset, value] of [[16, token], [28, 1], [48, 0xaaaa]])
+    for (const [offset, value] of [[0,0x46433352],[4,0x10001],[8,112],[16,token],[20,id],[24,3],
+      [28,1],[32,0x1000],[36,0x8000],[40,0x1234],[48,0xaaaa]])
       record.setUint32(offset, value, true);
   }
   function completed() {
@@ -210,8 +219,9 @@ async function fusedGateCase(fusedStatus, backend = 'v86', observedClock, id = 0
     },
     async providers() { return false; }, observeClock() { clocks++; return 123n; },
     initializer: () => null, stack: () => [], async wait() { session.running = false; },
-    beginCallback() { callbacks++; return false; }, settleWindows() { settled++; },
+    beginCallback() { callbacks++; return false; }, settleWindows() { settled++;this.callDiagnostics?.settle(this.thread); },
   });
+  configure(session);
   await session.loop();
   return {session, engine, calls, clocks, callbacks, settled, token, flushes};
 }
@@ -318,9 +328,9 @@ test('an inline completion yield returns to the host before another CPU entry or
   assert.equal(executions,1);assert.equal(published,2);assert.equal(waits,1);
 });
 
-test('only an unobserved v86 inner entry permits budget state reuse',async()=>{
+test('recording and phase measurement preserve v86 budget state reuse',async()=>{
   const prior=globalThis.__r3PhaseWindow;
-  try {for(const mode of ['plain','core','measurements','callDiagnostics','frameProbe','phase']) {
+  try {for(const mode of ['plain','core','basic','detailed','frameProbe','phase']) {
     const allowed=[],session=Object.assign(Object.create(Session.prototype),{
       backend:mode==='core'?'core':'v86',running:true,paused:false,stopped:false,lastSchedule:Infinity,lastStatus:Infinity,
       recent:[],thread:1,blocked:new Map(),exits:new Map(),
@@ -329,10 +339,56 @@ test('only an unobserved v86 inner entry permits budget state reuse',async()=>{
       code:{publish(){},import(){},select(value){allowed.push(value);return null;},execute(){session.running=false;return{coreReason:2};}},
       async providers(){return false;},observeClock:()=>0n,initializer:()=>null,stack:()=>[],async wait(){},
     });
-    if(mode==='measurements')session.measurements={run:(_name,fn)=>fn(),runAsync:(_name,fn)=>fn()};
-    if(mode==='callDiagnostics')session.callDiagnostics={};
+    if(mode==='basic'||mode==='detailed')recordSession(session,mode);
     if(mode==='frameProbe')session.frameProbe={measurements:Symbol('other')};
     globalThis.__r3PhaseWindow=mode==='phase';
-    await session.loop();assert.deepEqual(allowed,[mode==='plain'],mode);
+    await session.loop();assert.deepEqual(allowed,[mode!=='core'&&mode!=='frameProbe'],mode);
   }} finally {if(prior===undefined)delete globalThis.__r3PhaseWindow;else globalThis.__r3PhaseWindow=prior;}
 });
+
+for(const level of ['basic','detailed']) {
+  test(`${level} recording keeps fused calls, completion timing and returned-call diagnostics`,async t=>{
+    let now=0;t.mock.method(performance,'now',()=>now);
+    for(const status of [0,12,256]) {
+      now=0;
+      const {session,calls}=await fusedGateCase(status,'v86',undefined,0x40232,session=>{
+        recordSession(session,level);
+        const complete=session.engine.api.component_cpu_try_complete_gate;
+        session.engine.api.component_cpu_try_complete_gate=()=>{now+=7;return complete();};
+      });
+      assert(calls.includes('fused'),`status ${status} must use the same native completion path`);
+      const completion=session.measurements.snapshot().completion;
+      assert.equal(completion.elapsedNs,7_000_000);
+      assert.equal(completion.count,status===256?2:1);
+      assert.equal(session.fastNativeCompletions,status===0?1:0);
+      if(status!==12) {
+        const diagnostic=session.callDiagnostics.snapshot();
+        assert.equal(diagnostic.lastCompletedWindowsCall.token,37);
+        assert.equal(diagnostic.pendingReturns,0);
+        assert.match(diagnostic.coverage,/excludes.*inline/i);
+      } else assert.equal(session.blocked.get(1).args[0],37);
+    }
+  });
+  test(`${level} recording keeps inline and Wasm routes with their lifecycle barriers`,()=>{
+    const prior=globalThis.__r3PhaseWindow;
+    const session=Object.assign(Object.create(Session.prototype),{
+      backend:'v86',running:true,paused:false,stopped:false,needsSchedule:false,
+      inlineQuantumDeadline:Infinity,engine:{},stack:()=>[],observeClock:()=>123n,
+      code:{initializeExecutionPolicy(){}},
+    });
+    recordSession(session,level);
+    try {
+      globalThis.__r3PhaseWindow={};
+      session.initializeExecutionPolicy();
+      const owner=session.code.inlineOwner;
+      assert.equal(owner.canContinue(),true);assert.equal(owner.canBridge(),true);
+      assert.equal(owner.observeClock(),123n);
+      for(const [key,value] of [['paused',true],['stopped',true],['running',false],
+        ['needsSchedule',true],['inlineQuantumDeadline',-Infinity],['frameProbe',{}]]) {
+        const previous=session[key];session[key]=value;
+        assert.equal(owner.canContinue(),false,key);session[key]=previous;
+      }
+      session.stack=()=>[{}];assert.equal(owner.canContinue(),false,'callbacks still leave the fast loop');
+    } finally {if(prior===undefined)delete globalThis.__r3PhaseWindow;else globalThis.__r3PhaseWindow=prior;}
+  });
+}

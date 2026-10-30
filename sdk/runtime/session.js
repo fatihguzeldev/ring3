@@ -144,18 +144,7 @@ export class Session {
     while (await this.files.sourceProgress()) this.abort.signal.throwIfAborted();
     this.abort.signal.throwIfAborted();
     this.code = this.externalCpu ? await this.externalCpu.attach(h, execution) : new CodeCache(h, execution);
-    if(this.backend==='v86') {
-      this.code.inlineOwner={
-        canContinue:()=>this.running && !this.paused && !this.stopped && !this.measurements &&
-          !this.callDiagnostics && !this.frameProbe && !globalThis.__r3PhaseWindow &&
-          !this.stack().length && !this.needsSchedule && performance.now()<this.inlineQuantumDeadline,
-        observeClock:()=>this.observeClock(),
-        canBridge:()=>!this.measurements && !this.callDiagnostics && !this.frameProbe &&
-          !globalThis.__r3PhaseWindow && !globalThis.__r3GateCensus && !globalThis.__r3BindingGatePolicy,
-      };
-      if(typeof this.code.initializeExecutionPolicy==='function')this.code.initializeExecutionPolicy();
-      this.initializeFastPreset();
-    }
+    this.initializeExecutionPolicy();
     this.abort.signal.throwIfAborted();
     this.observation?.observer.event("execution.backend", { backend: this.backend, callback_backend: this.backend,
       engine_sha256: h.hash, cpu_sha256: this.externalCpu?.hash });
@@ -170,6 +159,17 @@ export class Session {
         this.fail(error);
       })
       .finally(() => this.scheduler.close());
+  }
+  initializeExecutionPolicy() {
+    if(this.backend!=='v86')return;
+    this.code.inlineOwner={
+      canContinue:()=>this.running && !this.paused && !this.stopped && !this.frameProbe &&
+        !this.stack().length && !this.needsSchedule && performance.now()<this.inlineQuantumDeadline,
+      observeClock:()=>this.observeClock(),
+      canBridge:()=>!this.frameProbe && !globalThis.__r3GateCensus && !globalThis.__r3BindingGatePolicy,
+    };
+    if(typeof this.code.initializeExecutionPolicy==='function')this.code.initializeExecutionPolicy();
+    this.initializeFastPreset();
   }
   initializeFastPreset() {
     if(this.externalCpu?.fastPreset!==true)return;
@@ -430,10 +430,9 @@ export class Session {
       const start = performance.now();
       this.inlineQuantumDeadline=start+6;
       do {
-        const allowBudgetContinuation=this.backend==='v86' && !this.measurements && !this.callDiagnostics &&
-          !this.frameProbe && !globalThis.__r3PhaseWindow;
+        const allowBudgetContinuation=this.backend==='v86' && !this.frameProbe;
         const unit = this.measurements
-            ? this.measurements.run("entry", () => this.code.select(false))
+            ? this.measurements.run("entry", () => this.code.select(allowBudgetContinuation))
             : this.code.select(allowBudgetContinuation),
           callback = this.stack().at(-1);
         const measurements = this.measurements,
@@ -481,11 +480,12 @@ export class Session {
           break;
         }
         let fused = 256, observedClock=run.observedClock;
-        if (this.backend === "v86" && this.fastNativeCalls && !this.measurements && !this.callDiagnostics &&
-            !this.frameProbe && !globalThis.__r3PhaseWindow &&
+        if (this.backend === "v86" && this.fastNativeCalls && !this.frameProbe &&
             typeof h.api.component_cpu_try_complete_gate === "function") {
           observedClock ??= this.observeClock();
-          fused = h.status("component_cpu_try_complete_gate", ...KEY);
+          fused = this.measurements
+            ? this.measurements.run("completion",()=>h.status("component_cpu_try_complete_gate", ...KEY))
+            : h.status("component_cpu_try_complete_gate", ...KEY);
           if (fused !== 0 && fused !== 12 && fused !== 256)
             throw Object.assign(new Error(`component_cpu_try_complete_gate returned${fused}`), {
               operation: "component_cpu_try_complete_gate", status: fused, pc: run.pc, id: run.detail,

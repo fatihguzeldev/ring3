@@ -66,6 +66,8 @@ export function instrumentSession(session, measurements) {
       }
     });
     patch(session.engine, 'status', original => function (operation, ...args) {
+      if (!session.paused && operation === 'component_cpu_try_complete_gate')
+        return measurements.runExclusive('windows.fused', () => Reflect.apply(original, this, [operation, ...args]));
       if (session.paused || operation.startsWith('component_cpu_') || inside('windows.') || inside('graphics.'))
         return Reflect.apply(original, this, [operation, ...args]);
       return measurements.runExclusive('host.native', () => Reflect.apply(original, this, [operation, ...args]));
@@ -95,6 +97,7 @@ export function instrumentSession(session, measurements) {
     snapshot() {
       return {
         semantics: 'exclusive synchronous worker elapsed plus active await remainder; await remainder can contain unmeasured continuation JavaScript; GPU work can overlap',
+        callCoverage: 'complete() calls only; fused native time is in windows.fused, and inline/Wasm-completed calls remain in their enclosing execution scopes',
         activeSyncScopes: measurements.exclusiveStack.length,
         activeAwaitScopes: pending.size,
         syncRootNs: Math.round(measurements.exclusiveRootMilliseconds * 1e6),

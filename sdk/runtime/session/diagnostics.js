@@ -182,6 +182,7 @@ export class CompletedWindowsCalls {
   snapshot() {
     return {
       clock: "worker performance.now milliseconds",
+      coverage: "JavaScript host-returned calls only; excludes v86 inline and Wasm-completed calls, whose aggregate counts remain in CPU stats",
       lastCompletedWindowsCall: copy(this.lastCompleted),
       directInputCalls: [...this.directInput.values()].map(copy),
       recentD3DCalls: [...this.d3d.values()].map(copy),

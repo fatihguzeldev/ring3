@@ -117,7 +117,7 @@ export function instrumentV86(cache, measurements) {
     nativeCalls:{...counters.nativeCalls}},
     semantics:{
       timing:'selfElapsedNs is synchronous exclusive time; elapsedNs includes child phases and must not be added to them',
-      run:'synchronous v86 main_loop excluding measured bridge trap handling; includes CPU code generation, not later asynchronous Wasm compilation',
+      run:'synchronous v86 main_loop excluding measured JavaScript bridge trap handling; includes Wasm port native completions and CPU code generation, not later asynchronous Wasm compilation',
       import:'self time excludes page refresh; includes canonical state import and adapter bookkeeping',
       execute:'self time includes state export, accounting and fault classification; pure state export is not separately measured',
       scans:'completed harvest candidates use policy scan counts; native validation and clear passes are included in elapsed time but not counted again; mappingRebuilds counts only full rebuilds',

@@ -233,6 +233,25 @@ function sessionMeasurementFixture(methods={}) {
     engine:{status(){return 0;}},...methods};
 }
 
+test('session profiling measures fused native work without pretending it has a per-call history',async t=>{
+  const {instrumentSession}=await import('../runtime/session/diagnostics/phases.js');
+  let now=0;t.mock.method(performance,'now',()=>now);
+  const result={completed:true},owner=sessionMeasurementFixture({engine:{status(operation,...args){
+    assert.equal(this,owner.engine);assert.equal(operation,'component_cpu_try_complete_gate');
+    assert.deepEqual(args,[1,2]);now+=4;return result;
+  }}});
+  const phases=new PhaseMeasurements(),installed=instrumentSession(owner,phases);
+  owner.paused=false;
+  assert.equal(owner.engine.status('component_cpu_try_complete_gate',1,2),result);
+  const snapshot=installed.snapshot();
+  assert.equal(snapshot.sync['windows.fused'].selfElapsedNs,4_000_000);
+  assert.equal(snapshot.syncRootNs,4_000_000);assert.deepEqual(snapshot.calls,[]);
+  assert.match(snapshot.callCoverage,/fused native time is in windows.fused/);
+  owner.paused=true;owner.pauseStarted=now;installed.restore();
+  assert.equal(owner.engine.status('component_cpu_try_complete_gate',1,2),result);
+  assert.equal(installed.snapshot().syncRootNs,4_000_000,'restored hooks no longer measure');
+});
+
 test('session await remainder subtracts nested synchronous roots once and preserves the awaited result', async t => {
   const {instrumentSession}=await import('../runtime/session/diagnostics/phases.js');
   let now=0,resolve;
