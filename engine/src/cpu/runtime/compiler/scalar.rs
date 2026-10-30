@@ -11,6 +11,7 @@ mod flags;
 mod memory;
 mod multiply;
 mod narrow;
+mod shift;
 mod string;
 
 const FLAGS: u32 = 9;
@@ -47,6 +48,7 @@ pub(super) fn supports(operation: &Operation) -> bool {
         || bit::supports(operation)
         || exchange::supports(operation)
         || flags::supports(operation)
+        || shift::supports(operation)
         || matches!(
             operation,
             Operation::Nop
@@ -890,6 +892,7 @@ impl Output {
                     && !bit::emit(self, operation)
                     && !exchange::emit(self, operation)
                     && !flags::emit(self, operation)
+                    && !shift::emit(self, operation)
                 {
                     return false;
                 }

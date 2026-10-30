@@ -668,6 +668,65 @@ test('actual LAHF encodes only status flags into AH and preserves FLAGS AL and t
     [0xa1b2d7c3, 0x33221100, 0xd5e6789a, 0x12345678, 0x2f00, 0x55443322, 0x66554433, 0x77665544]);
 });
 
+test('actual reached SHR CH seven preserves the aliased register bytes and publishes literal FLAGS', {skip}, () => {
+  arithmetic([0xc0, 0xed, 7],
+    [0x12345678, 0x89abcdef, 0xd5e6789a, 0x23456789, 0x2f00, 0x55443322, 0x66554433, 0x77665544],
+    [0x12345678, 0x89ab01ef, 0xd5e6789a, 0x23456789, 0x2f00, 0x55443322, 0x66554433, 0x77665544], 0x403);
+});
+
+test('actual zero-count memory SHR checks Modify permission before any state or RAM effects', {skip}, () => {
+  const registers = [0x12345678, 0x89abcdef, 0xd5e6789a, 0x23456789, 0x2f00, 0x55443322, 0x66554433, 0x77665544];
+  const f = fixture([0xc0, 0x2d, 0, 0x20, 0, 0, 0], {registers, data: [[0x2000, 0xcd]], execution: {budget: 1}});
+  const calls = memoryCalls(f);
+  try {
+    new DataView(f.engine.memory.buffer).setUint32(f.engine.base + 52, 0xcd7, true);
+    f.engine.ok('protect', 0x2000, 1, 1);
+    const scalar = new Uint8Array(f.engine.memory.buffer, f.engine.base, 56).slice(), banks = processBanks(f);
+    f.cache.import(); const selected = f.cache.select(), state = f.slab();
+    const backing = state.getUint32(84, true), length = state.getUint32(88, true) * 4096;
+    const ram = new Uint8Array(f.engine.memory.buffer, backing, length).slice();
+    const run = f.cache.execute(selected);
+    assert.deepEqual([run.reason, run.retired, run.work, run.pc], [5, 0, 0, 0x1000]);
+    assert.deepEqual(new Uint8Array(f.engine.memory.buffer, f.engine.base, 56), scalar);
+    assert.deepEqual(processBanks(f), banks);
+    assert.deepEqual(new Uint8Array(f.engine.memory.buffer, backing, length), ram);
+    assert.deepEqual([f.engine.get(80), f.engine.get(84), f.engine.get(88), f.engine.get(92)], [2, 0x2000, 2, 1]);
+    assert.equal(f.slab().getUint32(48, true), 1);
+    assert.equal(f.slab().getUint32(108, true), 0);
+    assert(calls.read > 0); assert.equal(calls.write, 0);
+    event(f.engine, 0xffffffff, 0x1000, 0);
+  } finally {f.close();}
+});
+
+test('actual zero-count memory SHR still commits its same-value executable alias store before SMC exit', {skip}, () => {
+  const f = fixture(undefined, {windowsMappings: true, physicalPages: 1024, execution: {budget: 2}});
+  try {
+    const [writable, executable] = sharedViews(f, 0x40, [2, 0x24]);
+    f.engine.request(Uint8Array.from([0xb8, 1, 0, 0, 0, 0xeb, 0xf9])); f.engine.ok('upload', writable, 7);
+    new DataView(f.engine.memory.buffer).setUint32(f.engine.base + 48, executable, true);
+    const old = f.cache.select(); assert.equal(f.cache.execute(old).reason, 1);
+    replaceCode(f, [0xc0, 0x2d, ...dword(writable + 1), 0, 0x43]);
+    const arena = new DataView(f.engine.memory.buffer);
+    arena.setUint32(f.engine.base + 28, 0x33445566, true);
+    arena.setUint32(f.engine.base + 48, 0x1000, true); arena.setUint32(f.engine.base + 52, 0xcd7, true);
+    const scalar = new Uint8Array(f.engine.memory.buffer, f.engine.base, 56).slice(), banks = processBanks(f);
+    view(scalar).setUint32(48, 0x1007, true);
+    const calls = memoryCalls(f), writer = f.cache.select(), state = f.slab();
+    const backing = state.getUint32(84, true), length = state.getUint32(88, true) * 4096;
+    const ram = new Uint8Array(f.engine.memory.buffer, backing, length).slice();
+    const run = f.cache.execute(writer);
+    assert.deepEqual([run.coreReason, run.reason, run.retired, run.work, run.pc], [6, 6, 1, 1, 0x1007]);
+    assert.deepEqual(new Uint8Array(f.engine.memory.buffer, f.engine.base, 56), scalar);
+    assert.deepEqual(processBanks(f), banks);
+    assert.deepEqual(new Uint8Array(f.engine.memory.buffer, backing, length), ram);
+    assert.equal(f.slab().getUint32(48, true), 1);
+    assert.equal(calls.write, 1, 'zero count retains the one canonical same-value write');
+    f.cache.import();
+    assert.equal(f.cache.table.get(old.slot), null);
+    assert.equal(f.cache.units.has(old.slot), false);
+  } finally {f.close();}
+});
+
 for (const readOnly of [false, true]) test(`actual XCHG memory EAX ${readOnly ? 'fault preserves the aliased address and complete state' : 'uses the address before exchanging EAX'}`, {skip}, () => {
   const registers = [0x2000, 0x11223344, 0x22334455, 0x33445566, 0x2f00, 0x44556677, 0x55667788, 0x66778899];
   const f = fixture([0x87, 0x00], {registers, data: dword(0x12345678).map((value, index) => [0x2000 + index, value]), execution: {budget: 1}});
