@@ -26,6 +26,9 @@ export class Engine {
 
   static async create(url, pages = RESIDENT_PAGES, signal, compiled, shared) {
     const { module, hash } = await loadEngineModule(url, signal, compiled);
+    const importsMemory = WebAssembly.Module.imports(module).some(item => item.kind === "memory" && item.module === "env" && item.name === "memory");
+    if (importsMemory && !shared)
+      throw new Error("this Ring3 engine imports env.memory and requires an external CPU memory owner; launch with the v86 backend");
     const imports = {
       ring3_observability: { now_ns: epochNowNs },
     };
@@ -33,7 +36,7 @@ export class Engine {
       const { memory, minimumMemoryBytes } = shared;
       if (!(memory instanceof WebAssembly.Memory) || !Number.isSafeInteger(minimumMemoryBytes) || minimumMemoryBytes < 0)
         throw new TypeError("invalid shared CPU memory");
-      if (!WebAssembly.Module.imports(module).some(item => item.kind === "memory" && item.module === "env" && item.name === "memory"))
+      if (!importsMemory)
         throw new Error("the external CPU requires a Ring3 engine built with imported memory");
       const missing = Math.ceil(minimumMemoryBytes / 65536) - memory.buffer.byteLength / 65536;
       if (missing > 0) memory.grow(missing);

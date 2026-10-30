@@ -5,6 +5,26 @@ import {Session} from '../runtime/session.js';
 import {WindowPresentation} from '../runtime/windows.js';
 import {CompletedWindowsCalls} from '../runtime/session/diagnostics.js';
 
+test('an imported-memory engine requires an explicit external CPU owner before instantiation', async () => {
+  const name=value=>[value.length,...new TextEncoder().encode(value)];
+  const section=(id,bytes)=>[id,bytes.length,...bytes];
+  const bytes=new Uint8Array([0,97,115,109,1,0,0,0,
+    ...section(2,[1,...name('env'),...name('memory'),2,0,1]),
+    ...section(7,[1,...name('memory'),2,0])]);
+  const fetch=globalThis.fetch;
+  globalThis.fetch=async()=>({ok:true,arrayBuffer:async()=>bytes.buffer});
+  try {
+    await assert.rejects(Engine.create('/authored-imported-memory.wasm'),
+      /env\.memory.*external CPU.*v86/);
+    await assert.rejects(Engine.create('/authored-imported-memory.wasm',1,undefined,undefined,{}),
+      /invalid shared CPU memory/);
+    const memory=new WebAssembly.Memory({initial:1});
+    await assert.rejects(Engine.create('/authored-imported-memory.wasm',1,undefined,undefined,
+      {memory,minimumMemoryBytes:65536}),/high memory layout exports/);
+    assert.equal(memory.buffer.byteLength,65536,'the supplied owner remains the actual imported memory');
+  } finally {globalThis.fetch=fetch;}
+});
+
 test('borrowed results reflect the arena while take preserves an owned snapshot', () => {
   const engine = new Engine({}, new WebAssembly.Memory({initial: 1}), 'fixture');
   engine.base = 256;
