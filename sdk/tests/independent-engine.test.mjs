@@ -5,6 +5,7 @@ import {fileURLToPath} from 'node:url';
 import {readEngine} from '../../engine/tests/support/wasm/engine.mjs';
 import {Engine, KEY, record, view} from '../runtime/engine.js';
 import {IndependentCodeCache} from '../runtime/independent.js';
+import {callbackRecord} from '../runtime/callback.js';
 import {builder} from '../../engine/tests/support/pe32/image.mjs';
 import {configureFiles} from '../../engine/tests/windows/files/fixtures/runtime/setup.mjs';
 
@@ -20,7 +21,7 @@ if (explicitPath || existsSync(path)) {
 
 function fixture(code = [0xeb, 0xfe], {pc = 0x1000, execution, data = [], dataPage = 0x2000,
   registers = [0, 0, 0, 0, 0x2f00, 0, 0, 0], fpControl, fpStatus,
-  windowsMappings = false, physicalPages = 16, independent = true} = {}) {
+  windowsMappings = false, moduleImage, physicalPages = 16, independent = true} = {}) {
   const instance = new WebAssembly.Instance(artifact.module, {ring3_observability: {now_ns: () => 0n}});
   const api = Object.fromEntries(Object.entries(instance.exports)
     .filter(([name]) => name.startsWith('ring3_abi_v1_')).map(([name, value]) => [name.slice(13), value]));
@@ -33,7 +34,7 @@ function fixture(code = [0xeb, 0xfe], {pc = 0x1000, execution, data = [], dataPa
     engine.ok('configure_module_limits', 8, 0x100000, 16, 65536, 0x100000);
     engine.ok('register_kernel32_module', 0x70000000);
     configureFiles({api, request: bytes => engine.request(bytes), take: length => Buffer.from(engine.take(length))});
-    const image = builder([['kernel32.dll', ['CreateFileMappingA', 'MapViewOfFile']]]).seal();
+    const image = moduleImage ?? builder([['kernel32.dll', ['CreateFileMappingA', 'MapViewOfFile']]]).seal();
     engine.ok('begin_module_input', image.bytes.length, engine.name('memory-fixture.exe'));
     for (let offset = 0; offset < image.bytes.length; offset += 4096) {
       const chunk = image.bytes.subarray(offset, offset + 4096);
@@ -648,4 +649,138 @@ for (const c of [
 test('actual compiled DIV memory source fault precedes division and preserves complete state', {skip}, () => {
   arithmetic([0xf6, 0x35, 0, 0x50, 0, 0],
     [0xa1b20100, 0x33221100, 0xd5e6789a, 1, 0x2f00, 0x55443322, 0x66554433, 0x77665544], undefined, undefined, 5);
+});
+
+function processFixture(guest) {
+  return fixture(undefined, {windowsMappings: true, moduleImage: guest, physicalPages: 1024,
+    pc: guest.entry, registers: [0, 0x11223344, 0x22334455, 0x33445566, 0x7e004000, 0x44556677, 0x55667788, 0x66778899],
+    execution: {budget: 1000}});
+}
+
+function processStop(f) {
+  for (let count = 0; count < 32; count++) {
+    const run = f.cache.execute(f.cache.select());
+    if (![1, 2, 6].includes(run.coreReason)) return run;
+  }
+  assert.fail('the authored process must reach its next native or exception boundary');
+}
+
+function nativeCall(f, id) {
+  const run = processStop(f);
+  assert.deepEqual([run.reason, run.detail], [8, id]);
+  f.engine.ok('cpu_capture_windows_call');
+  const call = f.engine.take(112), token = view(call).getUint32(16, true);
+  assert.equal(view(call).getUint32(20, true), id);
+  f.engine.ok('cpu_complete_windows_call', token);
+  return {call, token};
+}
+
+function processBanks(f) {
+  return [[4236, 352], [4612, 184]].map(([offset, length]) =>
+    new Uint8Array(f.engine.memory.buffer, f.engine.base + offset, length).slice());
+}
+
+function callbackReturnGate(engine) {
+  for (let start = 0, total = 1; start < total;) {
+    engine.ok('module_gates_page', start, 128);
+    const page = engine.resultView(4096), count = page.getUint32(24, true);
+    total = page.getUint32(16, true); assert(count > 0);
+    for (let index = 0; index < count; index++)
+      if (page.getUint32(36 + index * 8, true) === 0xffffe) return page.getUint32(32 + index * 8, true);
+    start += count;
+  }
+  assert.fail('the loaded kernel32 module must own the canonical callback return gate');
+}
+
+test('actual independent NLS callback completes a nested native call and restores the suspended state banks', {skip}, () => {
+  const b = builder([['kernel32.dll', ['SetLastError', 'EnumSystemLocalesEx', 'GetLastError']]],
+    {callbacks: [{words: 3, result: 0, record: 'locale'}]});
+  const nestedError = b.allocate('nestedError');
+  b.external('SetLastError', 0x10002, [0x12345678]);
+  b.external('EnumSystemLocalesEx', 0x150042, [b.callbacks[0].entry, 0x21, 0xabcdef, 0], 1);
+  const guest = b.seal(), definition = guest.callbacks[0], file = 0x200 + definition.entry - guest.entry;
+  const code = [...guest.bytes.subarray(file, file + definition.length - 8),
+    0xd9, 0xe8, 0x66, 0x0f, 0x76, 0xc0,
+    0xff, 0x15, ...dword(0x406408), 0xa3, ...dword(nestedError),
+    0xbb, ...dword(0xdeadbeef), 0xbe, ...dword(0xcafebabe), 0xbf, ...dword(0xfedcba98),
+    0x31, 0xc0, 0xc2, 12, 0];
+  guest.bytes.set(code, file);
+  const f = processFixture(guest);
+  try {
+    nativeCall(f, 0x10002);
+    nativeCall(f, 0x150042);
+    f.engine.ok('pending_windows_callback');
+    const request = f.engine.resultView(96);
+    assert.deepEqual([request.getUint32(12, true), request.getUint32(16, true), request.getUint32(20, true),
+      request.getUint32(36, true), request.getUint32(40, true)], [7, definition.entry, 3, 0x21, 0xabcdef]);
+    const scalar = new Uint8Array(f.engine.memory.buffer, f.engine.base, 56).slice(), banks = processBanks(f);
+    const returnPc = callbackReturnGate(f.engine);
+    f.engine.ok('cpu_begin_windows_callback', returnPc, 0xffffe);
+    const callback = callbackRecord(f.engine.take(64), returnPc, 0xffffe);
+    const nested = nativeCall(f, 0x10001);
+    assert(nested.token > callback.token);
+    assert.equal(f.engine.get(16), 0x12345678);
+    assert.notDeepEqual(processBanks(f)[0], banks[0], 'the callback executed its x87 and SIMD instructions before the nested provider returned');
+    const returned = processStop(f);
+    assert.deepEqual([returned.reason, returned.pc, returned.detail, f.engine.get(32)], [8, returnPc, 0xffffe, callback.returnEsp]);
+    assert.deepEqual([f.engine.get(28), f.engine.get(40), f.engine.get(44)], [0xdeadbeef, 0xcafebabe, 0xfedcba98]);
+    f.engine.ok('read32', nestedError); assert.equal(f.engine.get(120), 0x12345678);
+    f.engine.ok('cpu_finish_windows_callback', callback.token);
+    const expected = view(scalar), continuation = guest.entry + guest.calls[1].end;
+    expected.setUint32(16, 1, true); expected.setUint32(32, 0x7e004000, true); expected.setUint32(48, continuation, true);
+    assert.deepEqual(new Uint8Array(f.engine.memory.buffer, f.engine.base, 56), scalar);
+    assert.deepEqual(processBanks(f), banks);
+    f.engine.ok('pending_windows_callback'); assert.equal(f.engine.resultView(96).getUint32(12, true), 0);
+    f.cache.budget = 1;
+    const resumed = f.cache.execute(f.cache.select());
+    assert.deepEqual([resumed.reason, resumed.retired, resumed.work, resumed.pc], [1, 1, 1, continuation + 5]);
+    assert.deepEqual(processBanks(f), banks, 'the next independent import must retain the restored outer numerical banks');
+    f.engine.ok('read32', guest.calls[1].status); assert.equal(f.engine.get(120), 1);
+  } finally {f.close();}
+});
+
+test('actual independent DE handler returns through edited CONTEXT and restores the interrupted state banks', {skip}, () => {
+  const b = builder([['kernel32.dll', ['AddVectoredExceptionHandler', 'ExitProcess']]],
+    {callbacks: [{words: 1, result: 0xffffffff}]});
+  const result = b.allocate('result');
+  b.external('AddVectoredExceptionHandler', 0x120001, [1, b.callbacks[0].entry], 'handle');
+  b.emit(0x31, 0xd2, 0xb8, 1, 0, 0, 0, 0x31, 0xc9, 0xf7, 0xf1);
+  b.save(result); b.external('ExitProcess', 0x10003, [0], 'exit');
+  const guest = b.seal(), handler = guest.callbacks[0], file = 0x200 + handler.entry - guest.entry;
+  guest.bytes.set([0x8b, 0x44, 0x24, 4, 0x8b, 0x50, 4,
+    0x83, 0x82, ...dword(184), 2, 0xc7, 0x82, ...dword(176), ...dword(42),
+    0xd9, 0xe8, 0x66, 0x0f, 0x76, 0xc0, 0xbb, ...dword(0xdeadbeef),
+    0xb8, ...dword(0xffffffff), 0xc2, 4, 0], file);
+  const faultPc = guest.entry + guest.calls[0].end + 5 + 9;
+  assert.deepEqual([...guest.bytes.subarray(0x200 + faultPc - guest.entry, 0x202 + faultPc - guest.entry)], [0xf7, 0xf1]);
+  const f = processFixture(guest);
+  try {
+    nativeCall(f, 0x120001); assert(f.engine.get(16) > 0);
+    const fault = processStop(f);
+    assert.deepEqual([fault.reason, fault.pc, fault.detail], [10, faultPc, 0]);
+    const scalar = new Uint8Array(f.engine.memory.buffer, f.engine.base, 56).slice(), banks = processBanks(f);
+    assert.deepEqual(Array.from({length: 8}, (_, index) => f.engine.get(16 + index * 4)),
+      [1, 0, 0, 0x33445566, 0x7e004000, 0x44556677, 0x55667788, 0x66778899]);
+    f.engine.ok('cpu_dispatch_exception');
+    f.engine.ok('pending_windows_exception');
+    const delivery = f.engine.take(64), packet = view(delivery);
+    assert.deepEqual([packet.getUint32(12, true), packet.getUint32(28, true), packet.getUint32(32, true)], [1, 1, handler.entry]);
+    const record = packet.getUint32(36, true), context = packet.getUint32(40, true), returnPc = packet.getUint32(44, true), returnId = packet.getUint32(48, true);
+    f.engine.ok('read32', record); assert.equal(f.engine.get(120), 0xc0000094);
+    f.engine.ok('read32', context + 184); assert.equal(f.engine.get(120), faultPc);
+    const returned = processStop(f);
+    assert.deepEqual([returned.reason, returned.pc, returned.detail, f.engine.get(16)], [8, returnPc, returnId, 0xffffffff]);
+    assert.notDeepEqual(processBanks(f)[0], banks[0], 'the actual handler changed its own numerical and integer state');
+    f.engine.ok('read32', context + 176); assert.equal(f.engine.get(120), 42);
+    f.engine.ok('read32', context + 184); assert.equal(f.engine.get(120), faultPc + 2);
+    f.engine.ok('cpu_finish_exception');
+    view(scalar).setUint32(16, 42, true); view(scalar).setUint32(48, faultPc + 2, true);
+    assert.deepEqual(new Uint8Array(f.engine.memory.buffer, f.engine.base, 56), scalar);
+    assert.deepEqual(processBanks(f), banks);
+    f.engine.ok('pending_windows_exception'); assert.equal(f.engine.resultView(64).getUint32(12, true), 0);
+    nativeCall(f, 0x10003);
+    f.engine.ok('read32', result); assert.equal(f.engine.get(120), 42);
+    assert.equal(f.engine.get(72), 9);
+    assert.deepEqual(processBanks(f), banks);
+  } finally {f.close();}
 });
