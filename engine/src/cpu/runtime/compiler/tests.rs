@@ -135,6 +135,16 @@ fn independent_generated_wasm_executes_integer_calls_and_precise_faults() {
         let unit = compile(&memory, GuestAddress(0x1000), 1).unwrap();
         fs::write(scratch.join(format!("{name}.wasm")), &unit.wasm).unwrap();
     }
+    for condition in 0..16 {
+        memory.write(GuestAddress(0x1000), &[0x0f, 0x90 + condition, 0xc0]).unwrap();
+        let unit = compile(&memory, GuestAddress(0x1000), 1).unwrap();
+        fs::write(scratch.join(format!("setcc{condition}.wasm")), &unit.wasm).unwrap();
+    }
+    for (name, code) in [("setcc-memory", &[0x0f, 0x94, 0x03][..]), ("cmov32", &[0x0f, 0x44, 0xc2][..]), ("cmov16", &[0x66, 0x0f, 0x44, 0xc2][..]), ("cmov-memory32", &[0x0f, 0x44, 0x03][..]), ("cmov-memory16", &[0x66, 0x0f, 0x44, 0x03][..])] {
+        memory.write(GuestAddress(0x1000), code).unwrap();
+        let unit = compile(&memory, GuestAddress(0x1000), 1).unwrap();
+        fs::write(scratch.join(format!("{name}.wasm")), &unit.wasm).unwrap();
+    }
     for (bits, prefix) in [(8, &[][..]), (16, &[0x66][..])] {
         for (name, opcode) in [("add", 0x00), ("adc", 0x10), ("sub", 0x28), ("sbb", 0x18), ("cmp", 0x38), ("test", 0x84), ("and", 0x20), ("or", 0x08), ("xor", 0x30)] {
             let mut code = prefix.to_vec(); code.extend([opcode + u8::from(bits == 16), 0xd0]);
@@ -200,8 +210,8 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 const root=process.argv[1], memory=new WebAssembly.Memory({initial:2}), data=new DataView(memory.buffer), ptr=0x8000;
 const word=(offset,value)=>data.setUint32(ptr+offset,value>>>0,true), get=offset=>data.getUint32(ptr+offset,true);
-let fault=false,writeStatus=0;
-const imports={env:{memory},cpu:{read(p,address,width){width&=255;word(52,0);return width===1?data.getUint8(address):width===2?data.getUint16(address,true):data.getUint32(address,true);},write(p,address,width,value){if(fault&&address===0x1ffe){word(52,3);word(60,0x2000);return 3;}if(writeStatus===8){word(52,8);return 8;} if(width===1)data.setUint8(address,value);else if(width===2)data.setUint16(address,value,true);else data.setUint32(address,value,true);word(52,writeStatus);return writeStatus;}}};
+let fault=false,readFault=false,writeStatus=0;
+const imports={env:{memory},cpu:{read(p,address,width){width&=255;word(52,0);if(readFault&&address===0x1ffe){word(52,3);word(60,0x2000);return 0;}return width===1?data.getUint8(address):width===2?data.getUint16(address,true):data.getUint32(address,true);},write(p,address,width,value){if(fault&&address===0x1ffe){word(52,3);word(60,0x2000);return 3;}if(writeStatus===8){word(52,8);return 8;} if(width===1)data.setUint8(address,value);else if(width===2)data.setUint16(address,value,true);else data.setUint32(address,value,true);word(52,writeStatus);return writeStatus;}}};
 function initialize(pc,quota){new Uint8Array(memory.buffer).fill(0);word(0,1);word(4,160);word(40,pc);word(44,2);word(48,quota);word(24,0x4800);word(152,0x1f);}
 const load=async name=>(await WebAssembly.instantiate(fs.readFileSync(`${root}/${name}.wasm`),imports)).instance.exports.run;
 const run=await load('call');initialize(0x1000,1000);[5,64,7,0x3000,0x4800,0,0,0].forEach((v,i)=>word(8+4*i,v));
@@ -239,6 +249,9 @@ for(const bits of[8,16]){const limit=2**bits,sign=limit/2,max=limit-1,operands=[
 for(const bits of[8,16,32]){const limit=2**bits,sign=limit/2,max=limit-1,prefix=bits===8?0x12345600:bits===16?0x12340000:0;for(const name of['inc','dec','neg','not']){const fn=await load(`unary${bits}-${name}`);for(const value of[0,1,15,16,sign-1,sign,max])for(const carry of[0,1]){let result,flags=0xcd6|carry;if(name==='not')result=max-value;else{const sub=name!=='inc',left=name==='neg'?0:value,right=name==='neg'?value:1,exact=sub?BigInt(left)-BigInt(right):BigInt(left)+BigInt(right),sx=x=>BigInt(x>=sign?x-limit:x),signedExact=sub?sx(left)-sx(right):sx(left)+sx(right);result=Number(BigInt.asUintN(bits,exact));flags&=~0x8d5;if(name==='neg'&&value!==0||name!=='neg'&&carry)flags|=1;if(sub?(left&15)<(right&15):(left&15)+(right&15)>15)flags|=16;if(signedExact< -BigInt(sign)||signedExact>=BigInt(sign))flags|=0x800;if(result===0)flags|=64;if(result>=sign)flags|=128;if([...((result&255).toString(2))].filter(x=>x==='1').length%2===0)flags|=4;}initialize(0x1000,1);word(8,(prefix|value)>>>0);word(44,0xcd6|carry);assert.equal(fn(ptr),0);assert.equal(get(8),(prefix|result)>>>0,`unary${bits}${name} result`);assert.equal(get(44),flags,`unary${bits}${name} ${value.toString(16)} CF${carry}`);}}}
 for(const[name,expectEax,expectRam]of[['narrow-read8',0x112233c4,0x8180],['narrow-read16',0x1122b4c4,0x8180],['narrow-rmw8',0x11223344,0x817f],['narrow-rmw16',0x11223344,0x027f]]){initialize(0x1000,1);word(8,0x11223344);word(16,0x80ff);word(20,0x3000);data.setUint16(0x3000,0x8180,true);const fn=await load(name);assert.equal(fn(ptr),0,name);assert.equal(get(8),expectEax,name);assert.equal(data.getUint16(0x3000,true),expectRam,name);if(name.includes('rmw')){initialize(0x1000,1);word(20,0x1ffe);word(44,0xcd7);fault=true;assert.equal(fn(ptr),3,name);assert.equal(get(40),0x1000);assert.equal(get(56),0);assert.equal(get(44),0xcd7);fault=false;}}
 initialize(0x1000,1);word(8,0x11227f44);word(16,0x556680ff);const high=await load('narrow-high8');assert.equal(high(ptr),0);assert.equal(get(16),0x5566ffff);assert.equal(get(8),0x11227f44);assert.equal(get(44),0x86);
+for(let condition=0;condition<16;condition++){const fn=await load(`setcc${condition}`);for(let row=0;row<32;row++){const[cf,pf,zf,sf,of]=[row&1,(row>>1)&1,(row>>2)&1,(row>>3)&1,(row>>4)&1],flags=0x412|cf|(pf<<2)|(zf<<6)|(sf<<7)|(of<<11),truth=[of,!of,cf,!cf,zf,!zf,cf||zf,!(cf||zf),sf,!sf,pf,!pf,sf!==of,sf===of,zf||sf!==of,!zf&&sf===of];initialize(0x1000,1);word(8,0x123456ab);word(44,flags);assert.equal(fn(ptr),0);assert.equal(get(8),0x12345600|Number(Boolean(truth[condition])),`setcc${condition} flags${flags.toString(16)}`);assert.equal(get(44),flags);assert.equal(get(56),1);}}
+for(const name of['cmov32','cmov16','cmov-memory32','cmov-memory16']){const fn=await load(name);for(const zero of[0,64]){initialize(0x1000,1);word(8,0x11223344);word(16,0x556680ff);word(20,0x3000);word(44,0x412|zero);data.setUint32(0x3000,0x556680ff,true);assert.equal(fn(ptr),0);assert.equal(get(8),zero?(name.endsWith('16')?0x112280ff:0x556680ff):0x11223344,name);assert.equal(get(44),0x412|zero);}if(name.includes('memory')){initialize(0x1000,1);word(8,0x11223344);word(20,0x1ffe);word(44,2);readFault=true;assert.equal(fn(ptr),3,`${name} untaken memory still faults`);assert.equal(get(8),0x11223344);assert.equal(get(40),0x1000);assert.equal(get(56),0);readFault=false;}}
+const setMemory=await load('setcc-memory');initialize(0x1000,1);word(20,0x3000);word(44,0x442);assert.equal(setMemory(ptr),0);assert.equal(data.getUint8(0x3000),1);assert.equal(get(44),0x442);initialize(0x1000,1);word(20,0x1ffe);word(44,0x442);fault=true;assert.equal(setMemory(ptr),3);assert.equal(get(56),0);assert.equal(get(40),0x1000);assert.equal(get(44),0x442);fault=false;
 console.log('independent integer/CALL/RET, quota, precise fault/SMC and 100000 Wasm unit handoffs passed');
 "#).arg(&scratch).output().unwrap();
     assert!(

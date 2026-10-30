@@ -69,6 +69,12 @@ pub(super) fn supports(operation: &Operation) -> bool {
                 | Operation::SignExtendHighWord
                 | Operation::SignExtendHigh
                 | Operation::Shift { .. }
+            | Operation::SetByte { .. }
+            | Operation::MemorySetByte { .. }
+            | Operation::ConditionalMove { .. }
+            | Operation::ConditionalMoveWord { .. }
+            | Operation::ReadConditionalMove { .. }
+            | Operation::ReadConditionalMoveWord { .. }
         )
 }
 
@@ -505,6 +511,42 @@ impl Output {
                 self.word(source, R);
                 self.address(address);
                 self.write(2, R);
+            }
+            Operation::SetByte { condition, destination } => {
+                self.condition(condition);
+                self.c().local_set(R);
+                self.store_byte(destination, R);
+            }
+            Operation::MemorySetByte { condition, address } => {
+                self.condition(condition);
+                self.c().local_set(R);
+                self.address(address);
+                self.write(1, R);
+            }
+            Operation::ConditionalMove { condition, destination, source } => {
+                self.condition(condition);
+                self.c().if_(BlockType::Empty).local_get(reg(source)).local_set(reg(destination)).end();
+            }
+            Operation::ConditionalMoveWord { condition, destination, source } => {
+                self.condition(condition);
+                self.c().if_(BlockType::Empty);
+                self.word(WordValue::Register(source), R);
+                self.store_word(destination, R);
+                self.c().end();
+            }
+            Operation::ReadConditionalMove { condition, destination, address } => {
+                self.address(address);
+                self.read(4, R);
+                self.condition(condition);
+                self.c().if_(BlockType::Empty).local_get(R).local_set(reg(destination)).end();
+            }
+            Operation::ReadConditionalMoveWord { condition, destination, address } => {
+                self.address(address);
+                self.read(2, R);
+                self.condition(condition);
+                self.c().if_(BlockType::Empty);
+                self.store_word(destination, R);
+                self.c().end();
             }
             Operation::Extend {
                 kind,
