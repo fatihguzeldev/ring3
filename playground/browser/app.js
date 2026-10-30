@@ -3,6 +3,7 @@ import { VisibilityController } from "./visibility.js";
 import { CategoryPicker } from "./observability/categories.js";
 import { launchOptions } from "./launch.js";
 import { frameRateLabel } from "./frame-rate.js";
+import { createDiagnostics } from "./diagnostics.js";
 
 const $ = (id) => document.getElementById(id);
 const ui = Object.fromEntries(
@@ -52,22 +53,14 @@ let visibility;
 let frameRateTimer;
 const serialize = (value) =>
   JSON.stringify(value, (_key, item) => (typeof item === "bigint" ? item.toString() : item));
-function report(event) {
-  fetch("/api/diagnostics", {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: serialize(event),
-  }).catch(() => {});
-}
-function log(message, detail) {
+const { log, report } = createDiagnostics((message, detail) => {
   const text = `${new Date().toLocaleTimeString()}  ${message}${detail ? `\n${typeof detail === "string" ? detail : serialize(detail)}` : ""}`;
   entries.push(text);
   if (entries.length > 250) entries.shift();
   const atBottom = ui.log.scrollHeight - ui.log.scrollTop - ui.log.clientHeight < 40;
   ui.log.textContent = entries.join("\n");
   if (atBottom) ui.log.scrollTop = ui.log.scrollHeight;
-  report({ type: "diagnostic", message, detail });
-}
+});
 function status(info) {
   clearTimeout(frameRateTimer);
   ui["frame-rate"].textContent = frameRateLabel(info);
