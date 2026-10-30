@@ -298,7 +298,7 @@ impl EngineInstance {
             .then_some(frame)
     }
 
-    pub(in crate::process) fn prepare_core_exit(
+    pub(in crate::process) fn prepare_cpu_exit(
         &self,
         state: crate::cpu::x86::State32,
         exit: crate::cpu::ExecutionExit,
@@ -365,7 +365,7 @@ impl EngineInstance {
         })
     }
 
-    pub(in crate::process) fn commit_core_exit(&mut self, prepared: PreparedCoreExit32) {
+    pub(in crate::process) fn commit_cpu_exit(&mut self, prepared: PreparedCoreExit32) {
         use crate::abi::arena::*;
         let arena = self.arena.as_mut().get_mut();
         arena[STATE_OFFSET..STATE_OFFSET + crate::abi::x86::STATE_SIZE]
@@ -382,7 +382,7 @@ impl EngineInstance {
         self.cpu_event = prepared.event;
     }
 
-    pub(in crate::process) fn enable_core_execution(&mut self) -> Result<u64, HostError> {
+    pub(in crate::process) fn enable_cpu_execution(&mut self) -> Result<u64, HostError> {
         self.memory()?;
         if let Some(id) = self.core_owner {
             return Ok(id);
@@ -407,7 +407,7 @@ impl EngineInstance {
         Ok(())
     }
 
-    pub(in crate::process) fn guard_core_entry(&self) -> Result<(), HostError> {
+    pub(in crate::process) fn guard_cpu_entry(&self) -> Result<(), HostError> {
         self.guard_core_owner(self.core_owner.ok_or(HostError::InvalidArtifact)?)?;
         self.guard_thread_execution_ready()?;
         if self.pending_call.is_some() || self.cpu_event.is_some() {
@@ -423,7 +423,7 @@ impl EngineInstance {
         Ok(())
     }
 
-    pub fn capture_core_windows_call(
+    pub fn capture_cpu_windows_call(
         &mut self,
     ) -> Result<crate::abi::call_frame::CallRecord32, HostError> {
         let id = self.core_owner.ok_or(HostError::InvalidArtifact)?;
@@ -440,13 +440,13 @@ impl EngineInstance {
         self.capture_call_frame(PendingOwner::Core(id), convention, info.stack_words)
     }
 
-    pub fn complete_core_windows_call(&mut self, token: u32) -> Result<(), HostError> {
+    pub fn complete_cpu_windows_call(&mut self, token: u32) -> Result<(), HostError> {
         let id = self.core_owner.ok_or(HostError::InvalidArtifact)?;
         self.guard_core_owner(id)?;
         self.complete_windows_call_frame(PendingOwner::Core(id), token)
     }
 
-    pub fn begin_core_windows_callback(
+    pub fn begin_cpu_windows_callback(
         &mut self,
         return_pc: u32,
         return_id: u32,
@@ -454,11 +454,67 @@ impl EngineInstance {
         self.begin_windows_callback(self.key, 0, return_pc, return_id)
     }
 
-    pub fn finish_core_windows_callback(
+    pub fn finish_cpu_windows_callback(
         &mut self,
         token: u32,
     ) -> Result<crate::abi::callback::CallbackRecord32, HostError> {
         self.finish_windows_callback(self.key, 0, token)
+    }
+}
+
+impl EngineInstance {
+    pub(in crate::process) fn prepare_core_exit(
+        &self,
+        state: crate::cpu::x86::State32,
+        exit: crate::cpu::ExecutionExit,
+        work: u32,
+        origin: Option<crate::cpu::x86::EventOrigin32>,
+        instruction: Option<crate::process::CpuInstructionSite32>,
+        banks: (
+            crate::cpu::x86::X87State,
+            crate::cpu::x86::simd::SimdState,
+            crate::cpu::x86::simd::ymm::YmmUpperState,
+            crate::cpu::x86::SegmentContext,
+        ),
+    ) -> Result<PreparedCoreExit32, HostError> {
+        self.prepare_cpu_exit(state, exit, work, origin, instruction, banks)
+    }
+
+    pub(in crate::process) fn commit_core_exit(&mut self, prepared: PreparedCoreExit32) {
+        self.commit_cpu_exit(prepared);
+    }
+
+    pub(in crate::process) fn enable_core_execution(&mut self) -> Result<u64, HostError> {
+        self.enable_cpu_execution()
+    }
+
+    pub(in crate::process) fn guard_core_entry(&self) -> Result<(), HostError> {
+        self.guard_cpu_entry()
+    }
+
+    pub fn capture_core_windows_call(
+        &mut self,
+    ) -> Result<crate::abi::call_frame::CallRecord32, HostError> {
+        self.capture_cpu_windows_call()
+    }
+
+    pub fn complete_core_windows_call(&mut self, token: u32) -> Result<(), HostError> {
+        self.complete_cpu_windows_call(token)
+    }
+
+    pub fn begin_core_windows_callback(
+        &mut self,
+        return_pc: u32,
+        return_id: u32,
+    ) -> Result<crate::abi::callback::CallbackRecord32, HostError> {
+        self.begin_cpu_windows_callback(return_pc, return_id)
+    }
+
+    pub fn finish_core_windows_callback(
+        &mut self,
+        token: u32,
+    ) -> Result<crate::abi::callback::CallbackRecord32, HostError> {
+        self.finish_cpu_windows_callback(token)
     }
 }
 
