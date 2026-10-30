@@ -9,7 +9,7 @@ const BYTE_LIMIT: usize = 128 * 1024 * 1024;
 const MIN_DIRECTORY: usize = 16;
 
 pub(super) struct CodeCache {
-    units: Vec<Option<CompiledUnit>>,
+    units: Vec<Option<RetainedUnit>>,
     entries: Vec<[u32; 2]>,
     directory: Vec<[u32; 2]>,
     dispatcher: Vec<u8>,
@@ -17,8 +17,14 @@ pub(super) struct CodeCache {
     validated: Option<(u64, u64)>,
     oldest: usize,
     limit: usize,
+    retained_code_bytes: usize,
     #[cfg(test)]
     source_checks: usize,
+}
+
+struct RetainedUnit {
+    code: CompiledUnit,
+    charge: usize,
 }
 
 fn code_bytes(code: &CompiledUnit) -> usize {
@@ -79,6 +85,7 @@ impl CodeCache {
             validated: None,
             oldest: 0,
             limit: BYTE_LIMIT,
+            retained_code_bytes: 0,
             #[cfg(test)]
             source_checks: 0,
         };
@@ -91,7 +98,7 @@ impl CodeCache {
     pub(super) fn charged_bytes(&self) -> usize {
         self.units
             .capacity()
-            .saturating_mul(size_of::<Option<CompiledUnit>>())
+            .saturating_mul(size_of::<Option<RetainedUnit>>())
             .saturating_add(
                 self.entries
                     .capacity()
@@ -104,13 +111,7 @@ impl CodeCache {
             )
             .saturating_add(self.victims.capacity().saturating_mul(size_of::<u32>()))
             .saturating_add(self.dispatcher.capacity())
-            .saturating_add(
-                self.units
-                    .iter()
-                    .flatten()
-                    .map(code_bytes)
-                    .fold(0usize, usize::saturating_add),
-            )
+            .saturating_add(self.retained_code_bytes)
     }
 
     pub(super) fn directory_ptr(&self) -> u32 {
@@ -137,6 +138,7 @@ impl CodeCache {
         slot.checked_sub(1)
             .and_then(|index| self.units.get(index as usize))
             .and_then(Option::as_ref)
+            .map(|unit| &unit.code)
     }
 
     pub(super) fn take_victim(&mut self) -> u32 {
@@ -156,14 +158,14 @@ impl CodeCache {
         }
         let mut revoked = false;
         for index in 0..self.units.len() {
-            let Some(code) = self.units[index].as_ref() else {
+            let Some(unit) = self.units[index].as_ref() else {
                 continue;
             };
             #[cfg(test)]
             {
                 self.source_checks += 1;
             }
-            if !code.is_current(memory) {
+            if !unit.code.is_current(memory) {
                 if !revoked {
                     self.directory.fill([0; 2]);
                     revoked = true;
@@ -238,7 +240,11 @@ impl CodeCache {
             .extend(code.entries.iter().copied().map(|pc| [pc, slot]));
         self.entries.sort_unstable();
         self.entries.dedup_by_key(|entry| entry[0]);
-        self.units.push(Some(code));
+        self.units.push(Some(RetainedUnit {
+            code,
+            charge: incoming,
+        }));
+        self.retained_code_bytes += incoming;
         self.rebuild_directory()?;
         Ok(slot)
     }
@@ -247,14 +253,15 @@ impl CodeCache {
         let slot = index as u32 + 1;
         self.entries.retain(|entry| entry[1] != slot);
         self.victims.push(slot);
+        self.retained_code_bytes -= self.units[index].as_ref().unwrap().charge;
         self.units[index] = None;
-        for (index, code) in self
+        for (index, unit) in self
             .units
             .iter()
             .enumerate()
             .filter_map(|(index, code)| code.as_ref().map(|code| (index, code)))
         {
-            for &pc in &code.entries {
+            for &pc in &unit.code.entries {
                 if let Err(at) = self.entries.binary_search_by_key(&pc, |entry| entry[0]) {
                     self.entries.insert(at, [pc, index as u32 + 1]);
                 }
@@ -322,6 +329,68 @@ mod tests {
 
     fn unit(memory: &AddressSpace, pc: u32) -> CompiledUnit {
         compile(memory, GuestAddress(pc), 1).unwrap()
+    }
+
+    fn recomputed_bytes(cache: &CodeCache) -> usize {
+        let code = cache
+            .units
+            .iter()
+            .flatten()
+            .map(|unit| {
+                let code = &unit.code;
+                code.wasm.capacity()
+                    + code.entries.capacity() * size_of::<u32>()
+                    + code.sources.capacity() * size_of::<CodeSnapshot>()
+                    + code
+                        .sources
+                        .iter()
+                        .map(|source| source.versions.len() * size_of::<PageVersion>())
+                        .sum::<usize>()
+            })
+            .sum::<usize>();
+        code + cache.units.capacity() * size_of::<Option<RetainedUnit>>()
+            + cache.entries.capacity() * size_of::<[u32; 2]>()
+            + cache.directory.capacity() * size_of::<[u32; 2]>()
+            + cache.victims.capacity() * size_of::<u32>()
+            + cache.dispatcher.capacity()
+    }
+
+    #[test]
+    fn retained_charge_matches_allocations_after_admission_removal_and_compaction() {
+        let mut memory = fixture();
+        let mut cache = CodeCache::new().unwrap();
+        assert_eq!(cache.charged_bytes(), recomputed_bytes(&cache));
+        let mut first = unit(&memory, 0x1000);
+        first.wasm.reserve_exact(73);
+        first.entries.reserve_exact(11);
+        first.sources.reserve_exact(9);
+        let first = cache.install(first, &memory).unwrap();
+        assert_eq!(cache.charged_bytes(), recomputed_bytes(&cache));
+        let second = cache.install(unit(&memory, 0x1001), &memory).unwrap();
+        assert_eq!(cache.charged_bytes(), recomputed_bytes(&cache));
+        assert!(cache.evict_oldest().unwrap());
+        assert!(cache.selected(first).is_none());
+        assert!(cache.selected(second).is_some());
+        assert_eq!(cache.charged_bytes(), recomputed_bytes(&cache));
+        assert_eq!(cache.take_victim(), first);
+        assert_eq!(cache.charged_bytes(), recomputed_bytes(&cache));
+        memory.write(GuestAddress(0x1001), &[0xc3]).unwrap();
+        cache.refresh(&memory).unwrap();
+        assert!(cache.selected(second).is_none());
+        assert_eq!(cache.charged_bytes(), recomputed_bytes(&cache));
+        assert_eq!(cache.take_victim(), second);
+        assert_eq!(cache.take_victim(), 0);
+        cache.entries.reserve_exact(512);
+        cache.directory.reserve_exact(512);
+        cache.victims.reserve_exact(64);
+        assert_eq!(cache.charged_bytes(), recomputed_bytes(&cache));
+        let spare = cache.entries.capacity() + cache.directory.capacity();
+        cache.limit = cache.charged_bytes();
+        let third = cache.install(unit(&memory, 0x1002), &memory).unwrap();
+        assert!(third > second);
+        assert!(cache.entries.capacity() + cache.directory.capacity() < spare);
+        assert_eq!(cache.charged_bytes(), recomputed_bytes(&cache));
+        assert!(cache.charged_bytes() <= cache.limit);
     }
 
     #[test]
@@ -417,7 +486,7 @@ mod tests {
             cache.charged_bytes(),
             retained
                 + cache.dispatcher.capacity()
-                + cache.units.capacity() * size_of::<Option<CompiledUnit>>()
+                + cache.units.capacity() * size_of::<Option<RetainedUnit>>()
                 + cache.entries.capacity() * size_of::<[u32; 2]>()
                 + cache.directory.capacity() * size_of::<[u32; 2]>()
                 + cache.victims.capacity() * size_of::<u32>()
