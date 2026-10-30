@@ -152,6 +152,8 @@ pub fn compile_with_gates(
 }
 
 #[cfg(test)]
+mod multiply_tests;
+#[cfg(test)]
 mod string_tests;
 #[cfg(test)]
 mod tests;

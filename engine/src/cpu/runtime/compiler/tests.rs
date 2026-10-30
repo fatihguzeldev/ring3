@@ -136,18 +136,37 @@ fn independent_generated_wasm_executes_integer_calls_and_precise_faults() {
         fs::write(scratch.join(format!("{name}.wasm")), &unit.wasm).unwrap();
     }
     for condition in 0..16 {
-        memory.write(GuestAddress(0x1000), &[0x0f, 0x90 + condition, 0xc0]).unwrap();
+        memory
+            .write(GuestAddress(0x1000), &[0x0f, 0x90 + condition, 0xc0])
+            .unwrap();
         let unit = compile(&memory, GuestAddress(0x1000), 1).unwrap();
         fs::write(scratch.join(format!("setcc{condition}.wasm")), &unit.wasm).unwrap();
     }
-    for (name, code) in [("setcc-memory", &[0x0f, 0x94, 0x03][..]), ("cmov32", &[0x0f, 0x44, 0xc2][..]), ("cmov16", &[0x66, 0x0f, 0x44, 0xc2][..]), ("cmov-memory32", &[0x0f, 0x44, 0x03][..]), ("cmov-memory16", &[0x66, 0x0f, 0x44, 0x03][..])] {
+    for (name, code) in [
+        ("setcc-memory", &[0x0f, 0x94, 0x03][..]),
+        ("cmov32", &[0x0f, 0x44, 0xc2][..]),
+        ("cmov16", &[0x66, 0x0f, 0x44, 0xc2][..]),
+        ("cmov-memory32", &[0x0f, 0x44, 0x03][..]),
+        ("cmov-memory16", &[0x66, 0x0f, 0x44, 0x03][..]),
+    ] {
         memory.write(GuestAddress(0x1000), code).unwrap();
         let unit = compile(&memory, GuestAddress(0x1000), 1).unwrap();
         fs::write(scratch.join(format!("{name}.wasm")), &unit.wasm).unwrap();
     }
     for (bits, prefix) in [(8, &[][..]), (16, &[0x66][..])] {
-        for (name, opcode) in [("add", 0x00), ("adc", 0x10), ("sub", 0x28), ("sbb", 0x18), ("cmp", 0x38), ("test", 0x84), ("and", 0x20), ("or", 0x08), ("xor", 0x30)] {
-            let mut code = prefix.to_vec(); code.extend([opcode + u8::from(bits == 16), 0xd0]);
+        for (name, opcode) in [
+            ("add", 0x00),
+            ("adc", 0x10),
+            ("sub", 0x28),
+            ("sbb", 0x18),
+            ("cmp", 0x38),
+            ("test", 0x84),
+            ("and", 0x20),
+            ("or", 0x08),
+            ("xor", 0x30),
+        ] {
+            let mut code = prefix.to_vec();
+            code.extend([opcode + u8::from(bits == 16), 0xd0]);
             memory.write(GuestAddress(0x1000), &code).unwrap();
             let unit = compile(&memory, GuestAddress(0x1000), 1).unwrap();
             fs::write(scratch.join(format!("flags{bits}-{name}.wasm")), &unit.wasm).unwrap();
@@ -156,13 +175,28 @@ fn independent_generated_wasm_executes_integer_calls_and_precise_faults() {
     for (bits, prefix) in [(8, &[][..]), (16, &[0x66][..]), (32, &[][..])] {
         for (name, suffix) in [("inc", 0xc0), ("dec", 0xc8), ("neg", 0xd8), ("not", 0xd0)] {
             let mut code = prefix.to_vec();
-            code.extend([if matches!(name, "inc" | "dec") { if bits == 8 { 0xfe } else { 0xff } } else if bits == 8 { 0xf6 } else { 0xf7 }, suffix]);
+            code.extend([
+                if matches!(name, "inc" | "dec") {
+                    if bits == 8 { 0xfe } else { 0xff }
+                } else if bits == 8 {
+                    0xf6
+                } else {
+                    0xf7
+                },
+                suffix,
+            ]);
             memory.write(GuestAddress(0x1000), &code).unwrap();
             let unit = compile(&memory, GuestAddress(0x1000), 1).unwrap();
             fs::write(scratch.join(format!("unary{bits}-{name}.wasm")), &unit.wasm).unwrap();
         }
     }
-    for (name, code) in [("narrow-read8", &[0x02, 0x03][..]), ("narrow-rmw8", &[0x00, 0x13][..]), ("narrow-read16", &[0x66, 0x03, 0x03][..]), ("narrow-rmw16", &[0x66, 0x01, 0x13][..]), ("narrow-high8", &[0x00, 0xe6][..])] {
+    for (name, code) in [
+        ("narrow-read8", &[0x02, 0x03][..]),
+        ("narrow-rmw8", &[0x00, 0x13][..]),
+        ("narrow-read16", &[0x66, 0x03, 0x03][..]),
+        ("narrow-rmw16", &[0x66, 0x01, 0x13][..]),
+        ("narrow-high8", &[0x00, 0xe6][..]),
+    ] {
         memory.write(GuestAddress(0x1000), code).unwrap();
         let unit = compile(&memory, GuestAddress(0x1000), 1).unwrap();
         fs::write(scratch.join(format!("{name}.wasm")), &unit.wasm).unwrap();
@@ -206,11 +240,24 @@ fn independent_generated_wasm_executes_integer_calls_and_precise_faults() {
         fs::write(scratch.join(format!("{name}.wasm")), &unit.wasm).unwrap();
     }
     for bits in [16, 32] {
-        let immediate = if bits == 16 { &[0x81, 0x80][..] } else { &[0x7f, 0, 0, 0x80][..] };
-        for (name, opcode) in [("rr", &[0x0f, 0xaf, 0xc2][..]), ("rm", &[0x0f, 0xaf, 0x03][..]), ("ri8", &[0x6b, 0xc2, 0xfd][..]), ("mi8", &[0x6b, 0x03, 0xfd][..]), ("ri", &[0x69, 0xc2][..]), ("mi", &[0x69, 0x03][..])] {
+        let immediate = if bits == 16 {
+            &[0x81, 0x80][..]
+        } else {
+            &[0x7f, 0, 0, 0x80][..]
+        };
+        for (name, opcode) in [
+            ("rr", &[0x0f, 0xaf, 0xc2][..]),
+            ("rm", &[0x0f, 0xaf, 0x03][..]),
+            ("ri8", &[0x6b, 0xc2, 0xfd][..]),
+            ("mi8", &[0x6b, 0x03, 0xfd][..]),
+            ("ri", &[0x69, 0xc2][..]),
+            ("mi", &[0x69, 0x03][..]),
+        ] {
             let mut code = if bits == 16 { vec![0x66] } else { Vec::new() };
             code.extend_from_slice(opcode);
-            if name == "ri" || name == "mi" { code.extend_from_slice(immediate); }
+            if name == "ri" || name == "mi" {
+                code.extend_from_slice(immediate);
+            }
             memory.write(GuestAddress(0x1000), &code).unwrap();
             let unit = compile(&memory, GuestAddress(0x1000), 1).unwrap();
             fs::write(scratch.join(format!("imul{bits}-{name}.wasm")), &unit.wasm).unwrap();
