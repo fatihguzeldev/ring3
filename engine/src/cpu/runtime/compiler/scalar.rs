@@ -7,6 +7,7 @@ use wasm_encoder::{
 
 mod bit;
 mod exchange;
+mod flags;
 mod memory;
 mod multiply;
 mod narrow;
@@ -45,6 +46,7 @@ pub(super) fn supports(operation: &Operation) -> bool {
         || string::supports(operation)
         || bit::supports(operation)
         || exchange::supports(operation)
+        || flags::supports(operation)
         || matches!(
             operation,
             Operation::Nop
@@ -887,6 +889,7 @@ impl Output {
                     && !string::emit(self, operation)
                     && !bit::emit(self, operation)
                     && !exchange::emit(self, operation)
+                    && !flags::emit(self, operation)
                 {
                     return false;
                 }

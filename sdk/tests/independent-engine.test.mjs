@@ -657,6 +657,17 @@ test('actual reached XCHG AL AH swaps only the aliased bytes and preserves FLAGS
     [0xa1b2d4c3, 0x33221100, 0xd5e6789a, 0x12345678, 0x2f00, 0x55443322, 0x66554433, 0x77665544]);
 });
 
+test('actual reached SAHF ignores reserved AH bits and preserves overflow direction and every register', {skip}, () => {
+  const registers = [0xa1b22bd4, 0x33221100, 0xd5e6789a, 0x12345678, 0x2f00, 0x55443322, 0x66554433, 0x77665544];
+  arithmetic([0x9e], registers, registers, 0xc03);
+});
+
+test('actual LAHF encodes only status flags into AH and preserves FLAGS AL and the high word', {skip}, () => {
+  arithmetic([0x9f],
+    [0xa1b22bc3, 0x33221100, 0xd5e6789a, 0x12345678, 0x2f00, 0x55443322, 0x66554433, 0x77665544],
+    [0xa1b2d7c3, 0x33221100, 0xd5e6789a, 0x12345678, 0x2f00, 0x55443322, 0x66554433, 0x77665544]);
+});
+
 for (const readOnly of [false, true]) test(`actual XCHG memory EAX ${readOnly ? 'fault preserves the aliased address and complete state' : 'uses the address before exchanging EAX'}`, {skip}, () => {
   const registers = [0x2000, 0x11223344, 0x22334455, 0x33445566, 0x2f00, 0x44556677, 0x55667788, 0x66778899];
   const f = fixture([0x87, 0x00], {registers, data: dword(0x12345678).map((value, index) => [0x2000 + index, value]), execution: {budget: 1}});

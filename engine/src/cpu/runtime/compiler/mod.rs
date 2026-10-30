@@ -156,6 +156,8 @@ mod bit_tests;
 #[cfg(test)]
 mod exchange_tests;
 #[cfg(test)]
+mod flags_tests;
+#[cfg(test)]
 mod memory_tests;
 #[cfg(test)]
 mod multiply_tests;
