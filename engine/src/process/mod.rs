@@ -6,6 +6,9 @@ mod clock;
 #[path = "wasm/core/numeric.rs"]
 mod core_numeric_tests;
 #[cfg(test)]
+#[path = "wasm/independent/exit.rs"]
+mod independent_exit_tests;
+#[cfg(test)]
 #[path = "wasm/independent/cache.rs"]
 mod independent_cache_tests;
 mod cpu;
