@@ -86,6 +86,62 @@ async function pipelineFixture(t) {
   return {...f,renderer,targets,run:(state,kind='triangle-list',kinds=Array(8).fill(null),patch=false,output=targets)=>renderer.gpuPipeline(state,kind,output,kinds,patch)};
 }
 
+test('graphics timings count actual pipeline misses rather than repeated shader source construction',async t=>{
+  const {host,renderer,run}=await pipelineFixture(t);let now=0;
+  t.mock.method(performance,'now',()=>now);renderer.pipelineInputMemoEnabled=false;
+  host.device.createShaderModule=()=>({async getCompilationInfo(){now+=3;return {messages:[]};}});
+  host.device.createRenderPipelineAsync=async()=>{now+=11;return {getBindGroupLayout(){return {};}};};
+  const state=pipelineState();await run(state);await run(state);
+  const first=host.snapshot();
+  assert.equal(renderer.pipelineBuilds,2);assert.equal(first.pipelineCacheMisses,1);
+  assert.equal(first.pipelinesCreated,1);assert.equal(first.shaderWaitMs,3);assert.equal(first.pipelineWaitMs,11);
+  state.render[22]=2;await run(state);
+  const second=host.snapshot();
+  assert.equal(second.pipelineCacheMisses,2);assert.equal(second.pipelinesCreated,2);
+  assert.equal(second.shaderWaitMs,6);assert.equal(second.pipelineWaitMs,22);
+  assert.equal(second.pendingPipelineMs,null);
+});
+
+test('failed pipeline creation retains wait time and clears the pending marker without masking its error',async t=>{
+  const {host,run}=await pipelineFixture(t);let now=0;t.mock.method(performance,'now',()=>now);
+  const failure=Error('driver compile failed');
+  host.device.createRenderPipelineAsync=async()=>{now+=9;throw failure;};
+  await assert.rejects(run(pipelineState()),error=>error===failure);
+  const snapshot=host.snapshot();assert.equal(snapshot.pipelineCacheMisses,1);assert.equal(snapshot.pipelinesCreated,0);
+  assert.equal(snapshot.pipelineWaitMs,9);assert.equal(snapshot.pendingPipelineMs,null);
+});
+
+test('graphics timings separate observed fence and validation waits while retaining inclusive batch elapsed',async t=>{
+  const {host,fence}=await graphicsFixture(t);let now=0;t.mock.method(performance,'now',()=>now);
+  host.device.popErrorScope=async()=>{now+=5;return null;};
+  const consuming=host.consume(packet([[1,definition],[9,clear],[11,present]]));await turn();
+  now=25;assert.equal(host.snapshot().pendingBatchMs,25);assert.equal(host.snapshot().pendingPresents,1);
+  fence.resolve();await consuming;
+  const result=host.snapshot();
+  assert.equal(result.batches,1);assert.equal(result.consumeMs,30);
+  assert.equal(result.presentFenceWaitMs,25);assert.equal(result.validationWaitMs,5);
+  assert.equal(result.pendingBatchMs,null);assert.equal(result.pendingPresents,0);
+  assert.match(result.semantics,/inclusive.*not.*GPU/i);
+});
+
+test('browser status includes graphics timings when recording is off',()=>{
+  const snapshot={pipelineCacheMisses:5};let status;
+  const session=Object.assign(Object.create(Session.prototype),{
+    input:{},graphics:{snapshot:()=>snapshot},onStatus:value=>{status=value;},
+  });
+  session.status('running','running');assert.equal(status.graphicsTimings,snapshot);
+});
+
+test('overlapping device batches retain independent elapsed and oldest pending ages',async t=>{
+  const {host,fence}=await graphicsFixture(t);let now=0;t.mock.method(performance,'now',()=>now);
+  const first=host.consume(packet([[1,definition],[11,present]]));await turn();now=10;
+  const bytes=packet([[1,definition],[11,present]]);new DataView(bytes).setBigUint64(16,2n,true);
+  const second=host.consume(bytes);await turn();now=30;
+  assert.equal(host.snapshot().pendingBatchMs,30);fence.resolve();await Promise.all([first,second]);
+  const result=host.snapshot();assert.equal(result.consumeMs,50);assert.equal(result.batches,2);
+  assert.equal(result.pendingBatchMs,null);
+});
+
 test('normal render passes reuse attachments across state snapshots and close before barriers',async t=>{
   const {host,events}=await graphicsFixture(t);await host.consume(packet([[1,definition]]));
   const renderer=host.sessions.get(1n),state=pipelineState(),calls=[];let active=null,next=0;

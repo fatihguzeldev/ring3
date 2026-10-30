@@ -60,6 +60,7 @@ export class Session {
     this.capture?.observer.event("status", { state, message });
     this.onStatus({ state, message, ...extra, browserInput: this.input.snapshot?.(),
       presentation: this.frames?.snapshot(),
+      graphicsTimings: this.graphics?.snapshot?.(),
     });
   }
   pointerViewport() {

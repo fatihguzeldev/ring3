@@ -13,6 +13,7 @@ const compare=[null,'never','less','equal','less-equal','greater','not-equal','g
 const blendFactors={1:'zero',2:'one',3:'src',4:'one-minus-src',5:'src-alpha',6:'one-minus-src-alpha',7:'dst-alpha',8:'one-minus-dst-alpha',9:'dst',10:'one-minus-dst',11:'src-alpha-saturated',14:'constant',15:'one-minus-constant'};
 const stencil=[null,'keep','zero','replace','increment-clamp','decrement-clamp','invert','increment-wrap','decrement-wrap'];
 const topology={1:'point-list',2:'line-list',3:'line-strip',4:'triangle-list',5:'triangle-strip',6:'triangle-list'};
+function pendingAge(pending,now){let oldest=Infinity;for(const row of pending)oldest=Math.min(oldest,row.at);return oldest===Infinity?null:now-oldest;}
 function indexWords(source,at,elements,step) {
   const view=new DataView(source.buffer,source.byteOffset+at,elements*step),indices=new Uint32Array(elements);
   for(let i=0;i<elements;i++)indices[i]=step===2?view.getUint16(i*step,true):view.getUint32(i*step,true);
@@ -207,7 +208,11 @@ class DeviceRenderer {
     const code=buildShader(p,vertex,pixel,textureKinds,{patch});
     const key=JSON.stringify([code,kind,colorFormat,depthFormat,rs[7],rs[14],rs[19],rs[20],rs[22],rs[23],rs[27],rs.slice(52,60),rs[168],rs[171],rs[47]]);
     if(this.pipelines.has(key)){const cached=this.pipelines.get(key);this.pipelines.delete(key);this.pipelines.set(key,cached);this.rememberPipelineInput(input,key);return cached;}
-    const module=await checkedShader(this.device,code,'D3D8 vertex/pixel IR');
+    const timing=this.host.timings,pending={at:performance.now()};timing.pipelineCacheMisses++;timing.pendingPipelines.add(pending);
+    try {
+    let module;const shaderStart=performance.now();
+    try{module=await checkedShader(this.device,code,'D3D8 vertex/pixel IR');}
+    finally{timing.shaderWaitMs+=performance.now()-shaderStart;}
     const target={format:colorFormat,writeMask:rs[168]&15};
     if(rs[27]){
       let src=rs[19],dst=rs[20];if(src===12){src=5;dst=6;}if(src===13){src=6;dst=5;}
@@ -225,10 +230,13 @@ class DeviceRenderer {
       descriptor.depthStencil={format:depthFormat,depthWriteEnabled:Boolean(rs[7]&&rs[14]),depthCompare:rs[7]?compare[rs[23]]:'always',depthBias:rs[47]|0};
       if(rs[52]){require(depthFormat.includes('stencil'),'stencil enabled without stencil surface');const face={compare:compare[rs[56]],failOp:stencil[rs[53]],depthFailOp:stencil[rs[54]],passOp:stencil[rs[55]]};descriptor.depthStencil.stencilFront=face;descriptor.depthStencil.stencilBack=face;descriptor.depthStencil.stencilReadMask=rs[58];descriptor.depthStencil.stencilWriteMask=rs[59];}
     }
-    const gpu=await this.device.createRenderPipelineAsync(descriptor);
+    let gpu;const pipelineStart=performance.now();
+    try{gpu=await this.device.createRenderPipelineAsync(descriptor);timing.pipelinesCreated++;}
+    finally{timing.pipelineWaitMs+=performance.now()-pipelineStart;}
     this.pipelines.set(key,gpu);while(this.pipelines.size>128)this.pipelines.delete(this.pipelines.keys().next().value);
     this.rememberPipelineInput(input,key);
     return gpu;
+    } finally {timing.pendingPipelines.delete(pending);}
   }
   async draw(r) {
     const id=r.u64(),primitive=r.u32(),count=r.u32(),targets=r.targets(),b=bindings(r),mode=r.u32();let data={};
@@ -346,10 +354,20 @@ export async function createGraphicsHost(canvas,{onDiagnostic=()=>{}}={}) {
   const device=await adapter.requestDevice({requiredLimits:{maxStorageBuffersPerShaderStage:Math.min(8,adapter.limits.maxStorageBuffersPerShaderStage),maxStorageBufferBindingSize:Math.min(128*1024*1024,adapter.limits.maxStorageBufferBindingSize)}});
   const context=canvas.getContext('webgpu');require(context,'WebGPU canvas unavailable');const format=navigator.gpu.getPreferredCanvasFormat();
   const closedEpochs=new ClosedEpochs(),pendingPresents=new Set();let failed=null,closed=false,submissionAck=false,consuming=0,canvasConfigured=false;
+  const timings={batches:0,consumeMs:0,validationWaitMs:0,pipelineCacheMisses:0,pipelinesCreated:0,
+    shaderWaitMs:0,pipelineWaitMs:0,presentFences:0,presentFenceWaitMs:0,pendingPipelines:new Set()};
+  const pendingBatches=new Set();
   const fail=error=>{if(closed||failed)return;failed=error;onDiagnostic({type:'error',message:error.message});};
   device.lost.then(info=>fail(new Error(`WebGPU device lost: ${info.message}`)));
   device.addEventListener('uncapturederror',event=>fail(event.error));
-  const host={device,canvas,context,format,onDiagnostic,sessions:new Map(),
+  const host={device,canvas,context,format,onDiagnostic,sessions:new Map(),timings,
+    snapshot(){
+      const {pendingPipelines,...totals}=timings,now=performance.now();
+      return {semantics:'cumulative inclusive host elapsed; child waits overlap consumeMs and are not pure GPU execution time; pipeline counters and waits cover draw pipelines, other compilation remains in consumeMs',...totals,
+        pendingBatchMs:pendingAge(pendingBatches,now),
+        pendingPipelineMs:pendingAge(pendingPipelines,now),
+        pendingPresents:pendingPresents.size,cachedPipelines:[...host.sessions.values()].reduce((sum,renderer)=>sum+renderer.pipelines.size,0)};
+    },
     get submissionAck(){return submissionAck;},
     configureSubmissionAck(enabled){
       require(typeof enabled==='boolean'&&!closed&&!failed,'submission ACK mode');
@@ -372,15 +390,30 @@ export async function createGraphicsHost(canvas,{onDiagnostic=()=>{}}={}) {
     let completion;
     try {
       device.queue.submit([commands]);
+      const fenceStart=performance.now();
       completion=device.queue.onSubmittedWorkDone().then(()=>{
+        timings.presentFences++;timings.presentFenceWaitMs+=performance.now()-fenceStart;
         require(!failed,failed?.message);
         if(!closed)completed?.(frameProbe?{gpu_submit:submit,gpu_complete:probeStamp()}:undefined);
-      }).finally(()=>buffer.destroy());
+      },error=>{timings.presentFences++;timings.presentFenceWaitMs+=performance.now()-fenceStart;throw error;}).finally(()=>buffer.destroy());
     } catch(error){buffer.destroy();throw error;}
     pendingPresents.add(completion);
     void completion.then(()=>pendingPresents.delete(completion),error=>{pendingPresents.delete(completion);fail(error);});
     if(!submissionAck||frameProbe)await completion;
-  },async consume(packet,frameProbe){require(!closed,'graphics host closed');require(!failed,failed?.message);const bytes=new Uint8Array(packet);require(bytes.length>=64,'packet header');const epoch=new DataView(bytes.buffer,bytes.byteOffset,bytes.byteLength).getBigUint64(16,true);let session=host.sessions.get(epoch);if(!session){require(!closedEpochs.has(epoch),'retired device epoch');require(host.sessions.size<64,'device count limit');session=new DeviceRenderer(host,epoch);host.sessions.set(epoch,session);}device.pushErrorScope('validation');let scope=true;consuming++;try{const result=await session.accept(packet,frameProbe),error=await device.popErrorScope();scope=false;if(error)throw error;if(session.removed){session.close();host.sessions.delete(epoch);closedEpochs.add(epoch);}return result;}catch(error){if(scope)await device.popErrorScope().catch(()=>{});fail(error);throw error;}finally{consuming--;}
+  },async consume(packet,frameProbe){
+    require(!closed,'graphics host closed');require(!failed,failed?.message);
+    const bytes=new Uint8Array(packet);require(bytes.length>=64,'packet header');
+    const epoch=new DataView(bytes.buffer,bytes.byteOffset,bytes.byteLength).getBigUint64(16,true);
+    let session=host.sessions.get(epoch);
+    if(!session){require(!closedEpochs.has(epoch),'retired device epoch');require(host.sessions.size<64,'device count limit');session=new DeviceRenderer(host,epoch);host.sessions.set(epoch,session);}
+    device.pushErrorScope('validation');let scope=true;consuming++;const pending={at:performance.now()};pendingBatches.add(pending);
+    try{
+      const result=await session.accept(packet,frameProbe);let error;const validationStart=performance.now();
+      try{error=await device.popErrorScope();}finally{timings.validationWaitMs+=performance.now()-validationStart;}
+      scope=false;if(error)throw error;
+      if(session.removed){session.close();host.sessions.delete(epoch);closedEpochs.add(epoch);}return result;
+    }catch(error){if(scope)await device.popErrorScope().catch(()=>{});fail(error);throw error;}
+    finally{timings.batches++;timings.consumeMs+=performance.now()-pending.at;pendingBatches.delete(pending);consuming--;}
   },async drain(){require(!closed,'graphics host closed');try{await device.queue.onSubmittedWorkDone();}catch(error){fail(error);}while(pendingPresents.size)await Promise.allSettled([...pendingPresents]);require(!failed,failed?.message);},close(){if(closed)return;closed=true;for(const s of host.sessions.values())s.close();host.sessions.clear();closedEpochs.clear();context.unconfigure();device.destroy();}};
   onDiagnostic({type:'adapter',features:[...adapter.features],limits:{maxTextureDimension2D:device.limits.maxTextureDimension2D,maxStorageBufferBindingSize:device.limits.maxStorageBufferBindingSize}});return host;
 }
