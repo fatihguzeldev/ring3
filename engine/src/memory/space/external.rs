@@ -283,26 +283,7 @@ impl AddressSpace {
     }
 
     pub(crate) fn publish_external_dirty(&mut self, slots: &[u32]) -> Result<(), MemoryError> {
-        if slots.is_empty() {
-            return Ok(());
-        }
-        if slots.iter().any(|&slot| {
-            self.references
-                .get(slot as usize)
-                .is_none_or(|&count| count == 0)
-        }) {
-            return Err(MemoryError::InvalidRange);
-        }
-        let version = self.advance_version()?;
-        for &slot in slots {
-            self.versions[slot as usize].content = version;
-            if self.executable_views[slot as usize] != 0 {
-                self.code_validation_version = version;
-                self.code_source_version = version;
-                self.external_executable_epoch = version;
-            }
-        }
-        Ok(())
+        self.publish_cpu_dirty(slots)
     }
 
     pub(crate) fn external_write_fault(&mut self, address: u32) -> Result<(), MemoryError> {

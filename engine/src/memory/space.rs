@@ -12,6 +12,7 @@ mod guard;
 mod incarnations;
 mod mapping;
 mod paging;
+mod runtime;
 mod service;
 mod windows;
 
@@ -21,6 +22,7 @@ pub(crate) use core::{CoreMemoryView32, CoreWriteOutcome};
 pub(crate) use external::{ExternalCodePatch, ExternalCodeWrite};
 pub(crate) use guard::GuardPage32;
 pub(crate) use mapping::PageInitialization;
+pub(crate) use runtime::DirtyPages;
 pub(crate) use windows::PrivatePageChange32;
 
 use super::address::{ADDRESS_LIMIT, GUEST_PAGES};

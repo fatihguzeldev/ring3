@@ -11,6 +11,7 @@ pub use code::CodeSnapshot;
 pub(crate) use code::PageVersion;
 pub use space::AddressSpace;
 pub(crate) use space::CoreWriteOutcome;
+pub(crate) use space::DirtyPages;
 #[cfg(feature = "external-cpu")]
 pub(crate) use space::{ExternalCodePatch, ExternalCodeWrite};
 pub(crate) use space::{GuardPage32, PageInitialization, PrivatePageChange32, SharedPages};
