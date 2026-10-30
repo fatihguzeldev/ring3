@@ -5,6 +5,8 @@ import {fileURLToPath} from 'node:url';
 import {readEngine} from '../../engine/tests/support/wasm/engine.mjs';
 import {Engine, KEY, record, view} from '../runtime/engine.js';
 import {IndependentCodeCache} from '../runtime/independent.js';
+import {builder} from '../../engine/tests/support/pe32/image.mjs';
+import {configureFiles} from '../../engine/tests/windows/files/fixtures/runtime/setup.mjs';
 
 const explicitPath = process.env.ENGINE_WASM ?? process.env.RING3_ENGINE_WASM;
 const path = explicitPath ?? fileURLToPath(new URL('../../target/wasm32-unknown-unknown/release/ring3_engine.wasm', import.meta.url));
@@ -17,13 +19,29 @@ if (explicitPath || existsSync(path)) {
 } else skip = 'build the independent engine or set ENGINE_WASM';
 
 function fixture(code = [0xeb, 0xfe], {pc = 0x1000, execution, data = [], dataPage = 0x2000,
-  registers = [0, 0, 0, 0, 0x2f00, 0, 0, 0], fpControl, fpStatus} = {}) {
+  registers = [0, 0, 0, 0, 0x2f00, 0, 0, 0], fpControl, fpStatus,
+  windowsMappings = false, physicalPages = 16, independent = true} = {}) {
   const instance = new WebAssembly.Instance(artifact.module, {ring3_observability: {now_ns: () => 0n}});
   const api = Object.fromEntries(Object.entries(instance.exports)
     .filter(([name]) => name.startsWith('ring3_abi_v1_')).map(([name, value]) => [name.slice(13), value]));
   const engine = new Engine(api, instance.exports.memory, artifact.sha256);
-  engine.ok('open', 16, ...KEY);
+  engine.ok('open', physicalPages, ...KEY);
   engine.base = api.arena_ptr() >>> 0;
+  if (windowsMappings) {
+    engine.ok('configure_cpu_clock', 1_000_000_000, 0, 0, 0);
+    engine.ok('configure_synchronization', 128, 256, 256, 16);
+    engine.ok('configure_module_limits', 8, 0x100000, 16, 65536, 0x100000);
+    engine.ok('register_kernel32_module', 0x70000000);
+    configureFiles({api, request: bytes => engine.request(bytes), take: length => Buffer.from(engine.take(length))});
+    const image = builder([['kernel32.dll', ['CreateFileMappingA', 'MapViewOfFile']]]).seal();
+    engine.ok('begin_module_input', image.bytes.length, engine.name('memory-fixture.exe'));
+    for (let offset = 0; offset < image.bytes.length; offset += 4096) {
+      const chunk = image.bytes.subarray(offset, offset + 4096);
+      engine.request(chunk); engine.ok('append_module_input', offset, chunk.length);
+    }
+    engine.ok('commit_module_input');
+    engine.ok('start_module_process', engine.name('memory-fixture.exe'), 0, 0x7e000000, 4, 0x7f000000);
+  }
   engine.ok('map', 0x1000, 1, 7);
   engine.request(Uint8Array.from(code)); engine.ok('upload', 0x1000, code.length);
   engine.ok('protect', 0x1000, 1, 5);
@@ -36,13 +54,14 @@ function fixture(code = [0xeb, 0xfe], {pc = 0x1000, execution, data = [], dataPa
   const arena = new DataView(engine.memory.buffer);
   if (fpControl !== undefined) arena.setUint16(engine.base + 4236 + 16, fpControl, true);
   if (fpStatus !== undefined) arena.setUint16(engine.base + 4236 + 18, fpStatus, true);
-  const cache = new IndependentCodeCache(engine, execution);
+  const cache = independent ? new IndependentCodeCache(engine, execution) : null;
   let closed = false;
-  return {engine, cache, slab: () => new DataView(engine.memory.buffer, api.cpu_context_ptr() >>> 0, 160),
+  return {engine, cache, exports: instance.exports,
+    slab: () => new DataView(engine.memory.buffer, api.cpu_context_ptr() >>> 0, 160),
     close() {
       if (closed) return;
-      assert.equal(api.core_context_ptr(), 0, 'independent execution does not create a legacy core session');
-      cache.close(); engine.ok('close'); closed = true;
+      if (independent) assert.equal(api.core_context_ptr(), 0, 'independent execution does not create a legacy core session');
+      cache?.close(); engine.ok('close'); closed = true;
     }};
 }
 
@@ -57,6 +76,217 @@ function event(engine, expectedVector, expectedPc, expectedRetired) {
   assert.equal(engine.status('take_cpu_event'), 7);
 }
 
+function memoryCalls(f) {
+  const calls = {read: 0, write: 0};
+  for (const kind of ['read', 'write']) {
+    const name = `cpu_runtime_${kind}`, native = f.engine.api[name];
+    f.engine.api[name] = (...args) => {calls[kind]++; return native(...args);};
+  }
+  return calls;
+}
+
+function sharedViews(f, protection, accesses) {
+  const {engine, cache} = f, gates = new Map();
+  cache.import(); cache.publish();
+  for (let start = 0, total = 1; start < total;) {
+    engine.ok('module_gates_page', start, 128);
+    const page = engine.resultView(4096), count = page.getUint32(24, true);
+    total = page.getUint32(16, true); assert(count > 0);
+    for (let index = 0; index < count; index++)
+      gates.set(page.getUint32(36 + index * 8, true), page.getUint32(32 + index * 8, true));
+    start += count;
+  }
+  const initial = new Uint8Array(engine.memory.buffer, engine.base, 56).slice();
+  const call = (id, args) => {
+    const gate = gates.get(id); assert(gate, 'the setup provider uses its real loaded module gate');
+    for (const [index, value] of [0x1000, ...args].entries()) engine.ok('write32', 0x2f00 + index * 4, value);
+    const data = new DataView(engine.memory.buffer);
+    data.setUint32(engine.base + 48, gate, true); data.setUint32(engine.base + 32, 0x2f00, true);
+    const exit = record('R3EX', 40), e = view(exit);
+    e.setUint16(4, 3, true); e.setUint32(16, 8, true); e.setUint32(24, id, true);
+    new Uint8Array(engine.memory.buffer, engine.base + 56, 40).set(exit);
+    engine.ok('cpu_capture_windows_call'); const token = engine.resultView(112).getUint32(16, true);
+    engine.ok('cpu_complete_windows_call', token);
+    const result = engine.get(16);
+    new Uint8Array(engine.memory.buffer, engine.base, 56).set(initial);
+    assert(result !== 0 && result !== 0xffffffff, 'the actual file-mapping provider completed setup');
+    return result;
+  };
+  const section = call(0xa0080, [0xffffffff, 0, protection, 0, 4096, 0]);
+  return accesses.map(access => call(0xa0084, [section, access, 0, 0, 4096]));
+}
+
+const dword = value => [value & 255, value >>> 8 & 255, value >>> 16 & 255, value >>> 24];
+function replaceCode(f, code) {
+  f.engine.ok('protect', 0x1000, 1, 7);
+  f.engine.request(Uint8Array.from(code)); f.engine.ok('upload', 0x1000, code.length);
+  f.engine.ok('protect', 0x1000, 1, 5);
+}
+
+test('actual COW view uses the native split and refreshes the canonical mapping before later loads', {skip}, () => {
+  const f = fixture(undefined, {windowsMappings: true, physicalPages: 1024, execution: {budget: 4}});
+  try {
+    const [shared, copy] = sharedViews(f, 4, [2, 1]);
+    f.engine.ok('write32', shared, 0x11223344);
+    replaceCode(f, [0xb8, 0x88, 0x77, 0x66, 0x55, 0xa3, ...dword(copy),
+      0x8b, 0x1d, ...dword(shared), 0x8b, 0x0d, ...dword(copy)]);
+    const calls = memoryCalls(f);
+    f.cache.import(); const selected = f.cache.select();
+    const state = f.slab(), backing = state.getUint32(84, true), length = state.getUint32(88, true) * 4096;
+    const mappings = state.getUint32(76, true), before = new Uint8Array(f.engine.memory.buffer, backing, length).slice();
+    const slot = address => new DataView(f.engine.memory.buffer).getUint32(mappings + (address >>> 12) * 4, true) - 1;
+    const originalSlot = slot(shared); assert.equal(slot(copy), originalSlot);
+    assert(new DataView(f.engine.memory.buffer).getUint32(state.getUint32(96, true) + (copy >>> 12) * 4, true) !== 0);
+    const run = f.cache.execute(selected);
+    assert.deepEqual([run.reason, run.retired, run.work, run.pc], [1, 4, 4, 0x1016]);
+    assert.deepEqual(Array.from({length: 8}, (_, index) => f.engine.get(16 + index * 4)),
+      [0x55667788, 0x55667788, 0, 0x11223344, 0x2f00, 0, 0, 0]);
+    assert.equal(f.engine.get(52), 2);
+    assert.equal(slot(shared), originalSlot); assert.notEqual(slot(copy), originalSlot);
+    const copied = new Uint8Array(4096); new DataView(copied.buffer).setUint32(0, 0x55667788, true);
+    before.set(copied, slot(copy) * 4096);
+    assert.deepEqual(new Uint8Array(f.engine.memory.buffer, backing, length), before);
+    assert(calls.write > 0, 'COW stores retain the actual canonical native split');
+  } finally {f.close();}
+});
+
+test('actual non-executable alias write commits once, exits before the next instruction and revokes stale code', {skip}, () => {
+  const f = fixture(undefined, {windowsMappings: true, physicalPages: 1024, execution: {budget: 2}});
+  try {
+    const [writable, executable] = sharedViews(f, 0x40, [2, 0x24]);
+    f.engine.request(Uint8Array.from([0xb8, 1, 0, 0, 0, 0xeb, 0xf9]));
+    f.engine.ok('upload', writable, 7);
+    replaceCode(f, [0xc7, 0x05, ...dword(writable + 1), 2, 0, 0, 0, 0x40]);
+    new DataView(f.engine.memory.buffer).setUint32(f.engine.base + 48, executable, true);
+    f.cache.import(); const old = f.cache.select();
+    assert.equal(f.cache.execute(old).reason, 1); assert.equal(f.engine.get(16), 1);
+    const calls = memoryCalls(f);
+    new DataView(f.engine.memory.buffer).setUint32(f.engine.base + 48, 0x1000, true);
+    f.cache.budget = 3; f.cache.import(); const writer = f.cache.select();
+    const state = f.slab(), backing = state.getUint32(84, true), length = state.getUint32(88, true) * 4096;
+    const all = new DataView(f.engine.memory.buffer), mappings = state.getUint32(76, true);
+    const slot = all.getUint32(mappings + (writable >>> 12) * 4, true) - 1;
+    assert.equal(all.getUint32(mappings + (executable >>> 12) * 4, true) - 1, slot);
+    const expected = new Uint8Array(f.engine.memory.buffer, backing, length).slice();
+    const run = f.cache.execute(writer);
+    assert.deepEqual([run.coreReason, run.reason, run.retired, run.work, run.pc], [6, 6, 1, 1, 0x100a]);
+    assert.deepEqual(Array.from({length: 8}, (_, index) => f.engine.get(16 + index * 4)),
+      [1, 0, 0, 0, 0x2f00, 0, 0, 0], 'the following INC was not executed');
+    assert.equal(f.engine.get(52), 2);
+    new DataView(expected.buffer).setUint32(slot * 4096 + 1, 2, true);
+    assert.deepEqual(new Uint8Array(f.engine.memory.buffer, backing, length), expected);
+    assert(calls.write > 0, 'executable aliases retain immediate native invalidation');
+    new DataView(f.engine.memory.buffer).setUint32(f.engine.base + 48, executable, true);
+    f.cache.budget = 2; f.cache.import();
+    assert.equal(f.cache.table.get(old.slot), null);
+    const replacement = f.cache.select(); assert(replacement.slot > old.slot);
+    assert.equal(f.cache.execute(replacement).reason, 1);
+    assert.deepEqual(Array.from({length: 8}, (_, index) => f.engine.get(16 + index * 4)), [2, 0, 0, 0, 0x2f00, 0, 0, 0]);
+    assert.equal(f.engine.get(52), 2);
+  } finally {f.close();}
+});
+
+test('actual ordinary load RMW and stack operations preserve complete state without native memory helpers', {skip}, () => {
+  const code = [0xa1, 0, 0x20, 0, 0, 0x01, 0x05, 4, 0x20, 0, 0, 0x50, 0x5b];
+  const f = fixture(code, {execution: {budget: 4}, data: [[0x2000, 0x78], [0x2001, 0x56], [0x2002, 0x34], [0x2003, 0x12], [0x2004, 8]]});
+  const calls = memoryCalls(f);
+  try {
+    const banks = [[4236, 352], [4612, 184]].map(([offset, length]) =>
+      new Uint8Array(f.engine.memory.buffer, f.engine.base + offset, length).slice());
+    f.cache.import();
+    const selected = f.cache.select();
+    calls.read = 0; calls.write = 0;
+    const run = f.cache.execute(selected);
+    assert.deepEqual([run.reason, run.retired, run.work, run.pc], [1, 4, 4, 0x100d]);
+    assert.deepEqual(Array.from({length: 8}, (_, index) => f.engine.get(16 + index * 4)),
+      [0x12345678, 0, 0, 0x12345678, 0x2f00, 0, 0, 0]);
+    assert.equal(f.engine.get(52), 0x12);
+    const expected = new Uint8Array(65536); expected.set(code);
+    const data = new DataView(expected.buffer);
+    data.setUint32(4096, 0x12345678, true); data.setUint32(4100, 0x12345680, true);
+    data.setUint32(4096 + 0xefc, 0x12345678, true);
+    assert.deepEqual(new Uint8Array(f.engine.memory.buffer, f.slab().getUint32(84, true), 65536), expected);
+    assert.deepEqual([[4236, 352], [4612, 184]].map(([offset, length]) =>
+      new Uint8Array(f.engine.memory.buffer, f.engine.base + offset, length)), banks);
+    assert.deepEqual(calls, {read: 0, write: 0});
+  } finally {f.close();}
+});
+
+test('actual read-only RMW preserves full state and RAM while retaining the native permission fault', {skip}, () => {
+  const code = [0x01, 0x05, 0, 0x20, 0, 0];
+  const registers = [5, 0, 0, 0, 0x2f00, 0, 0, 0];
+  const f = fixture(code, {registers, data: [[0x2000, 7]], execution: {budget: 1}});
+  const calls = memoryCalls(f);
+  try {
+    f.engine.ok('protect', 0x2000, 1, 1);
+    f.cache.import(); const selected = f.cache.select();
+    const run = f.cache.execute(selected);
+    assert.deepEqual([run.reason, run.retired, run.work, run.pc], [5, 0, 0, 0x1000]);
+    assert.deepEqual(registers.map((_, index) => f.engine.get(16 + index * 4)), registers);
+    assert.equal(f.engine.get(52), 2);
+    assert.deepEqual([f.engine.get(80), f.engine.get(84), f.engine.get(88), f.engine.get(92)], [2, 0x2000, 2, 4]);
+    const expected = new Uint8Array(65536); expected.set(code); expected[4096] = 7;
+    assert.deepEqual(new Uint8Array(f.engine.memory.buffer, f.slab().getUint32(84, true), 65536), expected);
+    assert(calls.read > 0, 'read-modify-write permissions are checked by the real native slow path');
+    assert.equal(calls.write, 0);
+    event(f.engine, 0xffffffff, 0x1000, 0);
+  } finally {f.close();}
+});
+
+test('actual canonical version exhaustion rejects a fast store before RAM or retirement changes', {skip}, () => {
+  const registers = [0x11223344, 0, 0, 0, 0x2f00, 0, 0, 0];
+  const f = fixture([0xa3, 0, 0x20, 0, 0], {registers, execution: {budget: 1}});
+  const calls = memoryCalls(f);
+  let versionPointer = 0, savedVersion;
+  try {
+    f.cache.import(); const selected = f.cache.select();
+    const state = f.slab();
+    versionPointer = state.getUint32(156, true);
+    assert(versionPointer > 0 && versionPointer % 8 === 0, 'the actual CPU descriptor exposes canonical version authority');
+    const memory = new DataView(f.engine.memory.buffer);
+    savedVersion = memory.getBigUint64(versionPointer, true);
+    const backing = state.getUint32(84, true), before = new Uint8Array(f.engine.memory.buffer, backing, 65536).slice();
+    memory.setBigUint64(versionPointer, 0xffffffffffffffffn, true);
+    assert.throws(() => f.cache.execute(selected), /independent CPU stop 8/);
+    assert.deepEqual(new Uint8Array(f.engine.memory.buffer, backing, 65536), before);
+    assert.deepEqual(registers.map((_, index) => f.slab().getUint32(8 + index * 4, true)), registers);
+    assert.deepEqual([f.slab().getUint32(40, true), f.slab().getUint32(48, true), f.slab().getUint32(56, true)], [0x1000, 1, 0]);
+    assert.equal(f.slab().getUint32(108, true), 0, 'no uncompleted store enters the dirty batch');
+    assert(calls.write > 0, 'exhausted version authority retains the native failure path');
+    assert.throws(() => f.cache.import(), /independent CPU stop 8/);
+  } finally {
+    if (versionPointer && savedVersion !== undefined)
+      new DataView(f.engine.memory.buffer).setBigUint64(versionPointer, savedVersion, true);
+    f.close();
+  }
+});
+
+test('actual full dirty queue private-protocol negative rejects an unrecordable store before effects', {skip}, () => {
+  const registers = [0x11223344, 0, 0, 0, 0x2f00, 0, 0, 0];
+  const f = fixture([0xa3, 0, 0x30, 0, 0], {registers, execution: {budget: 1}});
+  const calls = memoryCalls(f);
+  try {
+    f.engine.ok('map', 0x3000, 1, 3);
+    f.cache.import(); const selected = f.cache.select();
+    const state = f.slab(), memory = new DataView(f.engine.memory.buffer);
+    const mappings = state.getUint32(76, true), listed = memory.getUint32(mappings + 2 * 4, true) - 1;
+    const target = memory.getUint32(mappings + 3 * 4, true) - 1;
+    assert.notEqual(listed, target);
+    const capacity = state.getUint32(112, true), slots = state.getUint32(104, true), bits = state.getUint32(100, true);
+    for (let index = 0; index < capacity; index++) memory.setUint32(slots + index * 4, listed, true);
+    memory.setUint8(bits + listed, 1); memory.setUint8(bits + target, 0);
+    state.setUint32(108, capacity, true);
+    const backing = state.getUint32(84, true), before = new Uint8Array(f.engine.memory.buffer, backing, 65536).slice();
+    assert.throws(() => f.cache.execute(selected), /independent CPU stop 8/);
+    assert.deepEqual(new Uint8Array(f.engine.memory.buffer, backing, 65536), before);
+    assert.deepEqual(registers.map((_, index) => f.slab().getUint32(8 + index * 4, true)), registers);
+    assert.deepEqual([f.slab().getUint32(40, true), f.slab().getUint32(48, true), f.slab().getUint32(56, true)], [0x1000, 1, 0]);
+    assert(f.slab().getUint32(108, true) <= capacity, 'the rejected append never exceeds its owned allocation');
+    assert(calls.write > 0, 'the malformed private queue is rejected by the bounded native path');
+    assert.throws(() => f.cache.import(), /independent CPU stop 8/);
+  } finally {f.close();}
+});
+
 test('actual independent owner rejects foreign release and closes after a malformed slab', {skip}, () => {
   const f = fixture();
   try {
@@ -68,6 +298,95 @@ test('actual independent owner rejects foreign release and closes after a malfor
     f.engine.ok('cpu_end', ...KEY);
     f.close();
   } finally {f.close();}
+});
+
+test('actual dispatcher inspection cannot attach an independent owner during an active legacy core lease', {skip}, () => {
+  const f = fixture(undefined, {independent: false});
+  let active = false;
+  try {
+    f.engine.ok('core_prepare', 0x1000, 1, 1);
+    assert(f.engine.api.core_recovery_scratch_ptr() > 0);
+    f.engine.ok('core_begin'); active = true;
+    const before = new Uint8Array(f.engine.memory.buffer, f.engine.base, 56).slice();
+    assert.equal(f.engine.api.cpu_dispatch_code_ptr(), 0);
+    assert.equal(f.engine.api.cpu_context_ptr(), 0);
+    assert.deepEqual(new Uint8Array(f.engine.memory.buffer, f.engine.base, 56), before);
+    f.engine.ok('core_end'); active = false;
+    f.close();
+  } finally {
+    if (active) f.engine.api.core_end();
+    f.engine.api.close();
+  }
+});
+
+test('actual independent cache rejects lazy legacy owners and still resumes its own compiled loop', {skip}, () => {
+  const f = fixture([0x43, 0xeb, 0xfd], {execution: {budget: 2}});
+  try {
+    const before = new Uint8Array(f.engine.memory.buffer, f.engine.base, 56).slice();
+    assert.equal(f.engine.api.core_recovery_scratch_ptr(), 0);
+    assert.equal(f.engine.api.core_dispatch_code_ptr(), 0);
+    assert.equal(f.engine.api.core_code_ptr(), 0);
+    assert.equal(f.engine.status('core_prepare', 0x1000, 2, 1), 12);
+    assert.equal(f.engine.status('core_prepare_executable', 0x1000, 2, 1), 12);
+    assert.equal(f.engine.api.core_cold_run(1), -12);
+    assert.equal(f.engine.api.core_context_ptr(), 0);
+    assert.deepEqual(new Uint8Array(f.engine.memory.buffer, f.engine.base, 56), before);
+    f.cache.import(); const selected = f.cache.select(), state = f.slab();
+    const backing = state.getUint32(84, true), length = state.getUint32(88, true) * 4096;
+    const expected = new Uint8Array(length); expected.set([0x43, 0xeb, 0xfd]);
+    assert.deepEqual(new Uint8Array(f.engine.memory.buffer, backing, length), expected);
+    const run = f.cache.execute(selected);
+    assert.deepEqual([run.reason, run.retired, run.work, run.pc], [1, 2, 2, 0x1000]);
+    assert.deepEqual(Array.from({length: 8}, (_, index) => f.engine.get(16 + index * 4)),
+      [0, 0, 0, 1, 0x2f00, 0, 0, 0]);
+    assert.equal(f.engine.get(52), 2);
+    assert.deepEqual(new Uint8Array(f.engine.memory.buffer, backing, length), expected);
+  } finally {f.close();}
+});
+
+const externalSkip = skip || (!WebAssembly.Module.exports(artifact.module)
+  .some(item => item.name === 'ring3_abi_v1_component_memory_lease') && 'artifact lacks the external-cpu feature');
+
+test('actual external memory lease excludes independent admission without state or RAM effects', {skip: externalSkip}, () => {
+  const f = fixture(undefined, {independent: false});
+  f.engine.ok('component_memory_lease', ...KEY);
+  const descriptor = f.engine.resultView(64), pointer = descriptor.getUint32(16, true), length = descriptor.getUint32(20, true);
+  const scalar = new Uint8Array(f.engine.memory.buffer, f.engine.base, 56).slice();
+  const ram = new Uint8Array(f.engine.memory.buffer, pointer, length).slice();
+  try {
+    assert.equal(f.engine.status('cpu_begin', ...KEY), 12);
+    assert.equal(f.engine.api.cpu_context_ptr(), 0);
+    assert.deepEqual(new Uint8Array(f.engine.memory.buffer, f.engine.base, 56), scalar);
+    assert.deepEqual(new Uint8Array(f.engine.memory.buffer, pointer, length), ram);
+    assert.equal(f.engine.status('close'), 12, 'the original external lease remains pinned');
+  } finally {
+    if (f.engine.api.cpu_context_ptr()) f.engine.api.cpu_end(...KEY);
+  }
+});
+
+test('actual attached external CPU excludes independent admission and remains releasable', {skip: externalSkip}, t => {
+  const f = fixture(undefined, {independent: false});
+  if (!(f.exports.__heap_base instanceof WebAssembly.Global) || f.exports.__heap_base.value < 512 * 1024 * 1024) {
+    f.close(); t.skip('component attach requires the external-cpu high-memory artifact'); return;
+  }
+  let attached = false;
+  try {
+    f.engine.ok('component_cpu_view', ...KEY);
+    const descriptor = f.engine.resultView(128), pointer = 16 * 1024 * 1024, length = descriptor.getUint32(20, true);
+    f.engine.ok('component_cpu_attach', ...KEY, pointer, length); attached = true;
+    const scalar = new Uint8Array(f.engine.memory.buffer, f.engine.base, 56).slice();
+    const ram = new Uint8Array(f.engine.memory.buffer, pointer, length).slice();
+    assert.equal(f.engine.status('cpu_begin', ...KEY), 12);
+    assert.equal(f.engine.api.cpu_context_ptr(), 0);
+    assert.deepEqual(new Uint8Array(f.engine.memory.buffer, f.engine.base, 56), scalar);
+    assert.deepEqual(new Uint8Array(f.engine.memory.buffer, pointer, length), ram);
+    f.engine.ok('component_cpu_release', ...KEY); attached = false;
+    f.close();
+  } finally {
+    if (f.engine.api.cpu_context_ptr()) f.engine.api.cpu_end(...KEY);
+    if (attached) f.engine.api.component_cpu_release(...KEY);
+    f.engine.api.close();
+  }
 });
 
 test('actual rejected read records infrastructure failure in its owning slab', {skip}, () => {
@@ -106,6 +425,7 @@ test('actual compiler and SDK publish an ordinary dirty batch at the yield bound
 test('actual compiled late-page store fault preserves its completed prefix and untouched RAM', {skip}, () => {
   const f = fixture([0xb8, 0x78, 0x56, 0x34, 0x12, 0xa3, 0xfe, 0x2f, 0x00, 0x00],
     {data: [[0x2ffe, 0x5a], [0x2fff, 0xa5]]});
+  const calls = memoryCalls(f);
   try {
     f.cache.import();
     const run = f.cache.execute(f.cache.select());
@@ -114,6 +434,7 @@ test('actual compiled late-page store fault preserves its completed prefix and u
     assert.deepEqual([f.engine.get(80), f.engine.get(84), f.engine.get(88), f.engine.get(92)], [1, 0x3000, 2, 4]);
     f.engine.ok('read16', 0x2ffe); assert.equal(f.engine.get(120), 0xa55a);
     event(f.engine, 0xffffffff, 0x1005, 1);
+    assert(calls.write > 0, 'cross-page writes retain the real native slow path');
   } finally {f.close();}
 });
 
@@ -141,14 +462,28 @@ test('actual prepare fetch fault reaches the guest fault boundary without instal
   } finally {f.close();}
 });
 
-test('actual POPFD refuses TF before changing the instruction or stack state', {skip}, () => {
-  const f = fixture([0x9d], {data: [[0x2f00, 2], [0x2f01, 1]]});
+for (const [name, flag] of [['TF', 0x100], ['AC', 0x40000]]) test(`actual POPFD refuses ${name} before changing the instruction or stack state`, {skip}, () => {
+  const f = fixture([0x9d], {data: dword(flag | 2).map((value, index) => [0x2f00 + index, value])});
   try {
     f.cache.import();
     assert.throws(() => f.cache.execute(f.cache.select()), /unsupported independent CPU instruction/);
     assert.deepEqual([f.engine.get(48), f.engine.get(32), f.engine.get(52), f.engine.get(76)], [0x1000, 0x2f00, 2, 0]);
     assert.equal(f.cache.stats().work, 0);
     assert.equal(f.slab().getUint32(48, true), 50000);
+  } finally {f.close();}
+});
+
+test('actual independent entry rejects AC before guest execution or memory effects', {skip}, () => {
+  const f = fixture([0xa1, 1, 0x20, 0, 0]);
+  try {
+    const state = new DataView(f.engine.memory.buffer);
+    state.setUint16(f.engine.base + 4, 3, true);
+    state.setUint32(f.engine.base + 52, 0x40002, true);
+    const before = new Uint8Array(f.engine.memory.buffer, f.engine.base, 56).slice();
+    assert.throws(() => f.cache.import(), /cpu_begin returned 7/);
+    assert.deepEqual(new Uint8Array(f.engine.memory.buffer, f.engine.base, 56), before);
+    assert.equal(f.cache.stats().work, 0);
+    f.engine.ok('read32', 0x2000); assert.equal(f.engine.get(120), 0);
   } finally {f.close();}
 });
 
@@ -213,4 +548,76 @@ test('actual late PUSHA fault leaves every register and the earlier mapped stack
     assert.equal(f.slab().getUint32(48, true), 50000);
     event(f.engine, 0xffffffff, 0x1000, 0);
   } finally {f.close();}
+});
+
+function arithmetic(code, registers, result, flags, fault) {
+  const f = fixture(code, {registers, execution: {budget: 1, instructions: 1},
+    data: Array.from({length: 64}, (_, index) => [0x2000 + index, index ^ 0xa5])});
+  try {
+    const arena = new DataView(f.engine.memory.buffer);
+    arena.setUint16(f.engine.base + 4, 3, true);
+    arena.setUint32(f.engine.base + 52, 0xcd7, true);
+    const scalar = new Uint8Array(f.engine.memory.buffer, f.engine.base, 56).slice(), expected = view(scalar);
+    expected.setUint16(4, 1, true);
+    (result ?? registers).forEach((value, index) => expected.setUint32(16 + index * 4, value, true));
+    expected.setUint32(48, fault ? 0x1000 : 0x1000 + code.length, true);
+    expected.setUint32(52, flags ?? 0xcd7, true);
+    const banks = [[4236, 352], [4612, 184]].map(([offset, length]) =>
+      new Uint8Array(f.engine.memory.buffer, f.engine.base + offset, length).slice());
+    f.cache.import(); const selected = f.cache.select(), state = f.slab();
+    const backing = state.getUint32(84, true), length = state.getUint32(88, true) * 4096;
+    const ram = new Uint8Array(f.engine.memory.buffer, backing, length).slice();
+    const run = f.cache.execute(selected), retired = fault ? 0 : 1;
+    assert.deepEqual([run.reason, run.retired, run.work, run.pc],
+      [fault ?? 1, retired, retired, fault ? 0x1000 : 0x1000 + code.length]);
+    assert.deepEqual(new Uint8Array(f.engine.memory.buffer, f.engine.base, 56), scalar);
+    assert.deepEqual([[4236, 352], [4612, 184]].map(([offset, size]) =>
+      new Uint8Array(f.engine.memory.buffer, f.engine.base + offset, size)), banks);
+    assert.deepEqual(new Uint8Array(f.engine.memory.buffer, backing, length), ram);
+    assert.equal(f.slab().getUint32(48, true), fault ? 1 : 0);
+    assert.equal(f.slab().getUint32(108, true), 0);
+    assert.equal(f.engine.get(76), retired);
+    assert.equal(f.cache.stats().instructionCalls, 0);
+    if (fault === 10) {
+      assert.deepEqual([f.engine.get(80), f.engine.get(84), f.engine.get(88)], [0, 0, 0]);
+      event(f.engine, 0, 0x1000, 0);
+    } else if (fault === 5) {
+      assert.deepEqual([f.engine.get(80), f.engine.get(84), f.engine.get(88), f.engine.get(92)], [1, 0x5000, 1, 1]);
+      event(f.engine, 0xffffffff, 0x1000, 0);
+    } else assert.equal(f.engine.status('take_cpu_event'), 7);
+  } finally {f.close();}
+}
+
+for (const c of [
+  {name: 'MUL8', code: [0xf6, 0xe3], before: [0xa1b2cc0f, 0x33221100, 0x76543210, 0xbbccdd10, 0x2f00, 0x55443322, 0x66554433, 0x77665544],
+    after: [0xa1b200f0, 0x33221100, 0x76543210, 0xbbccdd10, 0x2f00, 0x55443322, 0x66554433, 0x77665544], flags: 0x402},
+  {name: 'MUL16', code: [0x66, 0xf7, 0xe3], before: [0xa1b2fffe, 0x33221100, 0xd5e6abcd, 0xc3d40003, 0x2f00, 0x55443322, 0x66554433, 0x77665544],
+    after: [0xa1b2fffa, 0x33221100, 0xd5e60002, 0xc3d40003, 0x2f00, 0x55443322, 0x66554433, 0x77665544], flags: 0xc03},
+  {name: 'MUL32', code: [0xf7, 0xe3], before: [0xffffffff, 0x33221100, 0x76543210, 0xffffffff, 0x2f00, 0x55443322, 0x66554433, 0x77665544],
+    after: [1, 0x33221100, 0xfffffffe, 0xffffffff, 0x2f00, 0x55443322, 0x66554433, 0x77665544], flags: 0xc03},
+  {name: 'DIV8', code: [0xf6, 0xf3], before: [0xa1b21234, 0x33221100, 0x76543210, 0xbbccdd32, 0x2f00, 0x55443322, 0x66554433, 0x77665544],
+    after: [0xa1b20a5d, 0x33221100, 0x76543210, 0xbbccdd32, 0x2f00, 0x55443322, 0x66554433, 0x77665544]},
+  {name: 'DIV16', code: [0x66, 0xf7, 0xf3], before: [0xa1b20003, 0x33221100, 0xd5e60001, 0xc3d40101, 0x2f00, 0x55443322, 0x66554433, 0x77665544],
+    after: [0xa1b200ff, 0x33221100, 0xd5e60004, 0xc3d40101, 0x2f00, 0x55443322, 0x66554433, 0x77665544]},
+  {name: 'DIV32', code: [0xf7, 0xf3], before: [1, 0x33221100, 1, 3, 0x2f00, 0x55443322, 0x66554433, 0x77665544],
+    after: [0x55555555, 0x33221100, 2, 3, 0x2f00, 0x55443322, 0x66554433, 0x77665544]},
+]) test(`actual compiled ${c.name} publishes literal complete arithmetic state and unchanged RAM`, {skip}, () => {
+  arithmetic(c.code, c.before, c.after, c.flags);
+});
+
+for (const c of [
+  {name: 'DIV8 zero', code: [0xf6, 0xf3], eax: 0xa1b23456, edx: 0xd5e6789a, ebx: 0xbbccdd00},
+  {name: 'DIV8 overflow', code: [0xf6, 0xf3], eax: 0xa1b20100, edx: 0xd5e6789a, ebx: 0xbbccdd01},
+  {name: 'DIV16 zero', code: [0x66, 0xf7, 0xf3], eax: 0xa1b23456, edx: 0xd5e6789a, ebx: 0xbbcc0000},
+  {name: 'DIV16 overflow', code: [0x66, 0xf7, 0xf3], eax: 0xa1b20000, edx: 0xd5e60001, ebx: 0xbbcc0001},
+  {name: 'DIV32 zero', code: [0xf7, 0xf3], eax: 0x12345678, edx: 0x23456789, ebx: 0},
+  {name: 'DIV32 overflow', code: [0xf7, 0xf3], eax: 0, edx: 1, ebx: 1},
+  {name: 'IDIV32 minimum numerator divided by minus one', code: [0xf7, 0xfb], eax: 0, edx: 0x80000000, ebx: 0xffffffff},
+]) test(`actual compiled ${c.name} raises precise DE without any arithmetic or RAM effect`, {skip}, () => {
+  arithmetic(c.code, [c.eax, 0x33221100, c.edx, c.ebx, 0x2f00, 0x55443322, 0x66554433, 0x77665544], undefined, undefined, 10);
+});
+
+test('actual compiled DIV memory source fault precedes division and preserves complete state', {skip}, () => {
+  arithmetic([0xf6, 0x35, 0, 0x50, 0, 0],
+    [0xa1b20100, 0x33221100, 0xd5e6789a, 1, 0x2f00, 0x55443322, 0x66554433, 0x77665544], undefined, undefined, 5);
 });

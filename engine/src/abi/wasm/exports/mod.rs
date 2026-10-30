@@ -24,6 +24,7 @@ mod detection;
 mod events;
 mod execution;
 mod image;
+mod independent;
 mod instance;
 mod media;
 mod memory;

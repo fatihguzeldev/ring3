@@ -80,6 +80,9 @@ pub(crate) fn core_cold_run(budget: u32) -> i32 {
         let Ok(mut registry) = registry.try_borrow_mut() else {
             return -9;
         };
+        if registry.independent.is_some() {
+            return -12;
+        }
         let Registry { instance, core, .. } = &mut *registry;
         if core.as_ref().is_some_and(CoreSession32::is_active) {
             return -12;

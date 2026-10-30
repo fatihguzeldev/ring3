@@ -16,7 +16,11 @@ pub(super) fn shared_capacity() -> usize {
 fn dispatch_code() -> Option<&'static [u8]> {
     let allowed = REGISTRY.with(|registry| {
         registry.try_borrow().is_ok_and(|registry| {
-            if !registry.opened || registry.instance.is_none() || registry.core_active() {
+            if !registry.opened
+                || registry.instance.is_none()
+                || registry.independent.is_some()
+                || registry.core_active()
+            {
                 return false;
             }
             #[cfg(feature = "external-cpu")]

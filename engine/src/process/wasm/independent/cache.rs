@@ -224,7 +224,9 @@ impl CodeCache {
                 }
             }
             if !self.evict_oldest()? {
-                if compacted { return Err(HostError::Infrastructure); }
+                if compacted {
+                    return Err(HostError::Infrastructure);
+                }
                 self.units.shrink_to_fit();
                 self.entries.shrink_to_fit();
                 self.directory.shrink_to_fit();
@@ -450,7 +452,8 @@ mod tests {
         cache.directory.reserve_exact(512);
         let spare = cache.entries.capacity() + cache.directory.capacity();
         cache.limit = cache.charged_bytes();
-        let second = cache.install(unit(&memory, 0x1001), &memory)
+        let second = cache
+            .install(unit(&memory, 0x1001), &memory)
             .expect("spare capacity must be reclaimed before rejecting a candidate that fits");
         assert!(second > first);
         assert_eq!(cache.lookup(0x1001), Some(second));

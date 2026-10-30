@@ -24,6 +24,7 @@ pub(crate) use component_cpu::{
 
 mod clock;
 mod core;
+mod independent;
 pub(crate) use clock::{advance_cpu_clock, configure_cpu_clock, observe_cpu_clock};
 #[cfg(feature = "observability")]
 pub(crate) use core::core_cold_status_ptr;
@@ -39,6 +40,13 @@ pub(crate) use core::{
     core_numeric_owned, core_precise, core_precise_owned, core_prepare, core_prepare_executable,
     core_read, core_recovery_scratch_ptr, core_trace_finish, core_trace_pointer, core_trace_ready,
     core_trace_root, core_trace_start, core_trace_status_ptr, core_unlink, core_write,
+};
+pub(crate) use independent::{
+    cpu_abi, cpu_begin, cpu_begin_windows_callback, cpu_cache_bytes, cpu_cache_victim,
+    cpu_capture_windows_call, cpu_code_len, cpu_code_ptr, cpu_complete_windows_call,
+    cpu_context_ptr, cpu_dispatch_code_len, cpu_dispatch_code_ptr, cpu_dispatch_exception, cpu_end,
+    cpu_finish_exception, cpu_finish_windows_callback, cpu_instruction, cpu_prepare, cpu_publish,
+    cpu_runtime_read, cpu_runtime_write, cpu_unit_slot,
 };
 
 #[cfg(feature = "observability")]
@@ -57,19 +65,24 @@ struct Registry {
     opened: bool,
     instance: Option<EngineInstance>,
     core: Option<core::CoreSession32>,
+    independent: Option<independent::IndependentSession>,
 }
 
 impl Registry {
     fn core_active(&self) -> bool {
-        self.core
+        self.independent
             .as_ref()
-            .is_some_and(core::CoreSession32::is_active)
+            .is_some_and(independent::IndependentSession::is_active)
+            || self
+                .core
+                .as_ref()
+                .is_some_and(core::CoreSession32::is_active)
     }
 }
 
 thread_local! {
     static REGISTRY: RefCell<Registry> = const {
-        RefCell::new(Registry { opened: false, instance: None, core: None })
+        RefCell::new(Registry { opened: false, instance: None, core: None, independent: None })
     };
 }
 
@@ -98,11 +111,7 @@ pub(crate) fn close() -> u32 {
         let Ok(mut registry) = registry.try_borrow_mut() else {
             return 9;
         };
-        if registry
-            .core
-            .as_ref()
-            .is_some_and(core::CoreSession32::is_active)
-        {
+        if registry.core_active() {
             return 12;
         }
         #[cfg(feature = "external-cpu")]
@@ -114,6 +123,7 @@ pub(crate) fn close() -> u32 {
             return 12;
         }
         registry.core = None;
+        registry.independent = None;
         registry.opened = true;
         if let Some(instance) = registry.instance.as_mut() {
             instance.close();
@@ -172,11 +182,7 @@ fn mutate_inner(
         let Ok(mut registry) = registry.try_borrow_mut() else {
             return 9;
         };
-        if registry
-            .core
-            .as_ref()
-            .is_some_and(core::CoreSession32::is_active)
-        {
+        if registry.core_active() {
             return 12;
         }
         let Some(instance) = registry.instance.as_mut() else {

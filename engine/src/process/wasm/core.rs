@@ -276,6 +276,9 @@ pub(crate) fn core_prepare(pc: u32, instructions: u32, blocks: u32) -> u32 {
         let Ok(mut registry) = registry.try_borrow_mut() else {
             return 9;
         };
+        if registry.independent.is_some() {
+            return 12;
+        }
         let Registry { instance, core, .. } = &mut *registry;
         if core.as_ref().is_some_and(CoreSession32::is_active) {
             return 12;
@@ -470,6 +473,9 @@ fn select_executable(pc: u32, initialize: bool) -> u32 {
         let Ok(mut registry) = registry.try_borrow_mut() else {
             return 9;
         };
+        if registry.independent.is_some() {
+            return 12;
+        }
         let Registry { instance, core, .. } = &mut *registry;
         if core.as_ref().is_some_and(CoreSession32::is_active) {
             return 12;
@@ -558,6 +564,9 @@ pub(crate) fn core_recovery_scratch_ptr() -> u32 {
         let Ok(mut registry) = registry.try_borrow_mut() else {
             return 0;
         };
+        if registry.independent.is_some() {
+            return 0;
+        }
         let Registry { instance, core, .. } = &mut *registry;
         if core.as_ref().is_some_and(CoreSession32::is_active) {
             return 0;
