@@ -52,7 +52,8 @@ pub(super) fn supports(operation: &Operation) -> bool {
 fn supported(operation: X87Operation) -> bool {
     matches!(
         operation,
-        X87Operation::Load(X87Format::Float32 | X87Format::Float64)
+        X87Operation::Wait
+            | X87Operation::Load(X87Format::Float32 | X87Format::Float64)
             | X87Operation::Store {
                 format: X87Format::Float32 | X87Format::Float64,
                 truncate: false,
@@ -97,8 +98,8 @@ fn pointer(out: &mut Output, local: u32, length: i64) {
     miss_if(out);
 }
 
-/// numeric view v1 is independent of NumericState's layout.
-pub(super) fn enter(out: &mut Output, waiting: bool) {
+// numeric view v1 is independent of NumericState's layout.
+fn bank(out: &mut Output) {
     // these proofs live only in this function invocation. the owned boxes do
     // not move across trusted memory helpers; mutable x87 state is read below.
     out.c()
@@ -128,18 +129,27 @@ pub(super) fn enter(out: &mut Output, waiting: bool) {
         .end()
         .local_get(CHECKED_STATE)
         .local_set(STATE);
+}
+
+fn pending(out: &mut Output) {
+    out.c()
+        .local_get(STATE)
+        .i32_load16_u(mem(STATUS))
+        .local_get(STATE)
+        .i32_load16_u(mem(CONTROL))
+        .i32_const(-1)
+        .i32_xor()
+        .i32_and()
+        .i32_const(63)
+        .i32_and();
+    miss_if(out);
+}
+
+/// mutable stack state belongs to each reached x87 computation.
+pub(super) fn enter(out: &mut Output, waiting: bool) {
+    bank(out);
     if waiting {
-        out.c()
-            .local_get(STATE)
-            .i32_load16_u(mem(STATUS))
-            .local_get(STATE)
-            .i32_load16_u(mem(CONTROL))
-            .i32_const(-1)
-            .i32_xor()
-            .i32_and()
-            .i32_const(63)
-            .i32_and();
-        miss_if(out);
+        pending(out);
     }
     out.c()
         .local_get(STATE)
@@ -571,6 +581,11 @@ pub(super) fn emit(out: &mut Output, operation: Operation) -> bool {
         }
         _ => return false,
     };
+    if operation == X87Operation::Wait {
+        bank(out);
+        pending(out);
+        return true;
+    }
     enter(out, waiting || !operation.ignores_pending_exception());
     match operation {
         X87Operation::LoadConstant { index } => {

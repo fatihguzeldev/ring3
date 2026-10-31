@@ -235,3 +235,214 @@ console.log('binary64 canonical whole-span normal/zero loads/stores, PC53/CW pre
     );
     fs::remove_dir_all(scratch).unwrap();
 }
+
+#[test]
+fn x87_wait_owner_changes_only_pending_status_before_precise_mf() {
+    use crate::cpu::{
+        runtime::numeric::{NumericError, NumericState},
+        x86::{SegmentContext, State32, X87Operation},
+    };
+    let mut memory = AddressSpace::new(1).unwrap();
+    let segments = SegmentContext::default();
+    let operation = Operation::X87 {
+        operation: X87Operation::Wait,
+        address: None,
+        waiting: true,
+        opcode: 0,
+    };
+    for control in [
+        0x003f_u16, 0x007f, 0x023f, 0x037f, 0xffff, 0x003e, 0, 0xffc0,
+    ] {
+        for exceptions in 0..64_u16 {
+            let mut numeric = NumericState::default();
+            numeric.x87.control = control;
+            numeric.x87.status = 0x7f00 | exceptions;
+            numeric.x87.tag = 0xa5a5;
+            numeric.x87.opcode = 0x4321;
+            numeric.x87.instruction_pointer = 0x12345678;
+            numeric.x87.data_pointer = 0x87654321;
+            numeric.x87.code_selector = 0x71;
+            numeric.x87.data_selector = 0x72;
+            for (index, cell) in numeric.x87.registers.iter_mut().enumerate() {
+                cell.fill(0x80 + index as u8);
+            }
+            let mut scalar = State32 {
+                registers: [0x12345678, 2, 3, 4, 5, 6, 7, 8],
+                eip: 0x1000,
+                eflags: 0xcd7,
+            };
+            let (before, scalar_before) = (numeric.x87, scalar);
+            let pending =
+                (0..6).any(|bit| exceptions & (1 << bit) != 0 && control & (1 << bit) == 0);
+            let result = numeric.execute(&mut memory, &mut scalar, &segments, &operation, 0x1001);
+            let mut expected = before;
+            if pending {
+                expected.status |= 0x8080;
+                assert_eq!(
+                    result,
+                    Err(NumericError::Cpu {
+                        vector: 16,
+                        detail: u32::from(expected.status)
+                    })
+                );
+                assert_eq!(scalar, scalar_before);
+            } else {
+                assert!(!result.unwrap().code_invalidated);
+                assert_eq!(
+                    scalar,
+                    State32 {
+                        eip: 0x1001,
+                        ..scalar_before
+                    }
+                );
+            }
+            assert_eq!(
+                numeric.x87, expected,
+                "control={control:04x} status={:04x}",
+                before.status
+            );
+        }
+    }
+}
+
+#[test]
+fn generated_x87_wait_preserves_banks_metadata_prefixes_and_pending_fault_ownership() {
+    use std::{
+        fs,
+        process::Command,
+        time::{SystemTime, UNIX_EPOCH},
+    };
+    let scratch = std::env::temp_dir().join(format!(
+        "ring3-runtime-x87-wait-{}-{}",
+        std::process::id(),
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    fs::create_dir(&scratch).unwrap();
+    let mut memory = AddressSpace::new(1).unwrap();
+    memory
+        .map_zeroed(
+            PageRange::new(GuestAddress(0x1000), 1).unwrap(),
+            Permissions::ALL,
+        )
+        .unwrap();
+    let mut missing_entries = Vec::new();
+    for (name, bytes, limit, entries) in [
+        ("wait", &[0x9b][..], 1, vec![0x1000]),
+        (
+            "prefix",
+            &[0xb8, 0x78, 0x56, 0x34, 0x12, 0x9b][..],
+            2,
+            vec![0x1000, 0x1005],
+        ),
+        ("twice", &[0x9b, 0x9b][..], 2, vec![0x1000, 0x1001]),
+        (
+            "control",
+            &[0xd9, 0x2d, 0x00, 0x30, 0, 0, 0x9b][..],
+            2,
+            vec![0x1000, 0x1006],
+        ),
+    ] {
+        memory.write(GuestAddress(0x1000), bytes).unwrap();
+        let unit = compile(&memory, GuestAddress(0x1000), limit).unwrap();
+        if name == "twice" && unit.entries == [0x1000] {
+            // unsupported baseline FWAIT terminates decoding before the second WAIT.
+            missing_entries.push(name);
+        } else {
+            assert_eq!(unit.entries, entries, "{name} actual decoder boundaries");
+        }
+        fs::write(scratch.join(format!("{name}.wasm")), unit.wasm).unwrap();
+    }
+    let result = Command::new("node").arg("--input-type=module").arg("-e").arg(r#"
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+const root=process.argv[1],memory=new WebAssembly.Memory({initial:1}),ram=new Uint8Array(memory.buffer),data=new DataView(memory.buffer);
+const state=0x8000,view=0x9800,fp=0xa000,word=(at,value)=>data.setUint32(state+at,value>>>0,true),put=(at,value)=>data.setUint32(at,value>>>0,true);
+const get=at=>data.getUint32(state+at,true),fp16=(at,value)=>data.setUint16(fp+at,value,true);
+let reads=0,writes=0;
+const imports={env:{memory},cpu:{read(context,address,width){assert.equal(context,state);assert.equal(address>>>0,0x3000);assert.equal(width,2);reads++;word(52,0);return data.getUint16(0x3000,true);},write(){writes++;throw Error('FWAIT must not write guest memory');}}};
+const run=new Map();for(const name of['wait','prefix','twice','control'])run.set(name,(await WebAssembly.instantiate(fs.readFileSync(root+'/'+name+'.wasm'),imports)).instance.exports.run);
+const missing=[];
+function init(control=0x003f,status=0x4200,tag=0xffff){
+  for(let i=0;i<ram.length;i++)ram[i]=(i*13+0x59)&255;
+  word(0,1);word(4,160);[0xaabbccdd,2,3,4,0x4800,6,7,8].forEach((v,i)=>word(8+4*i,v));
+  word(40,0x1000);word(44,0xcd7);word(48,1);word(52,0);word(56,7);word(124,view);word(152,63);
+  word(76,0);word(80,0);word(84,0);
+  put(view,1);put(view+4,36);put(view+8,fp);[0x23,0x1b,0x23,0x23,0x3b,0x43].forEach((v,i)=>put(view+12+4*i,v));
+  fp16(0,control);fp16(2,status);fp16(4,tag);fp16(6,0x4321);put(fp+8,0x12345678);put(fp+12,0x87654321);fp16(16,0x71);fp16(18,0x72);
+  reads=writes=0;
+}
+function pending(control,status){for(let bit=0;bit<6;bit++)if((status&(1<<bit))&&!(control&(1<<bit)))return true;return false;}
+// each expected path names the completed prefix explicitly. before the mechanism
+// gate, a baseline's service exit must also preserve the exact whole memory image.
+function check(name,paths,label,requireInline=false,expectedReads=0){
+  const before=ram.slice(),actual=run.get(name)(state),path=paths[actual];
+  assert.ok(path,label+' unexpected exit '+actual);
+  const wanted=before.slice(),d=new DataView(wanted.buffer);
+  for(const[at,value]of[[40,path.pc],[48,path.remaining],[52,actual],[56,path.retired],...(path.eax===undefined?[]:[[8,path.eax]])])d.setUint32(state+at,value>>>0,true);
+  if(path.control!==undefined)d.setUint16(fp,path.control,true);
+  if(path.status!==undefined)d.setUint16(fp+2,path.status,true);
+  assert.deepEqual(ram,wanted,label+' full scalar/slab/bank/RAM state');
+  assert.deepEqual([reads,writes],[expectedReads,0],label+' trusted memory calls');
+  if(requireInline&&actual!==0)missing.push(label);
+  return actual;
+}
+const success={pc:0x1001,remaining:0,retired:8},miss={pc:0x1000,remaining:1,retired:7};
+for(const control of[0x003f,0x007f,0x023f,0x037f,0xffff,0x003e,0])for(const low of[0,1,0x3f,0x8080,0x8081,0x4200])for(let top=0;top<8;top++){
+  const status=(low&~0x3800)|(top<<11),tag=[0xffff,0,0xaaaa,0x5555][top&3];init(control,status,tag);
+  const fault=pending(control,status),paths=fault?{7:miss}:{0:success,7:miss};
+  check('wait',paths,'CW'+control.toString(16)+' SW'+status.toString(16)+' tag'+tag.toString(16),!fault);
+}
+for(const quota of[0,1,2]){
+  init();word(48,quota);
+  const paths=quota===0?{2:{pc:0x1000,remaining:0,retired:7}}:quota===1?{2:{pc:0x1005,remaining:0,retired:8,eax:0x12345678}}:
+    {0:{pc:0x1006,remaining:0,retired:9,eax:0x12345678},7:{pc:0x1005,remaining:1,retired:8,eax:0x12345678}};
+  check('prefix',paths,'completed integer prefix quota'+quota,quota===2);
+}
+for(const mutate of[
+  ()=>word(124,0),()=>word(124,0xfffffff0),()=>word(124,view+1),()=>put(view,0),()=>put(view,2),
+  ()=>put(view+4,0),()=>put(view+4,35),()=>put(view+8,0),()=>put(view+8,fp+1),
+  ()=>put(view+8,0xfffffff0),()=>put(view+8,ram.length-96),
+])for(const quota of[0,1,2]){
+  init();word(48,quota);mutate();
+  const paths=quota===0?{2:{pc:0x1000,remaining:0,retired:7}}:quota===1?{2:{pc:0x1005,remaining:0,retired:8,eax:0x12345678}}:
+    {7:{pc:0x1005,remaining:1,retired:8,eax:0x12345678}};
+  check('prefix',paths,'malformed unreached/reached view quota'+quota);
+}
+init(0x003e,1);word(48,2);
+check('prefix',{7:{pc:0x1005,remaining:1,retired:8,eax:0x12345678}},'pending FWAIT preserves completed integer prefix without publishing8080');
+init();word(40,0x1005);
+check('prefix',{0:{pc:0x1006,remaining:0,retired:8},7:{pc:0x1005,remaining:1,retired:7}},'arbitrary all-PC landing at FWAIT',true);
+init();word(48,1);
+const twice=check('twice',{2:{pc:0x1001,remaining:0,retired:8},7:miss},'budget between repeated FWAIT');
+if(twice!==2)missing.push('first FWAIT before repeated budget');
+init();word(48,2);
+check('twice',{0:{pc:0x1002,remaining:0,retired:9},7:{pc:0x1000,remaining:2,retired:7}},'repeated FWAIT one invocation',true);
+init(0x003f,0x4201);word(48,2);data.setUint16(0x3000,0x003e,true);
+check('control',{7:{pc:0x1006,remaining:1,retired:8,control:0x003e,status:0xc281}},'same-invocation FLDCW changes live pending check',false,1);
+for(const prefix of[36,40]){
+  init();put(view+4,prefix);
+  check('wait',{0:success,7:miss},'view prefix'+prefix,true);
+}
+init();const lastBank=ram.length-100;ram.copyWithin(lastBank,fp,fp+100);put(view+8,lastBank);
+check('wait',{0:success,7:miss},'bank ending exactly at memory boundary',true);
+init();const lastView=ram.length-36;ram.copyWithin(lastView,view,view+36);word(124,lastView);
+check('wait',{0:success,7:miss},'view36 ending exactly at memory boundary',true);
+console.log('FWAIT full-memory architectural paths, pending no-write ownership, masks/TOP/tags/raw ghosts, quota/prefix, malformed pointers, FLDCW and exact bounds passed');
+assert.equal(missing.length,0,'mechanism: valid no-pending FWAIT must inline instead of Instruction7; missing '+missing.slice(0,6).join(', '));
+"#).arg(&scratch).output().unwrap();
+    assert!(
+        result.status.success(),
+        "fixture {} failed:\n{}\n{}",
+        scratch.display(),
+        String::from_utf8_lossy(&result.stdout),
+        String::from_utf8_lossy(&result.stderr)
+    );
+    assert!(
+        missing_entries.is_empty(),
+        "mechanism: inline FWAIT must retain every repeated-WAIT entry: {missing_entries:?}"
+    );
+    fs::remove_dir_all(scratch).unwrap();
+}

@@ -1558,3 +1558,35 @@ test('actual independent DE handler returns through edited CONTEXT and restores 
     assert.deepEqual(processBanks(f), banks);
   } finally {f.close();}
 });
+
+test('actual pending FWAIT preserves its completed prefix and publishes the precise own MF event', {skip}, () => {
+  const registers = [0xaabbccdd, 0x89abcdef, 0xd5e6789a, 0x23456789, 0x2f00, 0x55443322, 0x66554433, 0x77665544];
+  const f = fixture([0xb8, 0x78, 0x56, 0x34, 0x12, 0x9b, 0x43], {
+    registers, fpControl: 0x003e, fpStatus: 0x4201, execution: {budget: 2},
+  });
+  rejectJsService(f);
+  const calls = memoryCalls(f);
+  try {
+    const scalar = new Uint8Array(f.engine.memory.buffer, f.engine.base, 56).slice(), banks = processBanks(f);
+    view(scalar).setUint32(16, 0x12345678, true);
+    view(scalar).setUint32(48, 0x1005, true);
+    // the own service adds ES/B after the generated pending guard returns7.
+    // C1/C3, CW, tags, raw ghosts, metadata and every other bank stay intact.
+    view(banks[0]).setUint16(18, 0xc281, true);
+    const selected = f.cache.select(), state = f.slab();
+    const backing = state.getUint32(84, true), length = state.getUint32(88, true) * 4096;
+    const ram = new Uint8Array(f.engine.memory.buffer, backing, length).slice();
+    const run = f.cache.execute(selected);
+    assert.deepEqual([run.coreReason, run.reason, run.retired, run.work, run.pc], [9, 12, 1, 1, 0x1005]);
+    assert.deepEqual(new Uint8Array(f.engine.memory.buffer, f.engine.base, 56), scalar);
+    assert.deepEqual(processBanks(f), banks);
+    assert.deepEqual(new Uint8Array(f.engine.memory.buffer, backing, length), ram);
+    assert.deepEqual([f.slab().getUint32(40, true), f.slab().getUint32(48, true), f.slab().getUint32(52, true),
+      f.slab().getUint32(56, true), f.slab().getUint32(60, true), f.slab().getUint32(64, true), f.slab().getUint32(68, true)],
+    [0x1005, 1, 9, 1, 0xc281, 0, 16]);
+    assert.equal(f.engine.get(80), 0xc281);
+    assert.deepEqual(calls, {read: 0, write: 0});
+    serviceCounts(f, 1);
+    event(f.engine, 16, 0x1005, 1);
+  } finally {f.close();}
+});
