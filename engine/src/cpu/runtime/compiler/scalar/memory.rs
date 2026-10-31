@@ -156,11 +156,6 @@ fn translate(out: &mut Output, width: u32, required: u32) {
         translate_uncached(out, width, required);
         return;
     }
-    if let Some(binding) = out.native_memory_binding {
-        out.c().local_get(CACHE).i32_eqz().if_(BlockType::Empty);
-        initialize_bound(out, binding);
-        out.c().end();
-    }
     out.c()
         .i32_const(0)
         .local_set(READY)
