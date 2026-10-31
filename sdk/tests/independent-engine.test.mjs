@@ -1700,3 +1700,85 @@ test('actual inexact FSTP executable-alias SMC commits PE C1 pop and metadata be
     serviceCounts(f, 0);
   } finally {f.close();}
 });
+
+function seedWideCompareBank(f, {empty = false, pending = false} = {}) {
+  const fp = new DataView(f.engine.memory.buffer, f.engine.base + 4236, 128);
+  fp.setUint16(16, pending ? 0x003e : 0x003f, true);
+  fp.setUint16(18, pending ? 0x7f21 : 0x7f20, true); // top7, all conditions, sticky pe.
+  fp.setUint16(20, empty ? 0xffff : 0x3fff, true);
+  fp.setUint16(22, 0x321, true);
+  fp.setUint32(24, 0x12345678, true); fp.setUint32(28, 0x87654321, true);
+  fp.setUint16(32, 0x71, true); fp.setUint16(34, 0x72, true);
+  for (let index = 0; index < 8; index++) {
+    fp.setBigUint64(40 + index * 10, 0x8000000000000000n + (BigInt(index) << 40n), true);
+    fp.setUint16(48 + index * 10, 0x3fff, true);
+  }
+  // st0 is1+2^-63, strictly greater than1; narrowing it to f64 would lose bit0.
+  fp.setBigUint64(110, 0x8000000000000001n, true);
+  new DataView(f.engine.memory.buffer).setUint32(f.engine.base + 52, 0xcd7, true);
+}
+
+test('actual legacy m64 FCOMP orders the full raw80 operand and preserves flags at its prefix budget boundary', {skip}, () => {
+  const registers = [0xaabbccdd, 0x89abcdef, 0xd5e6789a, 0x23456789, 0x2f00, 0x55443322, 0x66554433, 0x77665544];
+  const f = fixture([0xb8, 0x78, 0x56, 0x34, 0x12, 0x64, 0xdc, 0x1d, ...dword(0x1004), 0x43], {
+    registers, data: [...dword(0), ...dword(0x3ff00000)].map((value, index) => [0x2004 + index, value]),
+    execution: {budget: 2},
+  });
+  rejectJsService(f);
+  const calls = memoryCalls(f);
+  try {
+    f.engine.ok('set_segment_base', 4, 0x1000);
+    seedWideCompareBank(f);
+    const scalar = new Uint8Array(f.engine.memory.buffer, f.engine.base, 56).slice(), banks = processBanks(f);
+    view(scalar).setUint32(16, 0x12345678, true); view(scalar).setUint32(48, 0x100c, true);
+    const fp = view(banks[0]);
+    fp.setUint16(18, 0x0020, true); // greater clears C0/C1/C2/C3; PE remains, TOP wraps to0.
+    fp.setUint16(20, 0xffff, true); fp.setUint16(22, 0x41d, true);
+    fp.setUint32(24, 0x1005, true); fp.setUint32(28, 0x1004, true);
+    fp.setUint16(32, 0x1b, true); fp.setUint16(34, 0x3b, true);
+    const selected = f.cache.select(), state = f.slab();
+    const backing = state.getUint32(84, true), length = state.getUint32(88, true) * 4096;
+    const ram = new Uint8Array(f.engine.memory.buffer, backing, length).slice(), run = f.cache.execute(selected);
+    assert.deepEqual([run.coreReason, run.reason, run.retired, run.work, run.pc], [2, 1, 2, 2, 0x100c]);
+    assert.deepEqual(new Uint8Array(f.engine.memory.buffer, f.engine.base, 56), scalar);
+    assert.deepEqual(processBanks(f), banks);
+    assert.deepEqual(new Uint8Array(f.engine.memory.buffer, backing, length), ram);
+    assert.equal(f.slab().getUint32(48, true), 0);
+    assert.deepEqual(calls, {read: 0, write: 0});
+    serviceCounts(f, 0);
+  } finally {f.close();}
+});
+
+test('actual m64 comparison preserves whole-operand faults before empty-stack effects and pending MF priority', {skip}, () => {
+  for (const pending of [false, true]) {
+    const registers = [0xaabbccdd, 0x89abcdef, 0xd5e6789a, 0x23456789, 0x2f00, 0x55443322, 0x66554433, 0x77665544];
+    const f = fixture([0xb8, 0x78, 0x56, 0x34, 0x12, 0xdc, 0x1d, ...dword(0x2ffc), 0x43], {
+      registers, data: dword(0x11223344).map((value, index) => [0x2ffc + index, value]), execution: {budget: 2},
+    });
+    rejectJsService(f);
+    const calls = memoryCalls(f);
+    try {
+      seedWideCompareBank(f, {empty: true, pending});
+      const scalar = new Uint8Array(f.engine.memory.buffer, f.engine.base, 56).slice(), banks = processBanks(f);
+      view(scalar).setUint32(16, 0x12345678, true); view(scalar).setUint32(48, 0x1005, true);
+      if (pending) view(banks[0]).setUint16(18, 0xffa1, true); // only the own pending-MF service adds ES/B.
+      const selected = f.cache.select(), state = f.slab();
+      const backing = state.getUint32(84, true), length = state.getUint32(88, true) * 4096;
+      const ram = new Uint8Array(f.engine.memory.buffer, backing, length).slice(), run = f.cache.execute(selected);
+      assert.deepEqual([run.coreReason, run.reason, run.retired, run.work, run.pc],
+        [pending ? 9 : 3, pending ? 12 : 5, 1, 1, 0x1005]);
+      if (pending) assert.equal(f.engine.get(80), 0xffa1);
+      else assert.deepEqual([f.engine.get(80), f.engine.get(84), f.engine.get(88), f.engine.get(92)], [1, 0x3000, 1, 8]);
+      assert.deepEqual(new Uint8Array(f.engine.memory.buffer, f.engine.base, 56), scalar);
+      assert.deepEqual(processBanks(f), banks);
+      assert.deepEqual(new Uint8Array(f.engine.memory.buffer, backing, length), ram);
+      assert.equal(f.slab().getUint32(48, true), 1);
+      assert.deepEqual(calls, {read: 0, write: 0}, 'm64 remains one whole own-service operand, with no split cpu.read imports');
+      event(f.engine, pending ? 16 : 0xffffffff, 0x1005, 1);
+      // cross page m64 is deliberately outside read_words' same-page domain.
+      // both artifacts retain exactly one own service; only the positive test
+      // above has a new zero-service admission gate.
+      serviceCounts(f, 1);
+    } finally {f.close();}
+  }
+});

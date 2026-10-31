@@ -17,6 +17,7 @@ mod simd;
 mod string;
 mod x87;
 mod x87_arithmetic;
+mod x87_compare;
 mod x87_divide;
 mod x87_multiply;
 
@@ -58,6 +59,7 @@ pub(super) fn supports(operation: &Operation) -> bool {
         || rotate::supports(operation)
         || simd::supports(operation)
         || x87::supports(operation)
+        || x87_compare::supports(operation)
         || x87_arithmetic::supports(operation)
         || x87_multiply::supports(operation)
         || matches!(
@@ -973,6 +975,7 @@ impl Output {
                     && !rotate::emit(self, operation)
                     && !simd::emit(self, operation)
                     && !x87::emit(self, operation)
+                    && !x87_compare::emit(self, operation)
                     && !x87_multiply::emit(self, operation)
                     && !x87_arithmetic::emit(self, operation)
                 {

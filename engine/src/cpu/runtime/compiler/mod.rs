@@ -411,3 +411,6 @@ mod unit_name_tests {
         }
     }
 }
+
+#[cfg(test)]
+mod x87_compare_tests;
