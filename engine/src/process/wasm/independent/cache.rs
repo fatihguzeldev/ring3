@@ -2,18 +2,20 @@ use crate::{
     cpu::runtime::{
         CompiledUnit, ServiceSite, directory_hash, emit_dispatch_with_service as emit_dispatch,
     },
-    memory::{AddressSpace, CodeSnapshot, PageVersion},
+    memory::{AddressSpace, CodeSnapshot, PAGE_SIZE, PageVersion},
     process::HostError,
 };
 use std::mem::size_of;
 
 const BYTE_LIMIT: usize = 512 * 1024 * 1024;
 const MIN_DIRECTORY: usize = 16;
+const GUEST_PAGE_COUNT: usize = ((1_u64 << 32) / PAGE_SIZE as u64) as usize;
 
 pub(super) struct CodeCache {
     units: Vec<Option<RetainedUnit>>,
     entries: Vec<[u32; 2]>,
     services: Vec<[u32; 3]>,
+    source_pages: Vec<SourcePage>,
     directory: Vec<[u32; 2]>,
     dispatcher: Vec<u8>,
     victims: Vec<u32>,
@@ -23,6 +25,15 @@ pub(super) struct CodeCache {
     retained_code_bytes: usize,
     #[cfg(test)]
     source_checks: usize,
+    #[cfg(test)]
+    page_checks: usize,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct SourcePage {
+    page: usize,
+    version: PageVersion,
+    references: usize,
 }
 
 struct RetainedUnit {
@@ -57,6 +68,45 @@ fn code_bytes(code: &CompiledUnit) -> usize {
         )
 }
 
+fn candidate_source_pages(code: &CompiledUnit) -> Result<Vec<SourcePage>, HostError> {
+    let count = code.sources.iter().try_fold(0usize, |count, source| {
+        count
+            .checked_add(source.versions.len())
+            .ok_or(HostError::Infrastructure)
+    })?;
+    let mut pages = Vec::new();
+    reserve(&mut pages, count)?;
+    for source in &code.sources {
+        for (index, &version) in source.versions.iter().enumerate() {
+            pages.push(SourcePage {
+                page: (source.first + index) % GUEST_PAGE_COUNT,
+                version,
+                references: 1,
+            });
+        }
+    }
+    pages.sort_unstable_by_key(|page| page.page);
+    let mut length = 0;
+    for index in 0..pages.len() {
+        let page = pages[index];
+        if length != 0 && pages[length - 1].page == page.page {
+            let previous = &mut pages[length - 1];
+            if previous.version != page.version {
+                return Err(HostError::InvalidArtifact);
+            }
+            previous.references = previous
+                .references
+                .checked_add(page.references)
+                .ok_or(HostError::Infrastructure)?;
+        } else {
+            pages[length] = page;
+            length += 1;
+        }
+    }
+    pages.truncate(length);
+    Ok(pages)
+}
+
 fn directory_size(entries: usize) -> Result<usize, HostError> {
     entries
         .checked_mul(2)
@@ -88,6 +138,7 @@ impl CodeCache {
             units: Vec::new(),
             entries: Vec::new(),
             services: Vec::new(),
+            source_pages: Vec::new(),
             directory,
             dispatcher: emit_dispatch(),
             victims: Vec::new(),
@@ -97,6 +148,8 @@ impl CodeCache {
             retained_code_bytes: 0,
             #[cfg(test)]
             source_checks: 0,
+            #[cfg(test)]
+            page_checks: 0,
         };
         if cache.charged_bytes() > cache.limit {
             return Err(HostError::Infrastructure);
@@ -117,6 +170,11 @@ impl CodeCache {
                 self.services
                     .capacity()
                     .saturating_mul(size_of::<[u32; 3]>()),
+            )
+            .saturating_add(
+                self.source_pages
+                    .capacity()
+                    .saturating_mul(size_of::<SourcePage>()),
             )
             .saturating_add(
                 self.directory
@@ -194,6 +252,23 @@ impl CodeCache {
         {
             return Err(HostError::InvalidArtifact);
         }
+        // every retained snapshot contributes references to this exact-page
+        // union; a current union proves all snapshots without per-unit scans.
+        let mut pages_current = true;
+        for page in &self.source_pages {
+            #[cfg(test)]
+            {
+                self.page_checks += 1;
+            }
+            if !memory.is_code_page_current(current.0, page.page, page.version) {
+                pages_current = false;
+                break;
+            }
+        }
+        if pages_current {
+            self.validated = Some(current);
+            return Ok(());
+        }
         let mut revoked = false;
         for index in 0..self.units.len() {
             let Some(unit) = self.units[index].as_ref() else {
@@ -231,6 +306,7 @@ impl CodeCache {
             return Err(HostError::InvalidArtifact);
         }
         let incoming = code_bytes(&code);
+        let incoming_pages = candidate_source_pages(&code)?;
         let count = self
             .units
             .len()
@@ -252,6 +328,7 @@ impl CodeCache {
             .saturating_add(slot_bytes)
             .saturating_add(code.entries.len().saturating_mul(size_of::<[u32; 2]>()))
             .saturating_add(code.services.len().saturating_mul(size_of::<[u32; 3]>()))
+            .saturating_add(incoming_pages.len().saturating_mul(size_of::<SourcePage>()))
             .saturating_add(
                 directory_size(code.entries.len())?.saturating_mul(size_of::<[u32; 2]>()),
             )
@@ -277,16 +354,19 @@ impl CodeCache {
                 .len()
                 .checked_add(code.services.len())
                 .ok_or(HostError::Infrastructure)?;
+            let pages = self.source_page_capacity(&incoming_pages)?;
             let extra = incoming
                 .saturating_add(growth(&self.units, count))
                 .saturating_add(growth(&self.entries, entries))
                 .saturating_add(growth(&self.services, services))
+                .saturating_add(growth(&self.source_pages, pages))
                 .saturating_add(growth(&self.directory, directory))
                 .saturating_add(growth(&self.victims, count));
             if self.charged_bytes().saturating_add(extra) <= self.limit {
                 reserve(&mut self.units, count)?;
                 reserve(&mut self.entries, entries)?;
                 reserve(&mut self.services, services)?;
+                reserve(&mut self.source_pages, pages)?;
                 reserve(&mut self.directory, directory)?;
                 reserve(&mut self.victims, count)?;
                 if self.charged_bytes().saturating_add(incoming) <= self.limit {
@@ -300,9 +380,19 @@ impl CodeCache {
                 self.units.shrink_to_fit();
                 self.entries.shrink_to_fit();
                 self.services.shrink_to_fit();
+                self.source_pages.shrink_to_fit();
                 self.directory.shrink_to_fit();
                 self.victims.shrink_to_fit();
                 compacted = true;
+            }
+        }
+        for page in incoming_pages {
+            match self
+                .source_pages
+                .binary_search_by_key(&page.page, |page| page.page)
+            {
+                Ok(index) => self.source_pages[index].references += page.references,
+                Err(index) => self.source_pages.insert(index, page),
             }
         }
         self.entries
@@ -326,11 +416,45 @@ impl CodeCache {
 
     fn remove(&mut self, index: usize) {
         let slot = index as u32 + 1;
+        for source in &self.units[index].as_ref().unwrap().code.sources {
+            for offset in 0..source.versions.len() {
+                let page = (source.first + offset) % GUEST_PAGE_COUNT;
+                let index = self
+                    .source_pages
+                    .binary_search_by_key(&page, |page| page.page)
+                    .expect("retained source page proof");
+                self.source_pages[index].references -= 1;
+            }
+        }
+        self.source_pages.retain(|page| page.references != 0);
         self.entries.retain(|entry| entry[1] != slot);
         self.services.retain(|entry| entry[1] != slot);
         self.victims.push(slot);
         self.retained_code_bytes -= self.units[index].as_ref().unwrap().charge;
         self.units[index] = None;
+    }
+
+    fn source_page_capacity(&self, incoming: &[SourcePage]) -> Result<usize, HostError> {
+        let mut count = self.source_pages.len();
+        for page in incoming {
+            match self
+                .source_pages
+                .binary_search_by_key(&page.page, |page| page.page)
+            {
+                Ok(index) => {
+                    let existing = &self.source_pages[index];
+                    if existing.version != page.version {
+                        return Err(HostError::InvalidArtifact);
+                    }
+                    existing
+                        .references
+                        .checked_add(page.references)
+                        .ok_or(HostError::Infrastructure)?;
+                }
+                Err(_) => count = count.checked_add(1).ok_or(HostError::Infrastructure)?,
+            }
+        }
+        Ok(count)
     }
 
     fn evict_oldest(&mut self) -> Result<bool, HostError> {
@@ -433,6 +557,7 @@ mod tests {
         code + cache.units.capacity() * size_of::<Option<RetainedUnit>>()
             + cache.entries.capacity() * size_of::<[u32; 2]>()
             + cache.services.capacity() * size_of::<[u32; 3]>()
+            + cache.source_pages.capacity() * size_of::<SourcePage>()
             + cache.directory.capacity() * size_of::<[u32; 2]>()
             + cache.victims.capacity() * size_of::<u32>()
             + cache.dispatcher.capacity()
@@ -572,6 +697,7 @@ mod tests {
                 + cache.units.capacity() * size_of::<Option<RetainedUnit>>()
                 + cache.entries.capacity() * size_of::<[u32; 2]>()
                 + cache.services.capacity() * size_of::<[u32; 3]>()
+                + cache.source_pages.capacity() * size_of::<SourcePage>()
                 + cache.directory.capacity() * size_of::<[u32; 2]>()
                 + cache.victims.capacity() * size_of::<u32>()
         );
@@ -805,6 +931,7 @@ mod tests {
             + cache.dispatcher.capacity()
             + candidate.entries.len() * size_of::<[u32; 2]>()
             + candidate.services.len() * size_of::<[u32; 3]>()
+            + candidate_source_pages(&candidate).unwrap().len() * size_of::<SourcePage>()
             + directory_size(candidate.entries.len()).unwrap() * size_of::<[u32; 2]>();
         let count = cache.units.len() + 1;
         // Eviction can release payloads, but monotonic slot headers remain and
@@ -1076,5 +1203,284 @@ mod tests {
                 "{name}: fixture probe budget exceeded: total {total} / {count}, maximum {maximum}"
             );
         }
+    }
+
+    #[test]
+    fn unrelated_executable_changes_validate_shared_source_pages_without_unit_scans() {
+        let mut memory = fixture();
+        let mut cache = CodeCache::new().unwrap();
+        let owners: Vec<_> = (0..32)
+            .map(|index| {
+                cache
+                    .install(unit(&memory, 0x1000 + index % 16), &memory)
+                    .unwrap()
+            })
+            .collect();
+        let source_checks = cache.source_checks;
+        let page_checks = cache.page_checks;
+        memory
+            .protect(
+                PageRange::new(GuestAddress(0x3000), 1).unwrap(),
+                Permissions::ALL,
+            )
+            .unwrap();
+        for value in 0..4 {
+            memory.write(GuestAddress(0x3000), &[value]).unwrap();
+            cache.refresh(&memory).unwrap();
+            for (index, &slot) in owners.iter().enumerate() {
+                let pc = 0x1000 + index as u32 % 16;
+                assert!(cache.selected(slot).unwrap().is_current(&memory));
+                assert_eq!(cache.lookup(pc), Some(owners[index % 16]));
+                assert_eq!(directory_lookup(&cache, pc), Some(owners[index % 16]));
+            }
+            assert_eq!(cache.take_victim(), 0);
+            assert_eq!(cache.charged_bytes(), recomputed_bytes(&cache));
+        }
+        assert_eq!(
+            cache.source_checks, source_checks,
+            "current shared pages must avoid strict per-unit rescans"
+        );
+        assert_eq!(
+            cache.page_checks - page_checks,
+            4,
+            "one unique source page per changed global epoch"
+        );
+        assert_eq!(cache.source_pages.len(), 1);
+        assert_eq!(cache.source_pages[0].references, 32);
+    }
+
+    #[test]
+    fn source_page_proofs_drop_evicted_owners_and_keep_strict_revocation_on_changes() {
+        let mut memory = fixture();
+        memory
+            .protect(
+                PageRange::new(GuestAddress(0x3000), 1).unwrap(),
+                Permissions::ALL,
+            )
+            .unwrap();
+        memory.write(GuestAddress(0x3000), &[0x90]).unwrap();
+        let mut cache = CodeCache::new().unwrap();
+        let first = cache.install(unit(&memory, 0x1000), &memory).unwrap();
+        let duplicate = cache.install(unit(&memory, 0x1001), &memory).unwrap();
+        let retained = cache.install(unit(&memory, 0x3000), &memory).unwrap();
+        assert!(cache.evict_oldest().unwrap());
+        assert_eq!(cache.take_victim(), first);
+        memory.write(GuestAddress(0x1000), &[0x90]).unwrap();
+        cache.refresh(&memory).unwrap();
+        assert_eq!(cache.lookup(0x1000), None);
+        assert_eq!(cache.lookup(0x1001), None);
+        assert_eq!(directory_lookup(&cache, 0x1001), None);
+        assert!(cache.selected(duplicate).is_none());
+        assert_eq!(cache.take_victim(), duplicate);
+        assert_eq!(cache.take_victim(), 0);
+        assert_eq!(cache.lookup(0x3000), Some(retained));
+        assert_eq!(directory_lookup(&cache, 0x3000), Some(retained));
+        assert!(cache.selected(retained).unwrap().is_current(&memory));
+        let source_checks = cache.source_checks;
+        let page_checks = cache.page_checks;
+        memory.write(GuestAddress(0x1001), &[0x90]).unwrap();
+        cache.refresh(&memory).unwrap();
+        assert_eq!(cache.lookup(0x3000), Some(retained));
+        assert_eq!(cache.take_victim(), 0);
+        assert_eq!(cache.charged_bytes(), recomputed_bytes(&cache));
+        assert_eq!(
+            cache.source_checks, source_checks,
+            "an evicted source page cannot force live-owner rescans"
+        );
+        assert_eq!(cache.page_checks - page_checks, 1);
+        assert_eq!(cache.source_pages.len(), 1);
+        assert_eq!(cache.source_pages[0].page, 3);
+        assert_eq!(cache.source_pages[0].references, 1);
+    }
+
+    #[test]
+    fn canonical_page_validator_preserves_identity_mapping_content_and_range_checks() {
+        let mut memory = fixture();
+        let snapshot = memory.snapshot_code(GuestAddress(0x1000), 1).unwrap();
+        let identity = memory.identity();
+        let version = snapshot.versions[0];
+        assert!(memory.is_code_page_current(identity, 1, version));
+        assert!(!memory.is_code_page_current(identity, usize::MAX, version));
+        assert!(!memory.is_code_page_current(identity, 2, version));
+        assert!(!fixture().is_code_page_current(identity, 1, version));
+        memory.write(GuestAddress(0x1000), &[0x90]).unwrap();
+        assert!(!memory.is_code_page_current(identity, 1, version));
+        assert!(!memory.is_code_current(&snapshot));
+        let snapshot = memory.snapshot_code(GuestAddress(0x1000), 1).unwrap();
+        memory
+            .protect(
+                PageRange::new(GuestAddress(0x1000), 1).unwrap(),
+                Permissions::READ_WRITE,
+            )
+            .unwrap();
+        assert!(!memory.is_code_page_current(identity, 1, snapshot.versions[0]));
+        memory
+            .unmap(PageRange::new(GuestAddress(0x1000), 1).unwrap())
+            .unwrap();
+        memory
+            .map_zeroed(
+                PageRange::new(GuestAddress(0x1000), 1).unwrap(),
+                Permissions::ALL,
+            )
+            .unwrap();
+        assert!(!memory.is_code_page_current(identity, 1, snapshot.versions[0]));
+    }
+
+    #[test]
+    fn wrapped_and_repeated_block_sources_keep_exact_page_reference_counts() {
+        let mut memory = fixture();
+        memory
+            .write(GuestAddress(0x1000), &[0x75, 1, 0x40, 0x43, 0x90, 0xc3])
+            .unwrap();
+        let code = compile(&memory, GuestAddress(0x1000), 8).unwrap();
+        assert_eq!(code.sources.len(), 3);
+        let mut cache = CodeCache::new().unwrap();
+        let first = cache.install(code, &memory).unwrap();
+        let second = cache
+            .install(compile(&memory, GuestAddress(0x1000), 8).unwrap(), &memory)
+            .unwrap();
+        assert_eq!(cache.source_pages.len(), 1);
+        assert_eq!(cache.source_pages[0].references, 6);
+        assert!(cache.evict_oldest().unwrap());
+        assert_eq!(cache.take_victim(), first);
+        assert_eq!(cache.lookup(0x1000), Some(second));
+        assert_eq!(cache.source_pages[0].references, 3);
+        memory
+            .protect(
+                PageRange::new(GuestAddress(0x3000), 1).unwrap(),
+                Permissions::ALL,
+            )
+            .unwrap();
+        let source_checks = cache.source_checks;
+        cache.refresh(&memory).unwrap();
+        assert_eq!(cache.source_checks, source_checks);
+        assert_eq!(cache.charged_bytes(), recomputed_bytes(&cache));
+
+        let mut memory = AddressSpace::new(3).unwrap();
+        for pc in [0, 0x5000, 0xffff_f000] {
+            memory
+                .map_zeroed(
+                    PageRange::new(GuestAddress(pc), 1).unwrap(),
+                    Permissions::ALL,
+                )
+                .unwrap();
+        }
+        memory.write(GuestAddress(u32::MAX), &[0x90]).unwrap();
+        memory.write(GuestAddress(0), &[0x90, 0xc3]).unwrap();
+        let mut cache = CodeCache::new().unwrap();
+        let slot = cache
+            .install(
+                compile(&memory, GuestAddress(u32::MAX), 3).unwrap(),
+                &memory,
+            )
+            .unwrap();
+        assert_eq!(
+            cache
+                .source_pages
+                .iter()
+                .map(|page| page.page)
+                .collect::<Vec<_>>(),
+            [0, GUEST_PAGE_COUNT - 1]
+        );
+        assert!(cache.source_pages.iter().all(|page| page.references == 1));
+        let source_checks = cache.source_checks;
+        let page_checks = cache.page_checks;
+        memory.write(GuestAddress(0x5000), &[1]).unwrap();
+        cache.refresh(&memory).unwrap();
+        assert_eq!(cache.lookup(u32::MAX), Some(slot));
+        assert_eq!(cache.source_checks, source_checks);
+        assert_eq!(cache.page_checks - page_checks, 2);
+        assert!(cache.evict_oldest().unwrap());
+        assert!(cache.source_pages.is_empty());
+        assert_eq!(cache.charged_bytes(), recomputed_bytes(&cache));
+    }
+
+    #[test]
+    fn source_page_metadata_minimum_rejects_before_evicting_live_code() {
+        let mut memory = AddressSpace::new(3).unwrap();
+        for pc in [0, 0x1000, 0xffff_f000] {
+            memory
+                .map_zeroed(
+                    PageRange::new(GuestAddress(pc), 1).unwrap(),
+                    Permissions::ALL,
+                )
+                .unwrap();
+        }
+        memory.write(GuestAddress(0x1000), &[0x90]).unwrap();
+        memory.write(GuestAddress(u32::MAX), &[0x90]).unwrap();
+        memory.write(GuestAddress(0), &[0x90]).unwrap();
+        let mut cache = CodeCache::new().unwrap();
+        let slot = cache.install(unit(&memory, 0x1000), &memory).unwrap();
+        let before = (
+            cache.directory.clone(),
+            cache.entries.clone(),
+            cache.source_pages.clone(),
+            cache.charged_bytes(),
+        );
+        let mut candidate = compile(&memory, GuestAddress(u32::MAX), 2).unwrap();
+        candidate.wasm.reserve_exact(cache.charged_bytes());
+        let count = cache.units.len() + 1;
+        let without_proofs = code_bytes(&candidate)
+            + cache.dispatcher.capacity()
+            + count * size_of::<Option<RetainedUnit>>()
+            + count * size_of::<u32>()
+            + candidate.entries.len() * size_of::<[u32; 2]>()
+            + directory_size(candidate.entries.len()).unwrap() * size_of::<[u32; 2]>();
+        cache.limit = without_proofs + 2 * size_of::<SourcePage>() - 1;
+        assert!(before.3 <= cache.limit);
+        assert!(without_proofs <= cache.limit);
+        assert!(cache.install(candidate, &memory).is_err());
+        assert_eq!(cache.lookup(0x1000), Some(slot));
+        assert!(cache.selected(slot).is_some());
+        assert_eq!(
+            (
+                cache.directory.clone(),
+                cache.entries.clone(),
+                cache.source_pages.clone(),
+                cache.charged_bytes()
+            ),
+            before
+        );
+        assert_eq!(cache.take_victim(), 0);
+    }
+
+    #[test]
+    fn copy_on_write_alias_retires_only_its_own_virtual_source_proof() {
+        let mut memory = AddressSpace::new(3).unwrap();
+        let shared = memory.allocate_shared_pages(1, &[0]).unwrap();
+        for (pc, copy_on_write) in [(0x1000, false), (0x5000, true)] {
+            memory
+                .map_shared_pages(
+                    PageRange::new(GuestAddress(pc), 1).unwrap(),
+                    &shared,
+                    0,
+                    Permissions::ALL,
+                    copy_on_write,
+                )
+                .unwrap();
+        }
+        memory.write(GuestAddress(0x1000), &[0x90]).unwrap();
+        let mut cache = CodeCache::new().unwrap();
+        let original = cache.install(unit(&memory, 0x1000), &memory).unwrap();
+        let private = cache.install(unit(&memory, 0x5000), &memory).unwrap();
+        assert_eq!(cache.source_pages.len(), 2);
+        memory.write(GuestAddress(0x5000), &[0xc3]).unwrap();
+        cache.refresh(&memory).unwrap();
+        assert_eq!(cache.lookup(0x5000), None);
+        assert_eq!(directory_lookup(&cache, 0x5000), None);
+        assert!(cache.selected(private).is_none());
+        assert_eq!(cache.take_victim(), private);
+        assert_eq!(cache.take_victim(), 0);
+        assert_eq!(cache.lookup(0x1000), Some(original));
+        assert!(cache.selected(original).unwrap().is_current(&memory));
+        assert_eq!(cache.source_pages.len(), 1);
+        assert_eq!(cache.source_pages[0].page, 1);
+        assert_eq!(cache.source_pages[0].references, 1);
+        assert_eq!(cache.charged_bytes(), recomputed_bytes(&cache));
+        memory.write(GuestAddress(0x1000), &[0xc3]).unwrap();
+        cache.refresh(&memory).unwrap();
+        assert_eq!(cache.lookup(0x1000), None);
+        assert_eq!(cache.take_victim(), original);
+        assert!(cache.source_pages.is_empty());
     }
 }

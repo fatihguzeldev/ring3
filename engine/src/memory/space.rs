@@ -119,6 +119,19 @@ impl AddressSpace {
                 })
     }
 
+    pub(crate) fn is_code_page_current(
+        &self,
+        identity: u64,
+        page: usize,
+        version: PageVersion,
+    ) -> bool {
+        self.identity == identity
+            && self
+                .mappings
+                .get(page)
+                .is_some_and(|&mapping| mapping != 0 && self.page_version(page) == version)
+    }
+
     pub fn new(resident_pages: u32) -> Result<Self, MemoryError> {
         let bytes = u64::from(resident_pages) * u64::from(PAGE_SIZE);
         if resident_pages == 0 || bytes > u64::from(u32::MAX) || bytes > isize::MAX as u64 {
