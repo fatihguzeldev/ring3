@@ -63,6 +63,7 @@ fn supported(operation: X87Operation) -> bool {
             | X87Operation::LoadRegister { .. }
             | X87Operation::StoreRegister { .. }
             | X87Operation::Exchange { .. }
+            | X87Operation::ChangeSign
             | X87Operation::LoadControl
             | X87Operation::StoreControl
             | X87Operation::StoreStatus
@@ -803,6 +804,16 @@ pub(super) fn emit(out: &mut Output, operation: Operation) -> bool {
                 .i64_or()
                 .local_set(RAW)
                 .local_get(R)
+                .local_set(TMP);
+            write_raw(out, 0);
+            clear_c1(out);
+        }
+        X87Operation::ChangeSign => {
+            read_raw(out, 0);
+            out.c()
+                .local_get(TMP)
+                .i32_const(0x8000)
+                .i32_xor()
                 .local_set(TMP);
             write_raw(out, 0);
             clear_c1(out);

@@ -2012,3 +2012,119 @@ test('actual PC24 normal product quota stops before a pending exception or inval
     } finally {f.close();}
   }
 });
+
+const fchsNormalBaselineServices = 0;
+
+function fchsLiteralOracle(c, {negative = false, count = 1, services = count * fchsNormalBaselineServices} = {}) {
+  const registers = [0xaabbccdd, 0x89abcdef, 0xd5e6789a, 0x23456789, 0x2f00, 0x55443322, 0x66554433, 0x77665544];
+  const f = fixture([0xb8, 0x78, 0x56, 0x34, 0x12, ...Array.from({length: count}, () => [0xd9, 0xe0]).flat(), 0x43], {
+    registers, execution: {budget: count + 1},
+  });
+  rejectJsService(f);
+  const calls = memoryCalls(f);
+  try {
+    const left = {sig: c.sig, exp: c.exp ^ (negative ? 0x8000 : 0)};
+    seedMultiplyResidualBank(f, left, {control: c.control, status: c.status, top: c.top, tag: c.tag});
+    const scalar = new Uint8Array(f.engine.memory.buffer, f.engine.base, 56).slice(), banks = processBanks(f), fp = view(banks[0]);
+    view(scalar).setUint32(16, 0x12345678, true); view(scalar).setUint32(48, 0x1005 + count * 2, true);
+    fp.setUint16(18, fp.getUint16(18, true) & ~0x200, true);
+    fp.setUint16(20, (fp.getUint16(20, true) & ~(3 << (c.top * 2))) | c.resultTag << (c.top * 2), true);
+    fp.setUint16(22, 0x1e0, true); fp.setUint32(24, 0x1005 + (count - 1) * 2, true); fp.setUint16(32, 0x1b, true);
+    fp.setUint16(48 + c.top * 10, left.exp ^ (count & 1 ? 0x8000 : 0), true);
+    const selected = f.cache.select(), state = f.slab();
+    const backing = state.getUint32(84, true), length = state.getUint32(88, true) * 4096;
+    const ram = new Uint8Array(f.engine.memory.buffer, backing, length).slice();
+    let unit = selected, run, retired = 0, work = 0;
+    for (let attempts = 0; attempts < 4; attempts++) {
+      run = f.cache.execute(unit); retired += run.retired; work += run.work;
+      if (run.coreReason !== 1) break;
+      unit = f.cache.select();
+    }
+    assert.deepEqual([run.coreReason, run.reason, retired, work, run.pc], [2, 1, count + 1, count + 1, 0x1005 + count * 2]);
+    assert.deepEqual(new Uint8Array(f.engine.memory.buffer, f.engine.base, 56), scalar);
+    assert.deepEqual(processBanks(f), banks);
+    assert.deepEqual(new Uint8Array(f.engine.memory.buffer, backing, length), ram);
+    assert.equal(f.slab().getUint32(48, true), 0);
+    assert.deepEqual(calls, {read: 0, write: 0});
+    serviceCounts(f, services);
+  } finally {f.close();}
+}
+
+const fchsLiteralCases = [
+  {name: 'wide normal with every exception unmasked', sig: 0x8000000000000001n, exp: 0x3fff, control: 0x0000, status: 0x4700, top: 0, tag: 2, resultTag: 0},
+  {name: 'maximum normal raw exponent and all sticky bits', sig: 0xffffffffffffffffn, exp: 0x7ffe, control: 0xffff, status: 0xc7ff, top: 7, tag: 1, resultTag: 0},
+  {name: 'minimum normal raw exponent under directed precision64', sig: 0x8000000000000001n, exp: 0x0001, control: 0x0b7f, status: 0x4720, top: 3, tag: 1, resultTag: 0},
+  {name: 'zero retagged under default precision64', sig: 0n, exp: 0, control: 0x037f, status: 0x4720, top: 6, tag: 0, resultTag: 1},
+  {name: 'zero with unmasked directed control', sig: 0n, exp: 0, control: 0x0840, status: 0x4700, top: 5, tag: 2, resultTag: 1},
+  {name: 'normal under actual precision24 control', sig: 0x8000000000000000n, exp: 0x3fff, control: 0x007f, status: 0x4720, top: 1, tag: 1, resultTag: 0},
+  {name: 'all raw significand bits under precision53', sig: 0xf23456789abcdef0n, exp: 0x4001, control: 0x023f, status: 0x4700, top: 2, tag: 2, resultTag: 0},
+  {name: 'unmasked invalid with only masked PE sticky', sig: 0x8000000000000001n, exp: 0x3fff, control: 0x0c7e, status: 0x4720, top: 4, tag: 1, resultTag: 0},
+];
+
+for (const c of fchsLiteralCases) test(`actual FCHS baseline ${c.name} flips only the raw sign and canonical fields`, {skip}, () => {
+  for (const negative of [false, true]) fchsLiteralOracle(c, {negative});
+});
+
+test('actual FCHS baseline double sign change retains original payload across service unit boundaries', {skip}, () => {
+  fchsLiteralOracle(fchsLiteralCases[0], {negative: true, count: 2});
+});
+
+test('actual FCHS baseline special raw payloads retain the own service frontier', {skip}, () => {
+  for (const c of [
+    {sig: 0xc123456789abcdefn, exp: 0x7fff},
+    {sig: 1n, exp: 0},
+  ]) fchsLiteralOracle({...c, control: 0x003f, status: 0x4720, top: 7, tag: 0, resultTag: 2}, {negative: true, services: 1});
+});
+
+test('actual FCHS baseline pending MF precedes occupied or empty ST0 without changing metadata or raw bytes', {skip}, () => {
+  for (const tag of [0, 3]) {
+    const f = fixture([0xb8, 0x78, 0x56, 0x34, 0x12, 0xd9, 0xe0, 0x43], {execution: {budget: 2}});
+    rejectJsService(f);
+    const calls = memoryCalls(f);
+    try {
+      seedMultiplyResidualBank(f, {sig: 0x8000000000000001n, exp: 0x3fff}, {
+        control: tag === 3 ? 0x007e : 0x003e, status: 0x4701, top: 7, tag,
+      });
+      const scalar = new Uint8Array(f.engine.memory.buffer, f.engine.base, 56).slice(), banks = processBanks(f);
+      view(scalar).setUint32(16, 0x12345678, true); view(scalar).setUint32(48, 0x1005, true);
+      view(banks[0]).setUint16(18, 0xff81, true);
+      const selected = f.cache.select(), state = f.slab();
+      const backing = state.getUint32(84, true), length = state.getUint32(88, true) * 4096;
+      const ram = new Uint8Array(f.engine.memory.buffer, backing, length).slice(), run = f.cache.execute(selected);
+      assert.deepEqual([run.coreReason, run.reason, run.retired, run.work, run.pc], [9, 12, 1, 1, 0x1005]);
+      assert.equal(f.engine.get(80), 0xff81);
+      assert.deepEqual(new Uint8Array(f.engine.memory.buffer, f.engine.base, 56), scalar);
+      assert.deepEqual(processBanks(f), banks);
+      assert.deepEqual(new Uint8Array(f.engine.memory.buffer, backing, length), ram);
+      assert.equal(f.slab().getUint32(48, true), 1);
+      assert.deepEqual(calls, {read: 0, write: 0});
+      event(f.engine, 16, 0x1005, 1);
+      serviceCounts(f, 1);
+    } finally {f.close();}
+  }
+});
+
+test('actual FCHS baseline prefix quota stops before pending exception or stack access', {skip}, () => {
+  for (const pending of [false, true]) {
+    const f = fixture([0xb8, 0x78, 0x56, 0x34, 0x12, 0xd9, 0xe0, 0x43], {execution: {budget: 1}});
+    rejectJsService(f);
+    const calls = memoryCalls(f);
+    try {
+      seedMultiplyResidualBank(f, {sig: 0x8000000000000001n, exp: 0x3fff}, {
+        control: pending ? 0x003e : 0x0000, status: pending ? 0x4701 : 0x4700, top: 7, tag: 3,
+      });
+      const scalar = new Uint8Array(f.engine.memory.buffer, f.engine.base, 56).slice(), banks = processBanks(f);
+      view(scalar).setUint32(16, 0x12345678, true); view(scalar).setUint32(48, 0x1005, true);
+      const selected = f.cache.select(), state = f.slab();
+      const backing = state.getUint32(84, true), length = state.getUint32(88, true) * 4096;
+      const ram = new Uint8Array(f.engine.memory.buffer, backing, length).slice(), run = f.cache.execute(selected);
+      assert.deepEqual([run.coreReason, run.reason, run.retired, run.work, run.pc], [2, 1, 1, 1, 0x1005]);
+      assert.deepEqual(new Uint8Array(f.engine.memory.buffer, f.engine.base, 56), scalar);
+      assert.deepEqual(processBanks(f), banks);
+      assert.deepEqual(new Uint8Array(f.engine.memory.buffer, backing, length), ram);
+      assert.equal(f.slab().getUint32(48, true), 0);
+      assert.deepEqual(calls, {read: 0, write: 0});
+      serviceCounts(f, 0);
+    } finally {f.close();}
+  }
+});

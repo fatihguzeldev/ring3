@@ -446,3 +446,200 @@ assert.equal(missing.length,0,'mechanism: valid no-pending FWAIT must inline ins
     );
     fs::remove_dir_all(scratch).unwrap();
 }
+
+// explicit old-compiler baseline; promote the expectation only after separate
+// authorization of inline FCHS.
+const FCHS_EXPECT_INLINE: bool = true;
+
+#[test]
+fn x87_change_sign_owner_preserves_raw_precision_tags_and_pending_priority() {
+    use crate::cpu::{
+        runtime::numeric::{NumericError, NumericState},
+        x86::{SegmentContext, State32, X87Operation, X87State},
+    };
+    let mut memory = AddressSpace::new(1).unwrap();
+    let mut segments = SegmentContext::default();
+    segments.state.selectors = [0x23, 0x1b, 0x23, 0x23, 0x3b, 0x43];
+    let segments = SegmentContext::legacy(segments.state);
+    let operation = Operation::X87 {
+        operation: X87Operation::ChangeSign,
+        address: None,
+        waiting: true,
+        opcode: 0x1e0,
+    };
+    for control in [
+        0_u16, 0x40, 0x003f, 0x007f, 0x013f, 0x023f, 0x037f, 0x077f, 0x0b7f, 0x0f7f, 0x003e, 0xffff,
+    ] {
+        for (sig, exponent) in [
+            (0_u64, 0_u16),
+            (1 << 63, 0x3fff),
+            (0xabcdef0123456789, 0x4123),
+            (0x8000000000000001, 1),
+            (u64::MAX, 0x7ffe),
+        ] {
+            for sign in [0_u16, 0x8000] {
+                for top in 0..8_u16 {
+                    for tag in 0..3_u16 {
+                        for status in [0x4500, 0xc7c0] {
+                            let mut before = X87State {
+                                control,
+                                status: status | (top << 11) | (control & 63),
+                                tag: 0xffff,
+                                opcode: 0x4321,
+                                instruction_pointer: 0x12345678,
+                                data_pointer: 0x87654321,
+                                code_selector: 0x71,
+                                data_selector: 0x72,
+                                registers: std::array::from_fn(|i| {
+                                    std::array::from_fn(|j| (i * 29 + j * 17) as u8)
+                                }),
+                            };
+                            let physical = usize::from(top);
+                            before.tag =
+                                (before.tag & !(3 << (physical * 2))) | (tag << (physical * 2));
+                            before.registers[physical][..8].copy_from_slice(&sig.to_le_bytes());
+                            before.registers[physical][8..]
+                                .copy_from_slice(&(exponent | sign).to_le_bytes());
+                            let mut expected = before;
+                            expected.registers[physical][9] ^= 0x80;
+                            expected.tag = (before.tag & !(3 << (physical * 2)))
+                                | (u16::from(sig == 0) << (physical * 2));
+                            expected.status &= !0x200;
+                            expected.opcode = 0x1e0;
+                            expected.instruction_pointer = 0x1000;
+                            expected.code_selector = 0x1b;
+                            let mut scalar = State32 {
+                                registers: [0x12345678, 2, 3, 4, 0x4800, 6, 7, 8],
+                                eip: 0x1000,
+                                eflags: 0xcd7,
+                            };
+                            let scalar_before = scalar;
+                            let mut numeric = NumericState::default();
+                            numeric.x87 = before;
+                            assert!(
+                                !numeric
+                                    .execute(
+                                        &mut memory,
+                                        &mut scalar,
+                                        &segments,
+                                        &operation,
+                                        0x1002
+                                    )
+                                    .unwrap()
+                                    .code_invalidated
+                            );
+                            assert_eq!(
+                                numeric.x87, expected,
+                                "CW{control:x} sig{sig:x} exp{exponent:x} sign{sign:x} TOP{top} tag{tag}"
+                            );
+                            assert_eq!(
+                                scalar,
+                                State32 {
+                                    eip: 0x1002,
+                                    ..scalar_before
+                                }
+                            );
+                        }
+                    }
+                }
+            }
+        }
+    }
+    for bit in 0..6 {
+        for base_control in [0x003f_u16, 0x0f7f] {
+            for empty in [false, true] {
+                let mut numeric = NumericState::default();
+                numeric.x87.control = base_control & !(1 << bit);
+                numeric.x87.status = 0x7f00 | (1 << bit);
+                numeric.x87.tag = if empty { 0xffff } else { 0x3fff };
+                numeric.x87.opcode = 0x4321;
+                numeric.x87.instruction_pointer = 0x12345678;
+                numeric.x87.data_pointer = 0x87654321;
+                numeric.x87.code_selector = 0x71;
+                numeric.x87.data_selector = 0x72;
+                numeric.x87.registers =
+                    std::array::from_fn(|i| std::array::from_fn(|j| (i * 29 + j * 17) as u8));
+                let mut scalar = State32 {
+                    registers: [1, 2, 3, 4, 0x4800, 6, 7, 8],
+                    eip: 0x1000,
+                    eflags: 0xcd7,
+                };
+                let scalar_before = scalar;
+                let mut expected = numeric.x87;
+                expected.status |= 0x8080;
+                assert_eq!(
+                    numeric.execute(&mut memory, &mut scalar, &segments, &operation, 0x1002),
+                    Err(NumericError::Cpu {
+                        vector: 16,
+                        detail: u32::from(expected.status)
+                    })
+                );
+                assert_eq!(numeric.x87, expected);
+                assert_eq!(scalar, scalar_before);
+            }
+        }
+    }
+}
+
+#[test]
+fn generated_x87_change_sign_preserves_full_memory_and_service_frontiers() {
+    use std::{
+        fs,
+        process::Command,
+        time::{SystemTime, UNIX_EPOCH},
+    };
+    let scratch = std::env::temp_dir().join(format!(
+        "ring3-runtime-x87-fchs-{}-{}",
+        std::process::id(),
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    fs::create_dir(&scratch).unwrap();
+    let mut memory = AddressSpace::new(1).unwrap();
+    memory
+        .map_zeroed(
+            PageRange::new(GuestAddress(0x1000), 1).unwrap(),
+            Permissions::ALL,
+        )
+        .unwrap();
+    for (name, bytes, limit) in [
+        ("fchs", &[0xd9, 0xe0][..], 1),
+        ("prefix", &[0xb8, 0x78, 0x56, 0x34, 0x12, 0xd9, 0xe0][..], 2),
+        ("twice", &[0xd9, 0xe0, 0xd9, 0xe0][..], 2),
+    ] {
+        memory.write(GuestAddress(0x1000), bytes).unwrap();
+        fs::write(
+            scratch.join(format!("{name}.wasm")),
+            compile(&memory, GuestAddress(0x1000), limit).unwrap().wasm,
+        )
+        .unwrap();
+    }
+    let result = Command::new("node").arg("--input-type=module").arg("-e").arg(r#"
+import assert from 'node:assert/strict';import fs from 'node:fs';
+const root=process.argv[1],inline=process.argv[2]==='1',memory=new WebAssembly.Memory({initial:2}),ram=new Uint8Array(memory.buffer),d=new DataView(memory.buffer),state=0x8000,view=0xa000,fp=0xb000;
+const seed=Uint8Array.from({length:ram.length},(_,i)=>(i*13+0x59)&255),word=(at,v)=>d.setUint32(state+at,v>>>0,true),put=(at,v)=>d.setUint32(at,v>>>0,true),u16=(at,v)=>d.setUint16(fp+at,v,true),get=at=>d.getUint32(state+at,true);
+let reads=0,writes=0;const imports={env:{memory},cpu:{read(){reads++;throw Error('FCHS has no memory operand');},write(){writes++;throw Error('FCHS cannot write guest RAM');}}},run=new Map();
+for(const name of['fchs','prefix','twice'])run.set(name,(await WebAssembly.instantiate(fs.readFileSync(`${root}/${name}.wasm`),imports)).instance.exports.run);
+function init(cw=0x003f,top=0,tag=2,sig=0xabcdef0123456789n,exp=0x4123,status=0x4700){ram.set(seed);ram.fill(0,state,state+160);ram.fill(0,view,view+36);ram.fill(0,fp,fp+100);word(0,1);word(4,160);[0xaabbccdd,2,3,4,0x4800,6,7,8].forEach((v,i)=>word(8+i*4,v));word(40,0x1000);word(44,0xcd7);word(48,1);word(56,7);word(124,view);word(152,63);put(view,1);put(view+4,36);put(view+8,fp);[0x23,0x1b,0x23,0x23,0x3b,0x43].forEach((v,i)=>put(view+12+i*4,v));u16(0,cw);u16(2,(status&~0x3800)|(top<<11));u16(4,(0xffff&~(3<<(top*2)))|(tag<<(top*2)));u16(6,0x4321);put(fp+8,0x12345678);put(fp+12,0x87654321);u16(16,0x71);u16(18,0x72);for(let i=0;i<80;i++)ram[fp+20+i]=(i*29+17)&255;d.setBigUint64(fp+20+top*10,sig,true);d.setUint16(fp+28+top*10,exp,true);reads=writes=0;}
+function check(name,{status,pc,remaining,retired,eax,steps=0,start=0x1000},label){const wanted=ram.slice(),v=new DataView(wanted.buffer);for(const[at,value]of[[40,pc],[48,remaining],[52,status],[56,retired],...(eax===undefined?[]:[[8,eax]])])v.setUint32(state+at,value>>>0,true);if(steps){const sw=v.getUint16(fp+2,true),top=sw>>>11&7,at=fp+20+top*10,zero=v.getBigUint64(at,true)===0n&&(v.getUint16(at+8,true)&0x7fff)===0;if(steps&1)wanted[at+9]^=0x80;v.setUint16(fp+2,sw&~0x200,true);v.setUint16(fp+4,(v.getUint16(fp+4,true)&~(3<<(top*2)))|((zero?1:0)<<(top*2)),true);v.setUint16(fp+6,0x1e0,true);v.setUint32(fp+8,start+(steps-1)*2,true);v.setUint16(fp+16,0x1b,true);}assert.equal(run.get(name)(state),status,label);assert.deepEqual(ram,wanted,label+' full slab/bank/RAM');assert.deepEqual([reads,writes],[0,0]);}
+for(const cw of[0,0x40,0x003f,0x007f,0x013f,0x023f,0x037f,0x077f,0x0b7f,0x0f7f,0x003e,0xffff])for(const[sig,exp]of[[0n,0],[0x8000000000000000n,0x3fff],[0xabcdef0123456789n,0x4123],[0x8000000000000001n,1],[0xffffffffffffffffn,0x7ffe]])for(const sign of[0,0x8000])for(let top=0;top<8;top++)for(const tag of[0,1,2])for(const sw of[0x4500,0xc7c0]){init(cw,top,tag,sig,exp|sign,sw|(cw&63));check('fchs',inline?{status:0,pc:0x1002,remaining:0,retired:8,steps:1}:{status:7,pc:0x1000,remaining:1,retired:7},'CW'+cw.toString(16)+' TOP'+top+' tag'+tag+' normal/zero');}
+for(const[sig,exp]of[[0x8000000000000000n,0x7fff],[0xc000000000000001n,0x7fff],[0x8000000000000001n,0x7fff],[1n,0],[0x8000000000000000n,0],[1n,0x3fff],[0n,0x3fff]]){init(0x037f,7,2,sig,exp);check('fchs',{status:7,pc:0x1000,remaining:1,retired:7},'conservative special/unsupported fallback');}
+init(0x037f,7,3);check('fchs',{status:7,pc:0x1000,remaining:1,retired:7},'empty fallback');
+for(let bit=0;bit<6;bit++)for(const tag of[2,3]){init(0x037f&~(1<<bit),7,tag,0xabcdef0123456789n,0x4123,0x4700|(1<<bit));check('fchs',{status:7,pc:0x1000,remaining:1,retired:7},'pending before payload/domain');}
+for(const quota of[0,1,2]){init();word(48,quota);const path=quota===0?{status:2,pc:0x1000,remaining:0,retired:7}:quota===1?{status:2,pc:0x1005,remaining:0,retired:8,eax:0x12345678}:inline?{status:0,pc:0x1007,remaining:0,retired:9,eax:0x12345678,steps:1,start:0x1005}:{status:7,pc:0x1005,remaining:1,retired:8,eax:0x12345678};check('prefix',path,'integer prefix quota'+quota);}
+for(const mutate of[()=>word(124,0),()=>word(124,view+1),()=>put(view,2),()=>put(view+4,35),()=>put(view+8,0),()=>put(view+8,fp+1),()=>put(view+8,ram.length-96)])for(const quota of[0,1,2]){init();word(48,quota);mutate();check('prefix',quota===0?{status:2,pc:0x1000,remaining:0,retired:7}:quota===1?{status:2,pc:0x1005,remaining:0,retired:8,eax:0x12345678}:{status:7,pc:0x1005,remaining:1,retired:8,eax:0x12345678},'malformed/unreached numeric view quota'+quota);}
+init();word(48,2);check('twice',inline?{status:0,pc:0x1004,remaining:0,retired:9,steps:2}:{status:7,pc:0x1000,remaining:2,retired:7},'two FCHS restore payload sign with canonical retag');
+init();word(40,0x1005);check('prefix',inline?{status:0,pc:0x1007,remaining:0,retired:8,steps:1,start:0x1005}:{status:7,pc:0x1005,remaining:1,retired:7},'direct numeric landing');
+console.log('FCHS full-memory architecture/frontiers passed; explicit inline expectation='+inline);
+"#).arg(&scratch).arg(if FCHS_EXPECT_INLINE { "1" } else { "0" }).output().unwrap();
+    assert!(
+        result.status.success(),
+        "fixture {} failed:\n{}\n{}",
+        scratch.display(),
+        String::from_utf8_lossy(&result.stdout),
+        String::from_utf8_lossy(&result.stderr)
+    );
+    fs::remove_dir_all(scratch).unwrap();
+}
