@@ -6,6 +6,7 @@ use wasm_encoder::{
 };
 
 mod bit;
+mod deferred;
 mod exchange;
 mod flags;
 mod memory;
@@ -139,6 +140,7 @@ pub(super) fn emit(blocks: &[Block], entries: &[EntryPoint]) -> Vec<u8> {
     types.ty().function([ValType::I32; 3], [ValType::I32]);
     types.ty().function([ValType::I32; 4], [ValType::I32]);
     types.ty().function([ValType::I32], [ValType::I32]);
+    types.ty().function([ValType::I32; 6], [ValType::I32]);
     module.section(&types);
     let mut imports = ImportSection::new();
     imports.import(
@@ -157,6 +159,7 @@ pub(super) fn emit(blocks: &[Block], entries: &[EntryPoint]) -> Vec<u8> {
     module.section(&imports);
     let mut functions = FunctionSection::new();
     functions.function(2);
+    functions.function(3);
     module.section(&functions);
     let mut exports = ExportSection::new();
     exports.export("run", ExportKind::Func, 2);
@@ -279,6 +282,7 @@ pub(super) fn emit(blocks: &[Block], entries: &[EntryPoint]) -> Vec<u8> {
     out.c().end().unreachable().end().unreachable().end();
     let mut code = CodeSection::new();
     code.function(&out.function);
+    code.function(&deferred::materializer());
     module.section(&code);
     module.finish()
 }
@@ -293,6 +297,7 @@ impl Output {
         self.function.instructions()
     }
     fn publish(&mut self) {
+        self.materialize_flags();
         for (offset, local) in
             (8..40)
                 .step_by(4)
@@ -542,6 +547,7 @@ impl Output {
             .local_set(reg(Register32::Esp));
     }
     fn instruction(&mut self, operation: Operation, next: u32) -> bool {
+        self.prepare_flags(operation);
         let mut dynamic = false;
         match operation {
             Operation::Nop => {}
@@ -999,6 +1005,9 @@ impl Output {
         true
     }
     fn binary(&mut self, kind: BinaryKind) {
+        if matches!(kind, BinaryKind::Adc | BinaryKind::Sbb) {
+            self.materialize_flags();
+        }
         self.c()
             .local_get(FLAGS)
             .i32_const(1)
@@ -1113,105 +1122,8 @@ impl Output {
             .local_set(FLAGS)
             .end();
     }
-    fn flags(&mut self, kind: BinaryKind, width: u32, preserve_carry: bool) {
-        let logical = matches!(
-            kind,
-            BinaryKind::And | BinaryKind::Or | BinaryKind::Xor | BinaryKind::Test
-        );
-        let subtract = matches!(kind, BinaryKind::Sub | BinaryKind::Sbb | BinaryKind::Cmp);
-        self.c()
-            .local_get(FLAGS)
-            .i32_const(if preserve_carry { !0x8d4 } else { !0x8d5 })
-            .i32_and();
-        self.c()
-            .local_get(R)
-            .i32_eqz()
-            .i32_const(6)
-            .i32_shl()
-            .i32_or();
-        self.c()
-            .local_get(R)
-            .i32_const((width - 1) as i32)
-            .i32_shr_u()
-            .i32_const(7)
-            .i32_shl()
-            .i32_or();
-        self.c()
-            .local_get(R)
-            .i32_const(255)
-            .i32_and()
-            .i32_popcnt()
-            .i32_const(1)
-            .i32_and()
-            .i32_eqz()
-            .i32_const(2)
-            .i32_shl()
-            .i32_or();
-        if !logical {
-            self.c()
-                .local_get(A)
-                .local_get(B)
-                .i32_xor()
-                .local_get(R)
-                .i32_xor()
-                .i32_const(16)
-                .i32_and()
-                .i32_or();
-            if subtract {
-                self.c()
-                    .local_get(A)
-                    .local_get(B)
-                    .i32_xor()
-                    .local_get(A)
-                    .local_get(R)
-                    .i32_xor()
-                    .i32_and();
-            } else {
-                self.c()
-                    .local_get(A)
-                    .local_get(R)
-                    .i32_xor()
-                    .local_get(B)
-                    .local_get(R)
-                    .i32_xor()
-                    .i32_and();
-            }
-            self.c()
-                .i32_const((width - 1) as i32)
-                .i32_shr_u()
-                .i32_const(11)
-                .i32_shl()
-                .i32_or();
-            if !preserve_carry {
-                self.c()
-                    .local_get(A)
-                    .i64_extend_i32_u()
-                    .local_get(B)
-                    .i64_extend_i32_u();
-                if matches!(kind, BinaryKind::Adc | BinaryKind::Sbb) {
-                    self.c().local_get(CARRY).i64_extend_i32_u().i64_add();
-                }
-                if subtract {
-                    self.c().i64_lt_u();
-                } else {
-                    self.c()
-                        .i64_add()
-                        .i64_const(width as i64)
-                        .i64_shr_u()
-                        .i32_wrap_i64();
-                }
-                self.c().i32_or();
-            }
-        }
-        self.c().i32_const(2).i32_or().local_set(FLAGS);
-    }
     fn bit(&mut self, bit: u32) {
-        self.c()
-            .local_get(FLAGS)
-            .i32_const(bit as i32)
-            .i32_shr_u()
-            .i32_const(1)
-            .i32_and();
+        self.deferred_bit(bit);
     }
     fn condition(&mut self, condition: Condition) {
         match condition {
