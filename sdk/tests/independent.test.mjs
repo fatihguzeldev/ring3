@@ -252,3 +252,58 @@ test('close releases installed functions even when final publication fails', () 
   assert.equal(cache.closed, true);
   assert.equal(cache.stats().retainedModuleBytes, 0);
 });
+
+test('aggregate retention admits a tiny unit beyond the former 128 MiB ceiling', () => {
+  const f = fixture(), cache = new IndependentCodeCache(f.engine);
+  // Seed only the accounting counter; the fixture retains no large allocation.
+  cache.retainedModuleBytes = 128 * 1024 * 1024;
+  const selected = cache.select();
+  assert.equal(selected.bytes, gateUnit.length);
+  assert.equal(cache.retainedModuleBytes, 128 * 1024 * 1024 + gateUnit.length);
+  assert.equal(cache.stats().generatedModuleBytes, gateUnit.length);
+  assert.equal(cache.stats().installedUnits, 1);
+  assert.equal(typeof cache.table.get(selected.slot), 'function');
+  assert.deepEqual(f.counters(), {active: true, begins: 1, publishes: 0, ends: 0, prepared: 1});
+  cache.close();
+});
+
+test('aggregate retention admits exactly 512 MiB without changing unit validation', () => {
+  const f = fixture(), cache = new IndependentCodeCache(f.engine);
+  cache.retainedModuleBytes = 512 * 1024 * 1024 - gateUnit.length;
+  const selected = cache.select();
+  assert.equal(selected.bytes, gateUnit.length);
+  assert.equal(cache.retainedModuleBytes, 512 * 1024 * 1024);
+  assert.equal(typeof cache.table.get(selected.slot), 'function');
+  assert.equal(cache.failure, null);
+  assert.equal(f.counters().publishes, 0);
+  cache.close();
+});
+
+test('aggregate retention rejects one byte beyond 512 MiB before module validation or publication', () => {
+  // The malformed one-byte module would fail compilation if the budget check
+  // did not reject it first. The accounting counter avoids a large fixture.
+  const f = fixture({unit: Uint8Array.of(0)}), cache = new IndependentCodeCache(f.engine);
+  cache.retainedModuleBytes = 512 * 1024 * 1024;
+  assert.throws(() => cache.select(), /independent CPU resident code budget exceeded/);
+  assert.equal(cache.units.size, 0);
+  assert.equal(cache.table.length, 1);
+  assert.equal(cache.table.get(0), null);
+  assert.equal(cache.stats().generatedModuleBytes, 0);
+  assert.equal(cache.retainedModuleBytes, 512 * 1024 * 1024);
+  assert.deepEqual(f.counters(), {active: false, begins: 1, publishes: 0, ends: 1, prepared: 1});
+  assert.throws(() => cache.select(), /independent CPU resident code budget exceeded/);
+  assert.equal(f.counters().prepared, 1);
+  cache.close();
+});
+
+test('the per-unit 128 MiB input ceiling rejects before consulting the memory extent', () => {
+  const f = fixture(), cache = new IndependentCodeCache(f.engine), memory = cache.memory;
+  cache.memory = {get buffer() {throw new Error('oversized input reached the memory extent');}};
+  try {
+    assert.throws(() => cache.bytes(1, 128 * 1024 * 1024 + 1), /invalid independent CPU code allocation/);
+  } finally {
+    cache.memory = memory;
+    cache.close();
+  }
+  assert.deepEqual(f.counters(), {active: false, begins: 0, publishes: 0, ends: 0, prepared: 0});
+});

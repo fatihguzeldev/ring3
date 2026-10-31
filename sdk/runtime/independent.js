@@ -1,7 +1,8 @@
 import {KEY} from './engine.js';
 
 const STATE_BYTES = 160;
-const MAX_CODE_BYTES = 128 * 1024 * 1024;
+const MAX_MODULE_BYTES = 128 * 1024 * 1024;
+const MAX_RETAINED_MODULE_BYTES = 512 * 1024 * 1024;
 const REQUIRED = ['cpu_abi', 'cpu_context_ptr', 'cpu_begin', 'cpu_prepare', 'cpu_unit_slot',
   'cpu_code_ptr', 'cpu_code_len', 'cpu_dispatch_code_ptr', 'cpu_dispatch_code_len',
   'cpu_runtime_read', 'cpu_runtime_write', 'cpu_instruction', 'cpu_publish', 'cpu_end'];
@@ -85,7 +86,7 @@ export class IndependentCodeCache {
   bytes(pointer, length) {
     pointer >>>= 0;
     length >>>= 0;
-    if (!pointer || !length || length > MAX_CODE_BYTES || pointer + length > this.memory.buffer.byteLength)
+    if (!pointer || !length || length > MAX_MODULE_BYTES || pointer + length > this.memory.buffer.byteLength)
       throw new Error('invalid independent CPU code allocation');
     return new Uint8Array(this.memory.buffer, pointer, length);
   }
@@ -162,7 +163,7 @@ export class IndependentCodeCache {
       const retained = this.units.get(slot);
       if (retained) return retained;
       const bytes = this.bytes(this.api.cpu_code_ptr(), this.api.cpu_code_len());
-      if (this.retainedModuleBytes + bytes.length > MAX_CODE_BYTES)
+      if (this.retainedModuleBytes + bytes.length > MAX_RETAINED_MODULE_BYTES)
         throw new Error('independent CPU resident code budget exceeded');
       const module = new WebAssembly.Module(bytes);
       for (const item of WebAssembly.Module.imports(module))

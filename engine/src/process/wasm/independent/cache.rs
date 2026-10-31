@@ -5,7 +5,7 @@ use crate::{
 };
 use std::mem::size_of;
 
-const BYTE_LIMIT: usize = 128 * 1024 * 1024;
+const BYTE_LIMIT: usize = 512 * 1024 * 1024;
 const MIN_DIRECTORY: usize = 16;
 
 pub(super) struct CodeCache {
