@@ -156,6 +156,25 @@ fn translate(out: &mut Output, width: u32, required: u32) {
         translate_uncached(out, width, required);
         return;
     }
+    if out.native_memory_bound {
+        out.c()
+            .local_get(ADDRESS)
+            .i32_const(12)
+            .i32_shr_u()
+            .local_set(PAGE)
+            .local_get(ADDRESS)
+            .i32_const(4095)
+            .i32_and()
+            .i32_const((4096 - width) as i32)
+            .i32_le_u();
+        cache_match(out, required);
+        out.c().i32_and().local_tee(READY).if_(BlockType::Empty);
+        cache_hit(out);
+        out.c().else_();
+        cache_miss(out, width, required);
+        out.c().end();
+        return;
+    }
     out.c()
         .i32_const(0)
         .local_set(READY)
@@ -164,17 +183,35 @@ fn translate(out: &mut Output, width: u32, required: u32) {
         .local_get(ADDRESS)
         .i32_const(12)
         .i32_shr_u()
-        .local_set(PAGE);
-    if !out.native_memory_bound {
-        out.c().local_get(CACHE).if_(BlockType::Empty);
-    }
-    out.c()
+        .local_set(PAGE)
+        .local_get(CACHE)
+        .if_(BlockType::Empty)
         .local_get(ADDRESS)
         .i32_const(4095)
         .i32_and()
         .i32_const((4096 - width) as i32)
         .i32_le_u()
+        .if_(BlockType::Empty);
+    cache_match(out, required);
+    out.c().if_(BlockType::Empty);
+    cache_hit(out);
+    out.c()
+        .i32_const(1)
+        .local_set(READY)
+        .end()
+        .end()
+        .end()
+        .local_get(READY)
+        .i32_eqz()
         .if_(BlockType::Empty)
+        .i32_const(0)
+        .local_set(CACHE_FLAGS);
+    cache_miss(out, width, required);
+    out.c().end();
+}
+
+fn cache_match(out: &mut Output, required: u32) {
+    out.c()
         .local_get(CACHE_ROWS)
         .local_get(PAGE)
         .i32_const(3)
@@ -199,8 +236,11 @@ fn translate(out: &mut Output, width: u32, required: u32) {
         .i32_and()
         .i32_const(required as i32)
         .i32_eq()
-        .i32_and()
-        .if_(BlockType::Empty)
+        .i32_and();
+}
+
+fn cache_hit(out: &mut Output) {
+    out.c()
         .local_get(CACHE_FLAGS)
         .i32_const(12)
         .i32_shr_u()
@@ -218,20 +258,10 @@ fn translate(out: &mut Output, width: u32, required: u32) {
         .local_get(CACHE_FLAGS)
         .i32_const(7)
         .i32_and()
-        .local_set(CACHE_FLAGS)
-        .i32_const(1)
-        .local_set(READY)
-        .end()
-        .end();
-    if !out.native_memory_bound {
-        out.c().end();
-    }
-    out.c()
-        .local_get(READY)
-        .i32_eqz()
-        .if_(BlockType::Empty)
-        .i32_const(0)
         .local_set(CACHE_FLAGS);
+}
+
+fn cache_miss(out: &mut Output, width: u32, required: u32) {
     translate_uncached(out, width, required);
     out.c()
         .local_get(CACHE_FLAGS)
@@ -249,7 +279,7 @@ fn translate(out: &mut Output, width: u32, required: u32) {
         .i32_and()
         .if_(BlockType::Empty);
     cache_store(out);
-    out.c().end().end();
+    out.c().end();
 }
 
 fn cache_store(out: &mut Output) {

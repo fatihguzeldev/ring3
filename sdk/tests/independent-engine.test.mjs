@@ -2553,3 +2553,58 @@ test('actual ordinary store proofs expire when pure FP publication reaches versi
     f.close();
   }
 });
+
+test('actual warmed ordinary store proof still rejects a cross-page suffix before effects', {skip}, () => {
+  const registers = [0x12345678, 0x76543210, 0xa1b2c3d4, 0x55667788, 0x2f00, 0x13579bdf, 0x2468ace0, 0x0f1e2d3c];
+  const f = fixture([0xa3, 0, 0x20, 0, 0, 0xa3, 0xfe, 0x2f, 0, 0],
+    {independent: false, registers, data: [[0x2ffe, 0x5a], [0x2fff, 0xa5]]});
+  let active = false, writes = 0;
+  try {
+    const api = f.engine.api;
+    f.engine.ok('cpu_begin', ...KEY); active = true;
+    const context = api.cpu_context_ptr() >>> 0;
+    f.slab().setUint32(48, 3, true);
+    f.engine.ok('cpu_prepare', ...KEY, 0x1000, 2);
+    const state = f.slab(), all = new DataView(f.engine.memory.buffer);
+    const backing = state.getUint32(84, true), length = state.getUint32(88, true) * 4096;
+    const slot = all.getUint32(state.getUint32(76, true) + 2 * 4, true) - 1;
+    const header = state.getUint32(72, true), rows = all.getUint32(header + 16, true);
+    const bits = state.getUint32(100, true), slots = state.getUint32(104, true), capacity = state.getUint32(112, true);
+    const version = state.getUint32(156, true), beforeVersion = all.getBigUint64(version, true);
+    const expectedState = new Uint8Array(f.engine.memory.buffer, context, 160).slice();
+    for (const [at, value] of [[40, 0x1005], [48, 2], [52, 3], [56, 1], [60, 0x3000], [64, 0x10204], [68, 4], [108, 1]])
+      new DataView(expectedState.buffer).setUint32(at, value, true);
+    const expectedRam = new Uint8Array(f.engine.memory.buffer, backing, length).slice();
+    expectedRam.set([0x78, 0x56, 0x34, 0x12], slot * 4096);
+    const expectedBits = new Uint8Array(f.engine.memory.buffer, bits, capacity).slice(); expectedBits[slot] = 1;
+    const expectedSlots = new Uint8Array(f.engine.memory.buffer, slots, capacity * 4).slice();
+    new DataView(expectedSlots.buffer).setUint32(0, slot, true);
+    const banks = processBanks(f), nativeWrite = api.cpu_runtime_write;
+    const bytes = new Uint8Array(f.engine.memory.buffer, api.cpu_code_ptr() >>> 0, api.cpu_code_len() >>> 0);
+    const unit = new WebAssembly.Instance(new WebAssembly.Module(bytes), {env: {memory: f.engine.memory}, cpu: {
+      read: api.cpu_runtime_read,
+      write: (pointer, address, width, value) => {
+        writes++;
+        assert.deepEqual([pointer >>> 0, address, width, value >>> 0], [context, 0x2ffe, 4, 0x12345678]);
+        const current = new DataView(f.engine.memory.buffer), row = current.getBigUint64(rows + 2 * 8, true);
+        assert.equal(Number(row >> 32n), current.getUint32(header, true));
+        assert.equal(Number(row & 7n), 7, 'the completed first store leaves a current ordinary proof for this same page');
+        assert.equal(f.slab().getUint32(108, true), 1);
+        assert.deepEqual(new Uint8Array(f.engine.memory.buffer, backing, length), expectedRam);
+        return nativeWrite(pointer, address, width, value);
+      },
+    }});
+    assert.equal(unit.exports.run(context), 3);
+    assert.equal(writes, 1, 'only the cross-page suffix enters the canonical write helper');
+    assert.deepEqual(new Uint8Array(f.engine.memory.buffer, context, 160), expectedState);
+    assert.deepEqual(new Uint8Array(f.engine.memory.buffer, backing, length), expectedRam,
+      'the first store remains committed and both late-page sentinel bytes remain untouched');
+    assert.deepEqual(new Uint8Array(f.engine.memory.buffer, bits, capacity), expectedBits);
+    assert.deepEqual(new Uint8Array(f.engine.memory.buffer, slots, capacity * 4), expectedSlots);
+    assert.equal(new DataView(f.engine.memory.buffer).getBigUint64(version, true), beforeVersion);
+    assert.deepEqual(processBanks(f), banks);
+  } finally {
+    if (active) f.engine.ok('cpu_end', ...KEY);
+    f.close();
+  }
+});
