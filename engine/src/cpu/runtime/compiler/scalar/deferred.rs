@@ -187,7 +187,9 @@ impl Output {
 
     pub(super) fn flags(&mut self, kind: BinaryKind, width: u32, preserve_carry: bool) {
         if preserve_carry {
-            self.materialize_flags();
+            self.c().local_get(FLAGS).i32_const(!1).i32_and();
+            self.bit(0);
+            self.c().i32_or().local_set(FLAGS);
         }
         let mode = u32::from(matches!(
             kind,
@@ -198,23 +200,132 @@ impl Output {
         )) << 1)
             | (u32::from(matches!(kind, BinaryKind::Adc | BinaryKind::Sbb)) << 2)
             | (u32::from(preserve_carry) << 3);
-        for (source, destination) in [(A, LEFT), (B, RIGHT), (R, RESULT), (CARRY, INPUT_CARRY)] {
-            self.c().local_get(source).local_set(destination);
+        self.c().local_get(R).local_set(RESULT);
+        if mode & 1 == 0 {
+            self.c()
+                .local_get(A)
+                .local_set(LEFT)
+                .local_get(B)
+                .local_set(RIGHT);
+        }
+        if mode & 4 != 0 {
+            self.c().local_get(CARRY).local_set(INPUT_CARRY);
         }
         self.c()
             .i32_const((width | (mode << 6)) as i32)
             .local_set(PENDING);
     }
 
+    fn pending_carry_input(&mut self) {
+        self.c()
+            .local_get(PENDING)
+            .i32_const(256)
+            .i32_and()
+            .if_(BlockType::Result(ValType::I64))
+            .local_get(INPUT_CARRY)
+            .i64_extend_i32_u()
+            .else_()
+            .i64_const(0)
+            .end();
+    }
+
+    fn pending_carry(&mut self) {
+        self.c()
+            .local_get(PENDING)
+            .i32_const(64)
+            .i32_and()
+            .if_(BlockType::Result(ValType::I32))
+            .i32_const(0)
+            .else_()
+            .local_get(PENDING)
+            .i32_const(512)
+            .i32_and()
+            .if_(BlockType::Result(ValType::I32))
+            .local_get(FLAGS)
+            .i32_const(1)
+            .i32_and()
+            .else_()
+            .local_get(PENDING)
+            .i32_const(128)
+            .i32_and()
+            .if_(BlockType::Result(ValType::I32))
+            .local_get(LEFT)
+            .i64_extend_i32_u()
+            .local_get(RIGHT)
+            .i64_extend_i32_u();
+        self.pending_carry_input();
+        self.c()
+            .i64_add()
+            .i64_lt_u()
+            .else_()
+            .local_get(LEFT)
+            .i64_extend_i32_u()
+            .local_get(RIGHT)
+            .i64_extend_i32_u()
+            .i64_add();
+        self.pending_carry_input();
+        self.c()
+            .i64_add()
+            .local_get(PENDING)
+            .i32_const(63)
+            .i32_and()
+            .i64_extend_i32_u()
+            .i64_shr_u()
+            .i32_wrap_i64()
+            .end()
+            .end()
+            .end();
+    }
+
+    fn pending_overflow(&mut self) {
+        self.c()
+            .local_get(PENDING)
+            .i32_const(64)
+            .i32_and()
+            .if_(BlockType::Result(ValType::I32))
+            .i32_const(0)
+            .else_()
+            .local_get(PENDING)
+            .i32_const(128)
+            .i32_and()
+            .if_(BlockType::Result(ValType::I32))
+            .local_get(LEFT)
+            .local_get(RIGHT)
+            .i32_xor()
+            .local_get(LEFT)
+            .local_get(RESULT)
+            .i32_xor()
+            .i32_and()
+            .else_()
+            .local_get(LEFT)
+            .local_get(RESULT)
+            .i32_xor()
+            .local_get(RIGHT)
+            .local_get(RESULT)
+            .i32_xor()
+            .i32_and()
+            .end()
+            .local_get(PENDING)
+            .i32_const(63)
+            .i32_and()
+            .i32_const(1)
+            .i32_sub()
+            .i32_shr_u()
+            .i32_const(1)
+            .i32_and()
+            .end();
+    }
+
     pub(super) fn deferred_bit(&mut self, bit: u32) {
-        if matches!(bit, 2 | 6 | 7) {
+        if matches!(bit, 0 | 2 | 6 | 7 | 11) {
             self.c()
                 .local_get(PENDING)
-                .if_(BlockType::Result(ValType::I32))
-                .local_get(RESULT);
+                .if_(BlockType::Result(ValType::I32));
             match bit {
+                0 => self.pending_carry(),
                 2 => {
                     self.c()
+                        .local_get(RESULT)
                         .i32_const(255)
                         .i32_and()
                         .i32_popcnt()
@@ -223,10 +334,11 @@ impl Output {
                         .i32_eqz();
                 }
                 6 => {
-                    self.c().i32_eqz();
+                    self.c().local_get(RESULT).i32_eqz();
                 }
                 7 => {
                     self.c()
+                        .local_get(RESULT)
                         .local_get(PENDING)
                         .i32_const(63)
                         .i32_and()
@@ -236,6 +348,7 @@ impl Output {
                         .i32_const(1)
                         .i32_and();
                 }
+                11 => self.pending_overflow(),
                 _ => unreachable!(),
             }
             self.c()

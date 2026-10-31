@@ -1007,13 +1007,9 @@ impl Output {
     }
     fn binary(&mut self, kind: BinaryKind) {
         if matches!(kind, BinaryKind::Adc | BinaryKind::Sbb) {
-            self.materialize_flags();
+            self.bit(0);
+            self.c().local_set(CARRY);
         }
-        self.c()
-            .local_get(FLAGS)
-            .i32_const(1)
-            .i32_and()
-            .local_set(CARRY);
         self.c().local_get(A).local_get(B);
         match kind {
             BinaryKind::Add | BinaryKind::Adc => {

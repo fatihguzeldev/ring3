@@ -2,6 +2,150 @@ use super::*;
 use crate::memory::{PageRange, Permissions};
 
 #[test]
+fn generated_pending_flag_consumers_preserve_narrow_carry_overflow_and_partial_updates() {
+    use std::{
+        fs,
+        process::Command,
+        time::{SystemTime, UNIX_EPOCH},
+    };
+    let scratch = std::env::temp_dir().join(format!(
+        "ring3-runtime-pending-consumers-{}-{}",
+        std::process::id(),
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    fs::create_dir(&scratch).unwrap();
+    let mut memory = AddressSpace::new(1).unwrap();
+    memory
+        .map_zeroed(
+            PageRange::new(GuestAddress(0x1000), 1).unwrap(),
+            Permissions::ALL,
+        )
+        .unwrap();
+    for (name, code, count, branch) in [
+        ("adc32", &[0x83, 0xc0, 1, 0x83, 0xd2, 0][..], 2, false),
+        ("sbb32", &[0x83, 0xe8, 1, 0x83, 0xda, 0][..], 2, false),
+        (
+            "adc16",
+            &[0x66, 0x83, 0xc0, 1, 0x66, 0x83, 0xd2, 0][..],
+            2,
+            false,
+        ),
+        (
+            "sbb16",
+            &[0x66, 0x83, 0xe8, 1, 0x66, 0x83, 0xda, 0][..],
+            2,
+            false,
+        ),
+        ("adc8", &[0x80, 0xc0, 1, 0x80, 0xd2, 0][..], 2, false),
+        ("sbb8", &[0x80, 0xe8, 1, 0x80, 0xda, 0][..], 2, false),
+        (
+            "inc-carry",
+            &[0x83, 0xc0, 1, 0x43, 0x83, 0xd2, 0][..],
+            3,
+            false,
+        ),
+        (
+            "logical",
+            &[
+                0xf9, 0x83, 0xd0, 0, 0x31, 0xd2, 0x0f, 0x92, 0xc3, 0x0f, 0x90, 0xc7,
+            ][..],
+            5,
+            false,
+        ),
+        (
+            "below",
+            &[0x39, 0xd8, 0x72, 2, 0x0f, 0x0b, 0x0f, 0x0b][..],
+            4,
+            true,
+        ),
+        (
+            "less",
+            &[0x39, 0xd8, 0x7c, 2, 0x0f, 0x0b, 0x0f, 0x0b][..],
+            4,
+            true,
+        ),
+        (
+            "logical-overflow",
+            &[0x31, 0xc0, 0x70, 2, 0x0f, 0x0b, 0x0f, 0x0b][..],
+            4,
+            true,
+        ),
+        (
+            "direction",
+            &[0x83, 0xc0, 1, 0xfd, 0x9f, 0xfc, 0x9c][..],
+            5,
+            false,
+        ),
+    ] {
+        memory.write(GuestAddress(0x1000), code).unwrap();
+        let gates = if branch {
+            vec![(GuestAddress(0x1004), 23), (GuestAddress(0x1006), 17)]
+        } else {
+            vec![]
+        };
+        let unit = compile_with_gates(&memory, GuestAddress(0x1000), count, &gates).unwrap();
+        fs::write(scratch.join(format!("{name}.wasm")), unit.wasm).unwrap();
+    }
+    let result = Command::new("node").arg("--input-type=module").arg("-e").arg(r#"
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+const memory=new WebAssembly.Memory({initial:2}),ram=new Uint8Array(memory.buffer),d=new DataView(memory.buffer),ctx=0x8000;
+const word=(at,v)=>d.setUint32(ctx+at,v>>>0,true);
+let fault=false,writes=[],observed=[];
+const imports={env:{memory},cpu:{read(){throw Error('these authored consumers never read guest memory');},write(p,a,w,v){
+  assert.equal(p,ctx);assert.equal(w,4);writes.push([a,v>>>0]);observed.push(ram.slice());
+  if(fault){word(52,3);word(60,a);word(64,0x20204);word(68,4);return 3;}
+  d.setUint32(a,v>>>0,true);word(52,0);return 0;
+}}};
+const units={};for(const name of['adc32','sbb32','adc16','sbb16','adc8','sbb8','inc-carry','logical','below','less','logical-overflow','direction'])units[name]=(await WebAssembly.instantiate(fs.readFileSync(`${process.argv[1]}/${name}.wasm`),imports)).instance.exports.run;
+function scenario(name,input,expect){
+  for(let i=0;i<ram.length;i++)ram[i]=(i*37+11)&255;ram.fill(0,ctx,ctx+160);
+  word(0,1);word(4,160);[5,3,7,8,0x4800,10,11,12].forEach((v,i)=>word(8+4*i,v));
+  for(const[index,v]of Object.entries(input.regs??{}))word(8+4*Number(index),v);
+  word(40,0x1000);word(44,input.flags??0x200602);word(48,input.quota);word(56,0xfffffffe);word(152,63);
+  const before=ram.slice(),expected=before.slice(),view=new DataView(expected.buffer),set=(at,v)=>view.setUint32(ctx+at,v>>>0,true);
+  for(const[at,v]of[[40,expect.pc],[44,expect.flags],[48,input.quota-expect.steps],[52,expect.status??0],[56,(0xfffffffe+expect.steps)>>>0],...(expect.fields??[])])set(at,v);
+  for(const[index,v]of Object.entries(expect.regs??{}))set(8+4*Number(index),v);
+  for(const[a,v]of expect.stores??[])view.setUint32(a,v,true);
+  fault=input.fault??false;writes=[];observed=[];
+  assert.equal(units[name](ctx),expect.status??0,name);assert.deepEqual(ram,expected,`${name} full state`);assert.deepEqual(writes,expect.writes??[],name);
+  if(writes.length)assert.deepEqual(observed,[before],`${name} retains the helper-visible entry publication`);else assert.deepEqual(observed,[]);
+}
+for(const[name,eax,edx,outEax,outEdx,flags,pc]of[
+  ['adc32',0xffffffff,0x7fffffff,0,0x80000000,0x200e96,0x1006],
+  ['sbb32',0,0x80000000,0xffffffff,0x7fffffff,0x200e16,0x1006],
+  ['adc16',0x1234ffff,0x89ab7fff,0x12340000,0x89ab8000,0x200e96,0x1008],
+  ['sbb16',0x12340000,0x89ab8000,0x1234ffff,0x89ab7fff,0x200e16,0x1008],
+  ['adc8',0x1234ffff,0x89abcd7f,0x1234ff00,0x89abcd80,0x200e92,0x1006],
+  ['sbb8',0x1234ff00,0x89abcd80,0x1234ffff,0x89abcd7f,0x200e12,0x1006],
+])scenario(name,{quota:2,regs:{0:eax,2:edx}},{pc,steps:2,flags,regs:{0:outEax,2:outEdx}});
+scenario('inc-carry',{quota:3,regs:{0:0xffffffff,2:0xffffffff,3:0xffffffff}},{pc:0x1007,steps:3,flags:0x200657,regs:{0:0,2:0,3:0}});
+scenario('logical',{quota:5,regs:{0:0xffffffff,2:0x80000000,3:0x1234ffff}},{pc:0x100c,steps:5,flags:0x200646,regs:{0:0,2:0,3:0x12340000}});
+for(const[name,a,b,taken,flags]of[
+  ['below',0,1,true,0x200697],['below',0x80000000,1,false,0x200e16],['below',0x7fffffff,0xffffffff,true,0x200e87],
+  ['less',0,1,true,0x200697],['less',0x80000000,1,true,0x200e16],['less',0x7fffffff,0xffffffff,false,0x200e87],
+])scenario(name,{quota:3,regs:{0:a,3:b}},{pc:taken?0x1006:0x1004,steps:2,flags,status:5,fields:[[68,taken?17:23]]});
+scenario('logical-overflow',{quota:3,regs:{0:0x80000000}},{pc:0x1004,steps:2,flags:0x200646,status:5,regs:{0:0},fields:[[68,23]]});
+for(const[quota,pc,flags,eax]of[[2,0x1004,0x200657,0],[3,0x1005,0x200657,0x5700],[4,0x1006,0x200257,0x5700]])
+  scenario('direction',{quota,flags:0x200202,regs:{0:0xffffffff}},{pc,steps:quota,flags,status:2,regs:{0:eax}});
+scenario('direction',{quota:5,flags:0x200202,regs:{0:0xffffffff}},{pc:0x1007,steps:5,flags:0x200257,regs:{0:0x5700,4:0x47fc},stores:[[0x47fc,0x200257]],writes:[[0x47fc,0x200257]]});
+scenario('direction',{quota:5,flags:0x200202,regs:{0:0xffffffff},fault:true},{pc:0x1006,steps:4,flags:0x200257,status:3,regs:{0:0x5700},writes:[[0x47fc,0x200257]],fields:[[60,0x47fc],[64,0x20204],[68,4]]});
+console.log('literal narrow carry/overflow, signed and unsigned branch, preserved carry, dead logical recipe, DF/LAHF and PUSHF fault frontiers passed');
+"#).arg(&scratch).output().unwrap();
+    assert!(
+        result.status.success(),
+        "fixture {} failed:\n{}\n{}",
+        scratch.display(),
+        String::from_utf8_lossy(&result.stdout),
+        String::from_utf8_lossy(&result.stderr)
+    );
+    fs::remove_dir_all(scratch).unwrap();
+}
+
+#[test]
 fn generated_optional_page_cache_rejects_legacy_reserved_bytes_without_dereferencing_them() {
     use std::{
         fs,
