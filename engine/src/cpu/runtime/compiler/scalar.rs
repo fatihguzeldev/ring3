@@ -10,6 +10,7 @@ mod bit;
 mod deferred;
 mod exchange;
 mod flags;
+mod flags_flow;
 mod memory;
 mod memory_helpers;
 mod multiply;
@@ -189,6 +190,8 @@ pub(super) fn emit(
             (2, ValType::I32),
         ]),
         emitted_guest_write: false,
+        recipe: None,
+        operation: Operation::Nop,
     };
     if let Some(binding) = binding {
         out.c()
@@ -243,6 +246,7 @@ pub(super) fn emit(
         .br_table(0..block_count, block_count);
     for (block_index, block) in blocks.iter().enumerate() {
         out.c().end();
+        out.recipe = None;
         let remaining_blocks = block_count - block_index as u32;
         let self_loop = routing::self_loop(blocks, entries, block_index);
         let local_loop = u32::from(self_loop);
@@ -297,6 +301,7 @@ pub(super) fn emit(
                 .i32_store(mem(68));
             out.exit(5);
         }
+        flags_flow::finish(&mut out, blocks, entries, block_index);
         if routing::next(&mut out, blocks, entries, block_index) {
             out.c()
                 .local_get(A)
@@ -327,6 +332,8 @@ pub(super) fn emit(
 struct Output {
     function: Function,
     emitted_guest_write: bool,
+    recipe: Option<deferred::Recipe>,
+    operation: Operation,
 }
 
 impl Output {
