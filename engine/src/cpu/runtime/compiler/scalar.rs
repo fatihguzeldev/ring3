@@ -1,4 +1,5 @@
 use super::{Block, EntryPoint};
+use crate::cpu::runtime::memory_cache::NativeMemoryBinding;
 use crate::cpu::x86::{Register32, SegmentRegister, ir::*};
 use wasm_encoder::{
     BlockType, CodeSection, EntityType, ExportKind, ExportSection, Function, FunctionSection,
@@ -135,7 +136,11 @@ fn entry_route(out: &mut Output, entries: &[EntryPoint]) {
     }
 }
 
-pub(super) fn emit(blocks: &[Block], entries: &[EntryPoint]) -> Vec<u8> {
+pub(super) fn emit(
+    blocks: &[Block],
+    entries: &[EntryPoint],
+    binding: Option<NativeMemoryBinding>,
+) -> Vec<u8> {
     let mut module = Module::new();
     let mut types = TypeSection::new();
     types.ty().function([ValType::I32; 3], [ValType::I32]);
@@ -185,6 +190,16 @@ pub(super) fn emit(blocks: &[Block], entries: &[EntryPoint]) -> Vec<u8> {
         ]),
         emitted_guest_write: false,
     };
+    if let Some(binding) = binding {
+        out.c()
+            .local_get(0)
+            .i32_const(binding.context() as i32)
+            .i32_ne()
+            .if_(BlockType::Empty)
+            .i32_const(8)
+            .return_()
+            .end();
+    }
     out.c()
         .local_get(0)
         .i32_load(mem(0))
@@ -207,7 +222,11 @@ pub(super) fn emit(blocks: &[Block], entries: &[EntryPoint]) -> Vec<u8> {
     {
         out.c().local_get(0).i32_load(mem(offset)).local_set(local);
     }
-    memory::initialize(&mut out);
+    if let Some(binding) = binding {
+        memory::initialize_bound(&mut out, binding);
+    } else {
+        memory::initialize(&mut out);
+    }
     out.c().loop_(BlockType::Empty);
     entry_route(&mut out, entries);
     out.c().local_set(A);

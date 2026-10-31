@@ -2378,6 +2378,11 @@ test('actual fused page proofs survive read-only helpers and expire across write
       const bytes = new Uint8Array(f.engine.memory.buffer, api.cpu_code_ptr() >>> 0, api.cpu_code_len() >>> 0);
       const unit = new WebAssembly.Instance(new WebAssembly.Module(bytes), {env: {memory: f.engine.memory},
         cpu: {read: api.cpu_runtime_read, write: api.cpu_runtime_write}});
+      const beforeWrongContext = new Uint8Array(f.engine.memory.buffer).slice();
+      for (const pointer of [0, context + 8, 0xfffffff0]) {
+        assert.equal(unit.exports.run(pointer), 8);
+        assert.deepEqual(new Uint8Array(f.engine.memory.buffer), beforeWrongContext);
+      }
       assert.equal(unit.exports.run(context), 0);
       const all = new DataView(f.engine.memory.buffer), state = f.slab(), header = state.getUint32(72, true);
       assert.deepEqual([4, 8, 12, 20].map(at => all.getUint32(header + at, true)), [0x434d3352, 32, 2, 1 << 20]);

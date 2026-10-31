@@ -2,6 +2,27 @@ pub(crate) const ROW_COUNT: usize = 1 << 20;
 pub(crate) const RESIDENT_BYTES: usize =
     std::mem::size_of::<MemoryCache>() + ROW_COUNT * std::mem::size_of::<u64>();
 
+#[derive(Clone, Copy)]
+pub(crate) struct NativeMemoryBinding {
+    context: u32,
+    header: u32,
+    rows: u32,
+}
+
+impl NativeMemoryBinding {
+    pub(super) fn context(self) -> u32 {
+        self.context
+    }
+
+    pub(super) fn header(self) -> u32 {
+        self.header
+    }
+
+    pub(super) fn rows(self) -> u32 {
+        self.rows
+    }
+}
+
 #[repr(C, align(16))]
 pub(crate) struct MemoryCache {
     generation: u32,
@@ -13,6 +34,15 @@ pub(crate) struct MemoryCache {
 }
 
 impl MemoryCache {
+    // bound units stay owned by the session retaining these state and cache boxes.
+    pub(crate) fn binding(&self, state: &super::CpuState) -> NativeMemoryBinding {
+        NativeMemoryBinding {
+            context: std::ptr::from_ref(state) as usize as u32,
+            header: std::ptr::from_ref(self) as usize as u32,
+            rows: self.entries.as_ptr() as usize as u32,
+        }
+    }
+
     pub(crate) fn new() -> Result<Self, std::collections::TryReserveError> {
         let mut entries = Vec::new();
         entries.try_reserve_exact(ROW_COUNT)?;

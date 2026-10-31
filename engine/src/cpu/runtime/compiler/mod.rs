@@ -1,3 +1,4 @@
+use super::memory_cache::NativeMemoryBinding;
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use wasm_encoder::{NameMap, NameSection, Section};
 
@@ -129,6 +130,28 @@ pub(crate) fn compile_with_gates_until(
     gates: &[(GuestAddress, u32)],
     covered: impl Fn(GuestAddress) -> bool,
 ) -> Result<CompiledUnit, CompileError> {
+    compile_memory_bound(memory, pc, limit, gates, covered, None)
+}
+
+pub(crate) fn compile_with_native_memory(
+    memory: &AddressSpace,
+    pc: GuestAddress,
+    limit: usize,
+    gates: &[(GuestAddress, u32)],
+    binding: NativeMemoryBinding,
+    covered: impl Fn(GuestAddress) -> bool,
+) -> Result<CompiledUnit, CompileError> {
+    compile_memory_bound(memory, pc, limit, gates, covered, Some(binding))
+}
+
+fn compile_memory_bound(
+    memory: &AddressSpace,
+    pc: GuestAddress,
+    limit: usize,
+    gates: &[(GuestAddress, u32)],
+    covered: impl Fn(GuestAddress) -> bool,
+    binding: Option<NativeMemoryBinding>,
+) -> Result<CompiledUnit, CompileError> {
     if limit == 0 || limit > 4096 {
         return Err(CompileError::InvalidLimits);
     }
@@ -251,7 +274,7 @@ pub(crate) fn compile_with_gates_until(
     let entries = points.iter().map(|entry| entry.pc).collect();
     services.sort_unstable_by_key(|site| site.pc);
     services.dedup_by_key(|site| site.pc);
-    let mut wasm = scalar::emit(&blocks, &points);
+    let mut wasm = scalar::emit(&blocks, &points, binding);
     let mut functions = NameMap::new();
     functions.append(2, &format!("ring3_unit_{:08x}", pc.0));
     let mut names = NameSection::new();
@@ -278,9 +301,9 @@ mod exchange_tests;
 #[cfg(test)]
 mod flags_tests;
 #[cfg(test)]
-mod memory_tests;
-#[cfg(test)]
 mod mechanism_tests;
+#[cfg(test)]
+mod memory_tests;
 #[cfg(test)]
 mod multi_entry_tests;
 #[cfg(test)]

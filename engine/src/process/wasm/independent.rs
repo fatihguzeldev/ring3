@@ -281,11 +281,13 @@ pub(crate) fn cpu_prepare(low: u32, high: u32, pc: u32, maximum: u32) -> u32 {
             session.refresh(memory);
             return Ok(());
         }
-        let code = match runtime::compile_with_gates_until(
+        let binding = session.memory_cache.binding(&session.state);
+        let code = match runtime::compile_with_native_memory(
             memory,
             GuestAddress(pc),
             maximum as usize,
             &gates,
+            binding,
             |address| session.cache.lookup(address.0).is_some(),
         ) {
             Ok(code) => code,

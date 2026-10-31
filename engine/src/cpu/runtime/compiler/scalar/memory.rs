@@ -14,6 +14,19 @@ const CACHE_RECORD: u32 = 83;
 const CACHE_ROWS: u32 = 84;
 const BACKING: u32 = 85;
 
+pub(super) fn initialize_bound(out: &mut Output, binding: NativeMemoryBinding) {
+    out.c()
+        .i32_const(binding.header() as i32)
+        .local_tee(CACHE)
+        .i32_load(mem(0))
+        .local_set(CACHE_GENERATION)
+        .i32_const(binding.rows() as i32)
+        .local_set(CACHE_ROWS)
+        .local_get(0)
+        .i32_load(mem(84))
+        .local_set(BACKING);
+}
+
 pub(super) fn initialize(out: &mut Output) {
     out.c()
         .local_get(0)
