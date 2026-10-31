@@ -837,6 +837,15 @@ impl Output {
             }
             Operation::Binary {
                 kind,
+                destination: Location32::Register(_),
+                source: Value32::Register(_) | Value32::Immediate(_),
+            } if matches!(kind, BinaryKind::Cmp | BinaryKind::Test)
+                && deferred::recipe_for_flags(operation, kind, 32).is_some() =>
+            {
+                self.flags(kind, 32, false);
+            }
+            Operation::Binary {
+                kind,
                 destination,
                 source,
             } => {
