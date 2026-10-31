@@ -5,7 +5,6 @@ use crate::cpu::x86::{
 };
 
 const PENDING: u32 = 72;
-const RESULT: u32 = 75;
 
 fn numeric_preserves_flags(operation: Operation) -> bool {
     match operation {
@@ -289,7 +288,11 @@ impl Recipe {
                 out.c().local_get(reg(register));
             }
             Self::Negate => {
-                out.c().i32_const(0).local_get(RESULT).i32_sub();
+                out.c()
+                    .i32_const(0)
+                    .local_get(PENDING)
+                    .i32_wrap_i64()
+                    .i32_sub();
             }
             Self::Increment { .. } => {
                 out.c().i32_const(1);
@@ -301,8 +304,9 @@ impl Recipe {
         if self.carry_input() {
             out.c()
                 .local_get(PENDING)
-                .i32_const(1)
-                .i32_shr_u()
+                .i64_const(33)
+                .i64_shr_u()
+                .i32_wrap_i64()
                 .i32_const(1)
                 .i32_and();
         } else {
@@ -315,7 +319,7 @@ impl Recipe {
             out.c().i32_const(0);
             return;
         }
-        out.c().local_get(RESULT);
+        out.c().local_get(PENDING).i32_wrap_i64();
         self.right(out);
         if self.subtract() {
             out.c().i32_add();
@@ -336,7 +340,7 @@ impl Recipe {
         out.c().local_get(FLAGS);
         self.left(out);
         self.right(out);
-        out.c().local_get(RESULT);
+        out.c().local_get(PENDING).i32_wrap_i64();
         self.input(out);
         out.c()
             .i32_const(self.descriptor())
@@ -359,7 +363,8 @@ impl Recipe {
             self.right(out);
             out.c()
                 .i32_xor()
-                .local_get(RESULT)
+                .local_get(PENDING)
+                .i32_wrap_i64()
                 .i32_xor()
                 .i32_const(16)
                 .i32_and()
@@ -384,10 +389,14 @@ impl Recipe {
                     out.c().local_get(FLAGS).i32_const(1).i32_and();
                 }
                 Self::Negate => {
-                    out.c().local_get(RESULT).i32_eqz().i32_eqz();
+                    out.c()
+                        .local_get(PENDING)
+                        .i32_wrap_i64()
+                        .i32_eqz()
+                        .i32_eqz();
                 }
                 Self::Arithmetic { .. } => {
-                    out.c().local_get(RESULT).i64_extend_i32_u();
+                    out.c().local_get(PENDING).i32_wrap_i64().i64_extend_i32_u();
                     self.right(out);
                     out.c().i64_extend_i32_u();
                     if self.carry_input() {
@@ -403,7 +412,8 @@ impl Recipe {
             },
             2 => {
                 out.c()
-                    .local_get(RESULT)
+                    .local_get(PENDING)
+                    .i32_wrap_i64()
                     .i32_const(255)
                     .i32_and()
                     .i32_popcnt()
@@ -412,10 +422,14 @@ impl Recipe {
                     .i32_eqz();
             }
             6 => {
-                out.c().local_get(RESULT).i32_eqz();
+                out.c().local_get(PENDING).i32_wrap_i64().i32_eqz();
             }
             7 => {
-                out.c().local_get(RESULT).i32_const(31).i32_shr_u();
+                out.c()
+                    .local_get(PENDING)
+                    .i32_wrap_i64()
+                    .i32_const(31)
+                    .i32_shr_u();
             }
             11 => {
                 if matches!(self, Self::Logical) {
@@ -425,7 +439,7 @@ impl Recipe {
                     if self.subtract() {
                         self.right(out);
                     } else {
-                        out.c().local_get(RESULT);
+                        out.c().local_get(PENDING).i32_wrap_i64();
                     }
                     out.c().i32_xor();
                     if self.subtract() {
@@ -434,7 +448,8 @@ impl Recipe {
                         self.right(out);
                     }
                     out.c()
-                        .local_get(RESULT)
+                        .local_get(PENDING)
+                        .i32_wrap_i64()
                         .i32_xor()
                         .i32_and()
                         .i32_const(31)
@@ -590,17 +605,25 @@ pub(super) fn transfer(operation: Operation, incoming: Option<Recipe>) -> Option
 impl Output {
     pub(super) fn materialize_flags(&mut self) {
         if let Some(recipe) = self.recipe {
-            self.c().local_get(PENDING).if_(BlockType::Empty);
+            self.c()
+                .local_get(PENDING)
+                .i64_const(0)
+                .i64_ne()
+                .if_(BlockType::Empty);
             recipe.materialize(self);
-            self.c().i32_const(0).local_set(PENDING).end();
+            self.c().i64_const(0).local_set(PENDING).end();
         }
     }
 
     pub(super) fn materialize_flags_inline(&mut self) {
         if let Some(recipe) = self.recipe {
-            self.c().local_get(PENDING).if_(BlockType::Empty);
+            self.c()
+                .local_get(PENDING)
+                .i64_const(0)
+                .i64_ne()
+                .if_(BlockType::Empty);
             recipe.materialize_inline(self);
-            self.c().i32_const(0).local_set(PENDING).end();
+            self.c().i64_const(0).local_set(PENDING).end();
         }
     }
 
@@ -622,7 +645,7 @@ impl Output {
             Preparation::Canonical => self.canonicalize_flags(),
             Preparation::CarryOnly => {
                 self.capture_carry();
-                self.c().i32_const(0).local_set(PENDING);
+                self.c().i64_const(0).local_set(PENDING);
                 self.recipe = None;
             }
             Preparation::OverflowOnly => {
@@ -634,7 +657,7 @@ impl Output {
                         .i32_shl()
                         .i32_or()
                         .local_set(FLAGS)
-                        .i32_const(0)
+                        .i64_const(0)
                         .local_set(PENDING);
                     self.recipe = None;
                 }
@@ -645,18 +668,19 @@ impl Output {
     pub(super) fn flags(&mut self, kind: BinaryKind, width: u32, preserve: bool) {
         let recipe = recipe_for_flags(self.operation, kind, width);
         if let Some(recipe) = recipe {
-            self.c().local_get(R).local_set(RESULT);
+            self.c().local_get(R).i64_extend_i32_u();
             if recipe.carry_input() {
                 self.c()
                     .local_get(CARRY)
-                    .i32_const(1)
-                    .i32_shl()
-                    .i32_const(1)
-                    .i32_or()
-                    .local_set(PENDING);
+                    .i64_extend_i32_u()
+                    .i64_const(33)
+                    .i64_shl()
+                    .i64_const(1_i64 << 32)
+                    .i64_or();
             } else {
-                self.c().i32_const(1).local_set(PENDING);
+                self.c().i64_const(1_i64 << 32);
             }
+            self.c().i64_or().local_set(PENDING);
             self.recipe = Some(recipe);
         } else {
             for local in [FLAGS, A, B, R, CARRY] {
@@ -666,7 +690,7 @@ impl Output {
                 .i32_const(descriptor(kind, width, preserve))
                 .call(3)
                 .local_set(FLAGS)
-                .i32_const(0)
+                .i64_const(0)
                 .local_set(PENDING);
             self.recipe = None;
         }
@@ -676,6 +700,8 @@ impl Output {
         if let Some(recipe) = self.recipe.filter(|_| matches!(bit, 0 | 2 | 6 | 7 | 11)) {
             self.c()
                 .local_get(PENDING)
+                .i64_const(0)
+                .i64_ne()
                 .if_(BlockType::Result(ValType::I32));
             recipe.bit(self, bit);
             self.c()
