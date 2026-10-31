@@ -1368,3 +1368,104 @@ console.log('FIST/P Int32 strict/literal owner controls and full-RAM compiled fr
     );
     fs::remove_dir_all(scratch).unwrap();
 }
+
+#[test]
+fn x87_strict_division_and_save_keep_complete_empty_ghosts() {
+    use crate::cpu::{
+        runtime::numeric::NumericState,
+        x86::{Ext80, SegmentContext, State32, decode::decode_one},
+    };
+    let mut memory = AddressSpace::new(2).unwrap();
+    memory
+        .map_zeroed(
+            PageRange::new(GuestAddress(0x1000), 1).unwrap(),
+            Permissions::ALL,
+        )
+        .unwrap();
+    memory
+        .map_zeroed(
+            PageRange::new(GuestAddress(0x3000), 1).unwrap(),
+            Permissions::READ_WRITE,
+        )
+        .unwrap();
+    let mut segments = SegmentContext::default();
+    segments.state.selectors = [0x23, 0x1b, 0x23, 0x23, 0x3b, 0x43];
+    let segments = SegmentContext::legacy(segments.state);
+    let program = [0xd9, 0xc0, 0xd9, 0xe8, 0xd8, 0xf1, 0xdd, 0xd8, 0xdd, 0xd8];
+    for (divisor, significand, exponent, status) in [
+        (
+            0x4008000000000000_u64,
+            0xaaaaaaaaaaaaa800_u64,
+            0x3ffd_u16,
+            0x4520_u16,
+        ),
+        (0x4024000000000000, 0xccccccccccccd000, 0x3ffb, 0x4720),
+    ] {
+        memory.write(GuestAddress(0x1000), &program).unwrap();
+        let mut numeric = NumericState::default();
+        numeric.x87 = fist32_bank(0x023f, 0x4700, 0, 2, divisor);
+        let initial = numeric.x87;
+        let mut scalar = State32 {
+            registers: [0xaabbccdd, 2, 3, 0x3000, 0x4800, 6, 7, 8],
+            eip: 0x1000,
+            eflags: 0xcd7,
+        };
+        for step in 0..5 {
+            let decoded = decode_one(&memory, GuestAddress(scalar.eip)).unwrap();
+            numeric
+                .execute(
+                    &mut memory,
+                    &mut scalar,
+                    &segments,
+                    decoded.operation(),
+                    decoded.next_pc().0,
+                )
+                .unwrap();
+            if step == 2 {
+                assert_eq!(&numeric.x87.registers[6][..8], &significand.to_le_bytes());
+                assert_eq!(&numeric.x87.registers[6][8..], &exponent.to_le_bytes());
+                assert_eq!(
+                    numeric.x87.status,
+                    status | (6 << 11),
+                    "literal PE/C1 immediately after DIV"
+                );
+                assert_eq!(numeric.x87.tag, 0x0ffe);
+            }
+        }
+        let mut expected = initial;
+        expected.registers[6][..8].copy_from_slice(&significand.to_le_bytes());
+        expected.registers[6][8..].copy_from_slice(&exponent.to_le_bytes());
+        expected.registers[7] = Ext80::from_f64_bits(divisor).0;
+        expected.status = status;
+        expected.opcode = 0x5d8;
+        expected.instruction_pointer = 0x1008;
+        expected.code_selector = 0x1b;
+        assert_eq!(
+            numeric.x87, expected,
+            "popped physical ghosts, old occupied tag2 and metadata"
+        );
+        assert_eq!((scalar.eip, scalar.eflags), (0x100a, 0xcd7));
+        memory.write(GuestAddress(0x100a), &[0xdd, 0x33]).unwrap();
+        let save = decode_one(&memory, GuestAddress(0x100a)).unwrap();
+        numeric
+            .execute(
+                &mut memory,
+                &mut scalar,
+                &segments,
+                save.operation(),
+                save.next_pc().0,
+            )
+            .unwrap();
+        let mut saved = [0; 108];
+        memory.read(GuestAddress(0x3000), &mut saved).unwrap();
+        assert_eq!(&saved[28..], expected.registers.as_flattened());
+        assert_eq!(
+            numeric.x87.registers, expected.registers,
+            "FNSAVE reset retains the raw ghosts"
+        );
+        assert_eq!(
+            (numeric.x87.control, numeric.x87.status, numeric.x87.tag),
+            (0x037f, 0, 0xffff)
+        );
+    }
+}
