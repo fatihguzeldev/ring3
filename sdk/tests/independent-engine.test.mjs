@@ -1904,3 +1904,111 @@ test('actual multiply residual fault and pending MF preserve the prefix full ban
     } finally {f.close();}
   }
 });
+
+// this encodes fixture values, without computing a product or rounding oracle.
+function pc24Normal32As64Bits(bits) {
+  const word = bits >>> 0, exponent = word >>> 23 & 0xff, fraction = word & 0x7fffff;
+  assert(exponent < 0xff && (exponent !== 0 || fraction === 0), 'fixture is normal binary32 or signed zero');
+  const sign = BigInt(word >>> 31) << 63n;
+  return exponent ? sign | BigInt(exponent + 896) << 52n | BigInt(fraction) << 29n : sign;
+}
+
+const pc24NormalProductCases = [
+  {name: 'exact ordinary', left32: 0x40400000, right: 0x40000000, result32: 0x40c00000, inexact: false, incremented: false},
+  {name: 'odd lower tie', left32: 0x3f800001, right: 0x3fc00000, result32: 0x3fc00002, inexact: true, incremented: true},
+  {name: 'even lower tie', left32: 0x3f800003, right: 0x3fc00000, result32: 0x3fc00004, inexact: true, incremented: false},
+  {name: 'exponent carry', left32: 0x3f800001, right: 0x3ffffffe, result32: 0x40000000, inexact: true, incremented: true},
+  {name: 'minimum normal exact', left32: 0x00800000, right: 0x3f800000, result32: 0x00800000, inexact: false, incremented: false},
+  {name: 'minimum normal neighborhood inexact', left32: 0x00800001, right: 0x3f800001, result32: 0x00800002, inexact: true, incremented: false},
+  {name: 'maximum finite exact', left32: 0x7f7fffff, right: 0x3f800000, result32: 0x7f7fffff, inexact: false, incremented: false},
+  {name: 'maximum finite neighborhood inexact', left32: 0x7f7fffff, right: 0x3f7fffff, result32: 0x7f7ffffe, inexact: true, incremented: false},
+];
+
+for (const [index, row] of pc24NormalProductCases.entries()) test(`actual PC24 normal product ${row.name} preserves full banks RAM and literal rounding`, {skip}, () => {
+  const c = {...row, left: pc24Normal32As64Bits(row.left32), result: pc24Normal32As64Bits(row.result32)};
+  for (let signs = 0; signs < 4; signs++) multiplyResidualOracle(c, {
+    negativeLeft: !!(signs & 1), negativeRight: !!(signs & 2), top: (index * 4 + signs) & 7,
+    control: (index + signs) & 1 ? 0x007f : 0x003f,
+    status: 0x4500 | (signs & 1 ? 0x200 : 0) | (signs & 2 ? 0x20 : 0) | (signs === 3 ? 0x8080 : 0),
+    tag: (index + signs) % 3,
+  });
+});
+
+const pc24NormalProductFallbacks = [
+  // these extended-exponent results distinguish pc24 from binary32 arithmetic.
+  {name: 'below binary32 normal bound remains exact extended normal', left: pc24Normal32As64Bits(0x00800000), right: 0x3f7fffff, result: 0x380fffffe0000000n, inexact: false, incremented: false},
+  {name: 'above binary32 maximum remains finite extended normal', left: pc24Normal32As64Bits(0x7f7fffff), right: 0x3f800001, result: 0x47f0000000000000n, inexact: true, incremented: false},
+  {name: 'minimum normal squared retains extended exponent', left: pc24Normal32As64Bits(0x00800000), right: 0x00800000, result: 0x3030000000000000n, inexact: false, incremented: false},
+  {name: 'maximum finite squared retains extended exponent', left: pc24Normal32As64Bits(0x7f7fffff), right: 0x7f7fffff, result: 0x4fefffffc0000000n, inexact: true, incremented: false},
+  {name: 'exact binary64 outside binary32 precision retains discarded bit', rawLeft: {sig: 0x8000000000800000n, exp: 0x3fff}, right: 0x3f800000, result: 0x3ff0000000000000n, inexact: true, incremented: false},
+  {name: 'PC53 retains unrounded 48 bit product', left: pc24Normal32As64Bits(0x3f800001), right: 0x3fc00000, result: 0x3ff8000030000000n, inexact: false, incremented: false, control: 0x027f},
+  {name: 'PC64 retains existing own service frontier', left: pc24Normal32As64Bits(0x3f800001), right: 0x3fc00000, result: 0x3ff8000030000000n, inexact: false, incremented: false, control: 0x037f, services: 1},
+  {name: 'signed zero retains sign XOR', left: 0n, right: 0x3f800000, result: 0n, inexact: false, incremented: false},
+  {name: 'memory64 retains its existing PC24 path', left: pc24Normal32As64Bits(0x3f800001), right64: pc24Normal32As64Bits(0x3fc00000), result: pc24Normal32As64Bits(0x3fc00002), inexact: true, incremented: true},
+  {name: 'non nearest control retains existing own service frontier', left: pc24Normal32As64Bits(0x40400000), right: 0x40000000, result: pc24Normal32As64Bits(0x40c00000), inexact: false, incremented: false, control: 0x087f, services: 1},
+];
+
+for (const [index, c] of pc24NormalProductFallbacks.entries()) test(`actual PC24 normal product fallback ${c.name}`, {skip}, () => {
+  multiplyResidualOracle(c, {
+    negativeLeft: true, top: index & 7, control: c.control ?? (index & 1 ? 0x007f : 0x003f),
+    status: 0x4700, tag: index % 3,
+  });
+});
+
+test('actual PC24 normal product fault and pending MF preserve prefix effects full banks and source bytes', {skip}, () => {
+  for (const reserved of [0, 0x40]) for (const pending of [false, true]) {
+    const f = fixture([0xb8, 0x78, 0x56, 0x34, 0x12, 0xd8, 0x0d, ...dword(0x2ffe), 0x43], {
+      data: [[0x2ffe, 0x5a], [0x2fff, 0xa5]], execution: {budget: 2},
+    });
+    rejectJsService(f);
+    const calls = memoryCalls(f);
+    try {
+      seedMultiplyResidualBank(f, multiplyRaw64(pc24Normal32As64Bits(0x3f800001)), {
+        control: (pending ? 0x003e : 0x003f) | reserved, status: pending ? 0x4701 : 0x4700, top: 7,
+      });
+      const scalar = new Uint8Array(f.engine.memory.buffer, f.engine.base, 56).slice(), banks = processBanks(f);
+      view(scalar).setUint32(16, 0x12345678, true); view(scalar).setUint32(48, 0x1005, true);
+      if (pending) view(banks[0]).setUint16(18, 0xff81, true);
+      const selected = f.cache.select(), state = f.slab();
+      const backing = state.getUint32(84, true), length = state.getUint32(88, true) * 4096;
+      const ram = new Uint8Array(f.engine.memory.buffer, backing, length).slice(), run = f.cache.execute(selected);
+      assert.deepEqual([run.coreReason, run.reason, run.retired, run.work, run.pc], [pending ? 9 : 3, pending ? 12 : 5, 1, 1, 0x1005]);
+      if (pending) assert.equal(f.engine.get(80), 0xff81);
+      else assert.deepEqual([f.engine.get(80), f.engine.get(84), f.engine.get(88), f.engine.get(92)], [1, 0x3000, 1, 4]);
+      assert.deepEqual(new Uint8Array(f.engine.memory.buffer, f.engine.base, 56), scalar);
+      assert.deepEqual(processBanks(f), banks);
+      assert.deepEqual(new Uint8Array(f.engine.memory.buffer, backing, length), ram);
+      assert.equal(f.slab().getUint32(48, true), 1);
+      assert.deepEqual(calls, {read: pending ? 0 : 1, write: 0});
+      event(f.engine, pending ? 16 : 0xffffffff, 0x1005, 1);
+      serviceCounts(f, pending ? 1 : 0);
+    } finally {f.close();}
+  }
+});
+
+test('actual PC24 normal product quota stops before a pending exception or invalid operand', {skip}, () => {
+  for (const pending of [false, true]) {
+    const f = fixture([0xb8, 0x78, 0x56, 0x34, 0x12, 0xd8, 0x0d, ...dword(0x2ffe), 0x43], {
+      data: [[0x2ffe, 0x5a], [0x2fff, 0xa5]], execution: {budget: 1},
+    });
+    rejectJsService(f);
+    const calls = memoryCalls(f);
+    try {
+      seedMultiplyResidualBank(f, multiplyRaw64(pc24Normal32As64Bits(0x3f800001)), {
+        control: pending ? 0x007e : 0x003f, status: pending ? 0x4701 : 0x4700, top: 7,
+      });
+      const scalar = new Uint8Array(f.engine.memory.buffer, f.engine.base, 56).slice(), banks = processBanks(f);
+      view(scalar).setUint32(16, 0x12345678, true); view(scalar).setUint32(48, 0x1005, true);
+      const selected = f.cache.select(), state = f.slab();
+      const backing = state.getUint32(84, true), length = state.getUint32(88, true) * 4096;
+      const ram = new Uint8Array(f.engine.memory.buffer, backing, length).slice(), run = f.cache.execute(selected);
+      assert.deepEqual([run.coreReason, run.reason, run.retired, run.work, run.pc], [2, 1, 1, 1, 0x1005]);
+      assert.deepEqual(new Uint8Array(f.engine.memory.buffer, f.engine.base, 56), scalar);
+      assert.deepEqual(processBanks(f), banks);
+      assert.deepEqual(new Uint8Array(f.engine.memory.buffer, backing, length), ram);
+      assert.equal(f.slab().getUint32(48, true), 0);
+      assert.deepEqual(calls, {read: 0, write: 0});
+      serviceCounts(f, 0);
+    } finally {f.close();}
+  }
+});

@@ -375,6 +375,7 @@ fn generated_raw80_multiply_matches_strict_product_rounding_and_neutral_boundari
     ];
     pairs.extend(bounded_pairs());
     pairs.extend(memory32_product_boundary_pairs());
+    pairs.extend(pc24_normal_product_pairs());
     let carry = u128::from(u64::MAX) * u128::from(u64::MAX);
     assert_eq!(carry as u64, 1);
     assert_eq!((carry >> 64) as u64, 0xfffffffffffffffe);
@@ -540,6 +541,20 @@ fn generated_raw80_multiply_matches_strict_product_rounding_and_neutral_boundari
             6,
         ),
         ("m32", value(u64::MAX, 0x3fff), one, 0x037f, 7),
+        (
+            "m32",
+            binary32(0x3f80_0001),
+            binary32(0x3fc0_0000),
+            0x003f,
+            6,
+        ),
+        (
+            "m32",
+            binary32(0x3f80_0001),
+            binary32(0x3fc0_0000),
+            0x003e,
+            2,
+        ),
     ] {
         let mut before = initial(cw, 0, 0x4220);
         put(&mut before, 0, a);
@@ -688,6 +703,243 @@ fn memory32_product_boundary_pairs() -> Vec<(Value, Value)> {
                 }
             }
         }
+    }
+    pairs
+}
+
+// both old and future compilers must pass these semantic controls; they are
+// not fast-path witnesses.
+fn pc24_normal_product_literals() -> Vec<(&'static str, Value, Value, Value, bool, bool)> {
+    let mut cases = Vec::new();
+    for (name, a, b, result, inexact, incremented) in [
+        ("exact", 0x4040_0000, 0x4000_0000, 0x40c0_0000, false, false),
+        ("odd-tie", 0x3f80_0001, 0x3fc0_0000, 0x3fc0_0002, true, true),
+        (
+            "even-tie",
+            0x3f80_0003,
+            0x3fc0_0000,
+            0x3fc0_0004,
+            true,
+            false,
+        ),
+        ("carry", 0x3f80_0001, 0x3fff_fffe, 0x4000_0000, true, true),
+        (
+            "minnormal",
+            0x0080_0000,
+            0x3f80_0000,
+            0x0080_0000,
+            false,
+            false,
+        ),
+        (
+            "near-minnormal",
+            0x0080_0001,
+            0x3f80_0001,
+            0x0080_0002,
+            true,
+            false,
+        ),
+        (
+            "maxfinite",
+            0x7f7f_ffff,
+            0x3f80_0000,
+            0x7f7f_ffff,
+            false,
+            false,
+        ),
+        (
+            "near-maxfinite",
+            0x7f7f_ffff,
+            0x3f7f_ffff,
+            0x7f7f_fffe,
+            true,
+            false,
+        ),
+    ] {
+        cases.push((
+            name,
+            binary32(a),
+            binary32(b),
+            binary32(result),
+            inexact,
+            incremented,
+        ));
+    }
+    cases.extend([
+        (
+            "below-normal-exact",
+            binary32(0x0080_0000),
+            binary32(0x3f7f_ffff),
+            value(0xffff_ff00_0000_0000, 0x3f80),
+            false,
+            false,
+        ),
+        (
+            "above-maxfinite",
+            binary32(0x7f7f_ffff),
+            binary32(0x3f80_0001),
+            value(0x8000_0000_0000_0000, 0x407f),
+            true,
+            false,
+        ),
+        (
+            "minnormal-square",
+            binary32(0x0080_0000),
+            binary32(0x0080_0000),
+            value(0x8000_0000_0000_0000, 0x3f03),
+            false,
+            false,
+        ),
+        (
+            "maxfinite-square",
+            binary32(0x7f7f_ffff),
+            binary32(0x7f7f_ffff),
+            value(0xffff_fe00_0000_0000, 0x40fe),
+            true,
+            false,
+        ),
+        (
+            "raw-low40-bit",
+            value(0x8000_0000_0080_0000, 0x3fff),
+            binary32(0x3f80_0000),
+            value(0x8000_0000_0000_0000, 0x3fff),
+            true,
+            false,
+        ),
+        (
+            "full-raw-carry",
+            value(u64::MAX, 0x3fff),
+            binary32(0x3f80_0000),
+            value(0x8000_0000_0000_0000, 0x4000),
+            true,
+            true,
+        ),
+        (
+            "left-below-f32-range",
+            value(1 << 63, 0x3f80),
+            binary32(0x4000_0000),
+            value(1 << 63, 0x3f81),
+            false,
+            false,
+        ),
+        (
+            "left-above-f32-range",
+            value(1 << 63, 0x407f),
+            binary32(0x3f00_0000),
+            value(1 << 63, 0x407e),
+            false,
+            false,
+        ),
+        (
+            "left-zero",
+            value(0, 0),
+            binary32(0x3f80_0000),
+            value(0, 0),
+            false,
+            false,
+        ),
+        (
+            "right-zero",
+            binary32(0x4040_0000),
+            value(0, 0),
+            value(0, 0),
+            false,
+            false,
+        ),
+    ]);
+    cases
+}
+
+#[test]
+fn strict_pc24_memory32_product_literals_preserve_extended_exponent_fallbacks() {
+    let mut memory = AddressSpace::new(2).unwrap();
+    for address in [0x1000, 0x3000] {
+        memory
+            .map_zeroed(
+                PageRange::new(GuestAddress(address), 1).unwrap(),
+                Permissions::ALL,
+            )
+            .unwrap();
+    }
+    memory.write(GuestAddress(0x1000), &[0xd8, 0x0b]).unwrap();
+    let decoded = decode_one(&memory, GuestAddress(0x1000)).unwrap();
+    let mut segments = SegmentContext::default();
+    segments.state.selectors = [0x23, 0x1b, 0x23, 0x23, 0x3b, 0x43];
+    let segments = SegmentContext::legacy(segments.state);
+    for (name, a, b, rounded, inexact, incremented) in pc24_normal_product_literals() {
+        for signs in 0..4 {
+            let mut a = a;
+            let mut b = b;
+            let mut rounded = rounded;
+            a.negative ^= signs & 1 != 0;
+            b.negative ^= signs & 2 != 0;
+            rounded.negative = a.negative ^ b.negative;
+            let words = ieee(b, 4).unwrap();
+            memory
+                .write(GuestAddress(0x3000), &words[0].to_le_bytes())
+                .unwrap();
+            for cw in [0x003f, 0x007f] {
+                for top in 0..8 {
+                    for flags in [0x450f, 0x452f, 0x470f, 0x472f] {
+                        let mut before = initial(cw, top, flags);
+                        put(&mut before, 0, a);
+                        let mut expected = before;
+                        let physical = usize::from(top);
+                        expected.registers[physical][..8]
+                            .copy_from_slice(&rounded.sig.to_le_bytes());
+                        expected.registers[physical][8..].copy_from_slice(
+                            &(rounded.exp | if rounded.negative { 0x8000 } else { 0 })
+                                .to_le_bytes(),
+                        );
+                        expected.tag = (expected.tag & !(3 << (physical * 2)))
+                            | (u16::from(rounded.sig == 0) << (physical * 2));
+                        expected.status = (before.status & !0x200)
+                            | (if inexact { 0x20 } else { 0 })
+                            | (if incremented { 0x200 } else { 0 });
+                        expected.opcode = 0x0b;
+                        expected.instruction_pointer = 0x1000;
+                        expected.data_pointer = 0x3000;
+                        expected.code_selector = 0x1b;
+                        expected.data_selector = 0x23;
+                        let mut scalar = State32 {
+                            registers: [1, 2, 3, 0x3000, 5, 6, 7, 8],
+                            eip: 0x1000,
+                            eflags: 0xcd7,
+                        };
+                        let mut numeric = NumericState::default();
+                        numeric.x87 = before;
+                        numeric
+                            .execute(
+                                &mut memory,
+                                &mut scalar,
+                                &segments,
+                                decoded.operation(),
+                                decoded.next_pc().0,
+                            )
+                            .unwrap();
+                        assert_eq!(
+                            raw(numeric.x87),
+                            raw(expected),
+                            "{name} signs={signs} cw={cw:x} top={top} flags={flags:x}"
+                        );
+                        assert_eq!(scalar.registers, [1, 2, 3, 0x3000, 5, 6, 7, 8]);
+                        assert_eq!((scalar.eip, scalar.eflags), (decoded.next_pc().0, 0xcd7));
+                        let mut stored = [0; 4];
+                        memory.read(GuestAddress(0x3000), &mut stored).unwrap();
+                        assert_eq!(stored, words[0].to_le_bytes());
+                    }
+                }
+            }
+        }
+    }
+}
+
+// the existing matrix recomputes PC53 expectations with its strict owner.
+// these PC24 literals do not narrow the other precision/frontier oracles.
+fn pc24_normal_product_pairs() -> Vec<(Value, Value)> {
+    let mut pairs = Vec::new();
+    for (_, a, b, ..) in pc24_normal_product_literals() {
+        pairs.extend([(a, b), (neg(a), b), (a, neg(b)), (neg(a), neg(b))]);
     }
     pairs
 }
