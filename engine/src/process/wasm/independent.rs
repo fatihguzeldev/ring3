@@ -18,6 +18,7 @@ use cache::CodeCache;
 pub(super) struct IndependentSession {
     pub(super) state: Box<CpuState>,
     pub(super) numeric: Box<NumericState>,
+    numeric_view: Box<runtime::NumericView>,
     pub(super) segments: SegmentContext,
     pub(super) dirty: DirtyPages,
     cache: CodeCache,
@@ -36,6 +37,7 @@ impl IndependentSession {
         Ok(Self {
             state: Box::default(),
             numeric: Box::default(),
+            numeric_view: Box::default(),
             segments: instance.segment_context()?,
             dirty: DirtyPages::new(memory.capacity_pages()).map_err(HostError::Memory)?,
             cache: CodeCache::new()?,
@@ -82,6 +84,9 @@ impl IndependentSession {
     }
 
     pub(super) fn refresh(&mut self, memory: &mut AddressSpace) {
+        self.numeric_view.x87_state = std::ptr::from_ref(&self.numeric.x87) as usize as u32;
+        self.numeric_view.selectors = self.segments.state.selectors.map(u32::from);
+        self.state.numeric = std::ptr::from_ref(&*self.numeric_view) as usize as u32;
         let view = memory.core_view();
         self.state.mappings = view.mappings as u32;
         self.state.permissions = view.permissions as u32;

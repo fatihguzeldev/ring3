@@ -3,6 +3,9 @@ mod compiler;
 mod dispatch;
 pub(crate) mod numeric;
 
-pub use abi::{ABI_SIZE, ABI_VERSION, CpuState, Status, supports_segments};
+pub use abi::{
+    ABI_SIZE, ABI_VERSION, CpuState, NUMERIC_VIEW_SIZE, NUMERIC_VIEW_VERSION, NumericView, Status,
+    supports_segments,
+};
 pub use compiler::{CompileError, CompiledUnit, compile, compile_with_gates};
 pub use dispatch::{emit_dispatch, emit_dispatch_with_service};

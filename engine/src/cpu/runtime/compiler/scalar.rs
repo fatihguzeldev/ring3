@@ -13,6 +13,8 @@ mod multiply;
 mod narrow;
 mod shift;
 mod string;
+mod x87;
+mod x87_arithmetic;
 
 const FLAGS: u32 = 9;
 const PC: u32 = 10;
@@ -49,6 +51,8 @@ pub(super) fn supports(operation: &Operation) -> bool {
         || exchange::supports(operation)
         || flags::supports(operation)
         || shift::supports(operation)
+        || x87::supports(operation)
+        || x87_arithmetic::supports(operation)
         || matches!(
             operation,
             Operation::Nop
@@ -120,7 +124,14 @@ pub(super) fn emit(blocks: &[Block]) -> Vec<u8> {
     exports.export("run", ExportKind::Func, 2);
     module.section(&exports);
     let mut out = Output {
-        function: Function::new([(24, ValType::I32), (1, ValType::I64), (8, ValType::I32)]),
+        function: Function::new([
+            (24, ValType::I32),
+            (1, ValType::I64),
+            (18, ValType::I32),
+            (2, ValType::I64),
+            (3, ValType::F32),
+            (9, ValType::F64),
+        ]),
     };
     out.c()
         .local_get(0)
@@ -893,6 +904,8 @@ impl Output {
                     && !exchange::emit(self, operation)
                     && !flags::emit(self, operation)
                     && !shift::emit(self, operation)
+                    && !x87::emit(self, operation)
+                    && !x87_arithmetic::emit(self, operation)
                 {
                     return false;
                 }

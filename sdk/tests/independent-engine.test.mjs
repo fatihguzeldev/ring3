@@ -485,17 +485,23 @@ test('actual strict numeric fault publishes its event before touching an unmappe
   const f = fixture([0xd9, 0x05, 0x00, 0x40, 0x00, 0x00], {fpControl: 0x037e, fpStatus: 1});
   rejectJsService(f);
   try {
+    const scalar = new Uint8Array(f.engine.memory.buffer, f.engine.base, 56).slice(), banks = processBanks(f);
+    view(banks[0]).setUint16(18, 0x8081, true);
     f.cache.import();
-    const run = f.cache.execute(f.cache.select());
+    const selected = f.cache.select(), state = f.slab(), backing = state.getUint32(84, true), length = state.getUint32(88, true) * 4096;
+    const ram = new Uint8Array(f.engine.memory.buffer, backing, length).slice(), run = f.cache.execute(selected);
     assert.deepEqual([run.reason, run.retired, run.work, run.pc], [12, 0, 0, 0x1000]);
     assert.equal(f.engine.get(80), 0x8081);
     assert.equal(new DataView(f.engine.memory.buffer).getUint16(f.engine.base + 4236 + 18, true), 0x8081);
+    assert.deepEqual(new Uint8Array(f.engine.memory.buffer, f.engine.base, 56), scalar);
+    assert.deepEqual(processBanks(f), banks);
+    assert.deepEqual(new Uint8Array(f.engine.memory.buffer, backing, length), ram);
     serviceCounts(f, 1);
     event(f.engine, 16, 0x1000, 0);
   } finally {f.close();}
 });
 
-test('actual numeric service reaches an exact budget boundary without executing the following integer instruction', {skip}, () => {
+test('actual inline FLD1 reaches an exact budget boundary without executing the following integer instruction', {skip}, () => {
   const registers = [0x12345678, 0x89abcdef, 0xd5e6789a, 0x23456789, 0x2f00, 0x55443322, 0x66554433, 0x77665544];
   const f = fixture([0xd9, 0xe8, 0x43], {registers, execution: {budget: 1}});
   rejectJsService(f);
@@ -513,11 +519,11 @@ test('actual numeric service reaches an exact budget boundary without executing 
     assert.deepEqual(processBanks(f), banks);
     assert.deepEqual(new Uint8Array(f.engine.memory.buffer, backing, length), ram);
     assert.equal(f.slab().getUint32(48, true), 0);
-    serviceCounts(f, 1);
+    serviceCounts(f, 0);
   } finally {f.close();}
 });
 
-test('actual numeric services resume across compiled selections and publish the literal floating store', {skip}, () => {
+test('actual inline x87 transport resumes across compiled selections and publishes the literal floating store', {skip}, () => {
   const registers = [0x12345678, 0x89abcdef, 0xd5e6789a, 0x23456789, 0x2f00, 0x55443322, 0x66554433, 0x77665544];
   const f = fixture([0xd9, 0xe8, 0xd9, 0x1d, 0, 0x20, 0, 0, 0x43], {registers, execution: {budget: 2}});
   rejectJsService(f);
@@ -542,7 +548,7 @@ test('actual numeric services resume across compiled selections and publish the 
     assert.deepEqual(new Uint8Array(f.engine.memory.buffer, f.engine.base, 56), scalar);
     assert.deepEqual(processBanks(f), banks);
     assert.deepEqual(new Uint8Array(f.engine.memory.buffer, backing, length), ram);
-    serviceCounts(f, 2);
+    serviceCounts(f, 0);
   } finally {f.close();}
 });
 
@@ -566,7 +572,7 @@ test('actual service trap publishes its completed instruction once and retains t
   } finally {f.close();}
 });
 
-test('actual numeric service commits an executable alias store before its completed SMC exit', {skip}, () => {
+test('actual inline x87 store commits its executable alias before the completed SMC exit', {skip}, () => {
   const f = fixture(undefined, {windowsMappings: true, physicalPages: 1024, execution: {budget: 2}});
   rejectJsService(f);
   try {
@@ -592,8 +598,172 @@ test('actual numeric service commits an executable alias store before its comple
     assert.deepEqual(new Uint8Array(f.engine.memory.buffer, f.engine.base, 56), scalar);
     assert.deepEqual(processBanks(f), banks);
     assert.deepEqual(new Uint8Array(f.engine.memory.buffer, backing, length), ram);
-    serviceCounts(f, 1);
     f.cache.import(); assert.equal(f.cache.table.get(old.slot), null);
+    serviceCounts(f, 0);
+  } finally {f.close();}
+});
+
+test('actual inline x87 transport preserves every raw80 ghost and logical FS metadata at each budget boundary', {skip}, () => {
+  const one = [0, 0, 0, 0, 0, 0, 0, 0x80, 0xff, 0x3f];
+  const epsilon = [0, 0, 0, 0, 0, 1, 0, 0x80, 0xff, 0x3f];
+  const registers = [0x12345678, 0x89abcdef, 0xd5e6789a, 0x23456789, 0x2f00, 0x55443322, 0x66554433, 0x77665544];
+  const f = fixture([0x64, 0xd9, 0x05, ...dword(0x1000), 0xd9, 0xe8, 0xd9, 0xc9, 0xdd, 0xd8,
+    0x64, 0xd9, 0x1d, ...dword(0x1004)], {registers, fpControl: 0x003f, fpStatus: 0x4220,
+    data: dword(0x3f800001).map((value, index) => [0x2000 + index, value]), execution: {budget: 1}});
+  try {
+    f.engine.ok('set_segment_base', 4, 0x1000);
+    const scalar = new Uint8Array(f.engine.memory.buffer, f.engine.base, 56).slice(), banks = processBanks(f), fp = view(banks[0]);
+    let ram, backing, length, dataSlot;
+    for (const step of [
+      {pc: 0x1000, next: 0x1007, status: 0x7820, tag: 0x3fff, opcode: 0x105, data: 0x1000, raw: [[7, epsilon]]},
+      {pc: 0x1007, next: 0x1009, status: 0x7020, tag: 0x0fff, opcode: 0x1e8, data: 0x1000, raw: [[6, one]]},
+      {pc: 0x1009, next: 0x100b, status: 0x7020, tag: 0x0fff, opcode: 0x1c9, data: 0x1000, raw: [[6, epsilon], [7, one]]},
+      {pc: 0x100b, next: 0x100d, status: 0x7820, tag: 0x3fff, opcode: 0x5d8, data: 0x1000, raw: []},
+      {pc: 0x100d, next: 0x1014, status: 0x4020, tag: 0xffff, opcode: 0x11d, data: 0x1004, raw: []},
+    ]) {
+      const selected = f.cache.select(), state = f.slab();
+      if (!ram) {
+        backing = state.getUint32(84, true); length = state.getUint32(88, true) * 4096;
+        ram = new Uint8Array(f.engine.memory.buffer, backing, length).slice();
+        dataSlot = new DataView(f.engine.memory.buffer).getUint32(state.getUint32(76, true) + 2 * 4, true) - 1;
+      }
+      view(scalar).setUint32(48, step.next, true);
+      fp.setUint16(18, step.status, true); fp.setUint16(20, step.tag, true); fp.setUint16(22, step.opcode, true);
+      fp.setUint32(24, step.pc, true); fp.setUint32(28, step.data, true); fp.setUint16(32, 0x1b, true); fp.setUint16(34, 0x3b, true);
+      for (const [slot, raw] of step.raw) banks[0].set(raw, 40 + slot * 10);
+      if (step.next === 0x1014) new DataView(ram.buffer).setUint32(dataSlot * 4096 + 4, 0x3f800000, true);
+      const run = f.cache.execute(selected);
+      assert.deepEqual([run.reason, run.retired, run.work, run.pc], [1, 1, 1, step.next]);
+      assert.deepEqual(new Uint8Array(f.engine.memory.buffer, f.engine.base, 56), scalar);
+      assert.deepEqual(processBanks(f), banks);
+      assert.deepEqual(new Uint8Array(f.engine.memory.buffer, backing, length), ram);
+      assert.equal(f.slab().getUint32(48, true), 0);
+    }
+    serviceCounts(f, 0);
+  } finally {f.close();}
+});
+
+test('actual inline x87 register exchange and pop retain normal raw80 values wider than binary32', {skip}, () => {
+  const first = [1, 0, 0, 0, 0, 0, 0, 0x80, 0xff, 0x3f];
+  const second = [1, 0, 0, 0, 0, 0, 0, 0xc0, 0, 0x40];
+  const f = fixture([0xd9, 0xc9, 0xdd, 0xd8, 0xdd, 0xd8], {fpControl: 0x007f, fpStatus: 0x200, execution: {budget: 3}});
+  try {
+    const arena = new DataView(f.engine.memory.buffer), bank = f.engine.base + 4236;
+    arena.setUint16(bank + 20, 0xfff0, true);
+    new Uint8Array(f.engine.memory.buffer, bank + 40, 10).set(first);
+    new Uint8Array(f.engine.memory.buffer, bank + 50, 10).set(second);
+    const scalar = new Uint8Array(f.engine.memory.buffer, f.engine.base, 56).slice(), banks = processBanks(f), fp = view(banks[0]);
+    view(scalar).setUint32(48, 0x1006, true); fp.setUint16(18, 0x1000, true); fp.setUint16(20, 0xffff, true);
+    fp.setUint16(22, 0x5d8, true); fp.setUint32(24, 0x1004, true); fp.setUint16(32, 0x1b, true);
+    banks[0].set(second, 40); banks[0].set(first, 50);
+    let selected = f.cache.select(); const state = f.slab(), backing = state.getUint32(84, true), length = state.getUint32(88, true) * 4096;
+    const ram = new Uint8Array(f.engine.memory.buffer, backing, length).slice();
+    let run, work = 0, retired = 0;
+    for (let count = 0; count < 4; count++) {
+      run = f.cache.execute(selected); work += run.work; retired += run.retired;
+      if (run.coreReason !== 1) break;
+      selected = f.cache.select();
+    }
+    assert.deepEqual([run.reason, retired, work, run.pc], [1, 3, 3, 0x1006]);
+    assert.deepEqual(new Uint8Array(f.engine.memory.buffer, f.engine.base, 56), scalar);
+    assert.deepEqual(processBanks(f), banks);
+    assert.deepEqual(new Uint8Array(f.engine.memory.buffer, backing, length), ram);
+    serviceCounts(f, 0);
+  } finally {f.close();}
+});
+
+test('actual inline x87 late store fault preserves the pending pop raw payload flags and metadata', {skip}, () => {
+  const f = fixture([0xd9, 0x1d, 0xfe, 0x2f, 0, 0, 0x43], {fpControl: 0x007f, fpStatus: 0x200,
+    data: [[0x2ffe, 0x5a], [0x2fff, 0xa5]], execution: {budget: 2}});
+  try {
+    const arena = new DataView(f.engine.memory.buffer), bank = f.engine.base + 4236;
+    arena.setUint16(bank + 20, 0xfffc, true); arena.setUint16(bank + 22, 0x321, true);
+    arena.setUint32(bank + 24, 0x1234, true); arena.setUint32(bank + 28, 0x4321, true);
+    arena.setUint16(bank + 32, 0x1b, true); arena.setUint16(bank + 34, 0x3b, true);
+    new Uint8Array(f.engine.memory.buffer, bank + 40, 10).set([0, 0, 0, 0, 0, 0, 0, 0x80, 0xff, 0x3f]);
+    const scalar = new Uint8Array(f.engine.memory.buffer, f.engine.base, 56).slice(), banks = processBanks(f);
+    const selected = f.cache.select(), state = f.slab(), backing = state.getUint32(84, true), length = state.getUint32(88, true) * 4096;
+    const ram = new Uint8Array(f.engine.memory.buffer, backing, length).slice(), run = f.cache.execute(selected);
+    assert.deepEqual([run.reason, run.retired, run.work, run.pc], [5, 0, 0, 0x1000]);
+    assert.deepEqual([f.engine.get(80), f.engine.get(84), f.engine.get(88), f.engine.get(92)], [1, 0x3000, 2, 4]);
+    assert.deepEqual(new Uint8Array(f.engine.memory.buffer, f.engine.base, 56), scalar);
+    assert.deepEqual(processBanks(f), banks);
+    assert.deepEqual(new Uint8Array(f.engine.memory.buffer, backing, length), ram);
+    assert.equal(f.slab().getUint32(48, true), 2);
+    event(f.engine, 0xffffffff, 0x1000, 0);
+    serviceCounts(f, 0);
+  } finally {f.close();}
+});
+
+for (const c of [
+  {name: 'exact ADD', operation: 0x05, left: 0x40400000, right: 0x40000000, output: 0x40a00000,
+    raw: [0, 0, 0, 0, 0, 0, 0, 0xa0, 1, 0x40], control: 0x003f, status: 0x4020, inline: true},
+  {name: 'exact MUL', operation: 0x0d, left: 0x40400000, right: 0x40000000, output: 0x40c00000,
+    raw: [0, 0, 0, 0, 0, 0, 0, 0xc0, 1, 0x40], control: 0x003f, status: 0x4020, inline: true},
+  {name: 'exact DIV', operation: 0x35, left: 0x40400000, right: 0x40000000, output: 0x3fc00000,
+    raw: [0, 0, 0, 0, 0, 0, 0, 0xc0, 0xff, 0x3f], control: 0x003f, status: 0x4020, inline: true},
+  {name: 'non-PC24 ADD', operation: 0x05, left: 0x40400000, right: 0x40000000, output: 0x40a00000,
+    raw: [0, 0, 0, 0, 0, 0, 0, 0xa0, 1, 0x40], control: 0x037f, status: 0x4020, inline: false},
+  {name: 'unmasked ADD', operation: 0x05, left: 0x40400000, right: 0x40000000, output: 0x40a00000,
+    raw: [0, 0, 0, 0, 0, 0, 0, 0xa0, 1, 0x40], control: 0x003e, status: 0x4020, inline: false},
+  {name: 'inexact DIV', operation: 0x35, left: 0x3f800000, right: 0x40400000, output: 0x3eaaaaab,
+    raw: [0, 0, 0, 0, 0, 0xab, 0xaa, 0xaa, 0xfd, 0x3f], control: 0x003f, status: 0x4000, inline: false},
+]) test(`actual x87 ${c.name} preserves raw CW sticky PE C3 and the strict arithmetic result`, {skip}, () => {
+  const registers = [0x12345678, 0x89abcdef, 0xd5e6789a, 0x23456789, 0x2f00, 0x55443322, 0x66554433, 0x77665544];
+  const data = [...dword(c.left).map((value, index) => [0x2000 + index, value]),
+    ...dword(c.right).map((value, index) => [0x2004 + index, value])];
+  const f = fixture([0xd9, 0x05, ...dword(0x2000), 0xd8, c.operation, ...dword(0x2004),
+    0xd9, 0x1d, ...dword(0x2008), 0x43], {registers, data, fpControl: c.control, fpStatus: c.status, execution: {budget: 3}});
+  try {
+    const scalar = new Uint8Array(f.engine.memory.buffer, f.engine.base, 56).slice(), banks = processBanks(f), fp = view(banks[0]);
+    view(scalar).setUint32(48, 0x1012, true); fp.setUint16(18, 0x4020, true);
+    fp.setUint16(22, 0x11d, true); fp.setUint32(24, 0x100c, true); fp.setUint32(28, 0x2008, true);
+    fp.setUint16(32, 0x1b, true); fp.setUint16(34, 0x23, true); banks[0].set(c.raw, 110);
+    let selected = f.cache.select(); const state = f.slab(), backing = state.getUint32(84, true), length = state.getUint32(88, true) * 4096;
+    const ram = new Uint8Array(f.engine.memory.buffer, backing, length).slice();
+    const slot = new DataView(f.engine.memory.buffer).getUint32(state.getUint32(76, true) + 2 * 4, true) - 1;
+    new DataView(ram.buffer).setUint32(slot * 4096 + 8, c.output, true);
+    let run, retired = 0, work = 0;
+    for (let count = 0; count < 4; count++) {
+      run = f.cache.execute(selected); retired += run.retired; work += run.work;
+      if (run.coreReason !== 1) break;
+      selected = f.cache.select();
+    }
+    assert.deepEqual([run.reason, retired, work, run.pc], [1, 3, 3, 0x1012]);
+    assert.deepEqual(new Uint8Array(f.engine.memory.buffer, f.engine.base, 56), scalar);
+    assert.deepEqual(processBanks(f), banks);
+    assert.deepEqual(new Uint8Array(f.engine.memory.buffer, backing, length), ram);
+    if (c.inline) serviceCounts(f, 0);
+    else {
+      assert(f.cache.stats().instructionCalls > 0, 'an input outside the proved arithmetic predicate retains the independent instruction service');
+      serviceCounts(f, f.cache.stats().instructionCalls);
+    }
+  } finally {f.close();}
+});
+
+test('actual special x87 infinity transport retains the independent service and exact ghost payload', {skip}, () => {
+  const f = fixture([0xd9, 0x05, ...dword(0x2000), 0xd9, 0x1d, ...dword(0x2004)], {
+    data: dword(0x7f800000).map((value, index) => [0x2000 + index, value]), fpControl: 0x003f, fpStatus: 0x4020, execution: {budget: 2}});
+  try {
+    const scalar = new Uint8Array(f.engine.memory.buffer, f.engine.base, 56).slice(), banks = processBanks(f), fp = view(banks[0]);
+    view(scalar).setUint32(48, 0x100c, true); fp.setUint16(22, 0x11d, true);
+    fp.setUint32(24, 0x1006, true); fp.setUint32(28, 0x2004, true); fp.setUint16(32, 0x1b, true); fp.setUint16(34, 0x23, true);
+    banks[0].set([0, 0, 0, 0, 0, 0, 0, 0x80, 0xff, 0x7f], 110);
+    let selected = f.cache.select(); const state = f.slab(), backing = state.getUint32(84, true), length = state.getUint32(88, true) * 4096;
+    const ram = new Uint8Array(f.engine.memory.buffer, backing, length).slice();
+    const slot = new DataView(f.engine.memory.buffer).getUint32(state.getUint32(76, true) + 2 * 4, true) - 1;
+    new DataView(ram.buffer).setUint32(slot * 4096 + 4, 0x7f800000, true);
+    let run, retired = 0, work = 0;
+    for (let count = 0; count < 3; count++) {
+      run = f.cache.execute(selected); retired += run.retired; work += run.work;
+      if (run.coreReason !== 1) break;
+      selected = f.cache.select();
+    }
+    assert.deepEqual([run.reason, retired, work, run.pc], [1, 2, 2, 0x100c]);
+    assert.deepEqual(new Uint8Array(f.engine.memory.buffer, f.engine.base, 56), scalar);
+    assert.deepEqual(processBanks(f), banks);
+    assert.deepEqual(new Uint8Array(f.engine.memory.buffer, backing, length), ram);
+    serviceCounts(f, 2);
   } finally {f.close();}
 });
 

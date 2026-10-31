@@ -183,3 +183,7 @@ mod source_tests;
 mod string_tests;
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod x87_arithmetic_tests;
+#[cfg(test)]
+mod x87_tests;

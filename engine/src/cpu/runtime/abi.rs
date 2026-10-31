@@ -2,6 +2,28 @@ use crate::cpu::x86::{SegmentContext, State32};
 
 pub const ABI_VERSION: u32 = 1;
 pub const ABI_SIZE: u32 = 160;
+pub const NUMERIC_VIEW_VERSION: u32 = 1;
+pub const NUMERIC_VIEW_SIZE: u32 = 36;
+
+#[derive(Clone, Debug)]
+#[repr(C)]
+pub struct NumericView {
+    pub version: u32,
+    pub size: u32,
+    pub x87_state: u32,
+    pub selectors: [u32; 6],
+}
+
+impl Default for NumericView {
+    fn default() -> Self {
+        Self {
+            version: NUMERIC_VIEW_VERSION,
+            size: NUMERIC_VIEW_SIZE,
+            x87_state: 0,
+            selectors: [0; 6],
+        }
+    }
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(u32)]
@@ -124,10 +146,34 @@ mod tests {
         assert_eq!(std::mem::offset_of!(CpuState, registers), 8);
         assert_eq!(std::mem::offset_of!(CpuState, eip), 40);
         assert_eq!(std::mem::offset_of!(CpuState, mappings), 76);
+        assert_eq!(std::mem::offset_of!(CpuState, numeric), 124);
         assert_eq!(std::mem::offset_of!(CpuState, mapping_epoch), 128);
         assert_eq!(std::mem::offset_of!(CpuState, directory), 144);
         assert_eq!(std::mem::offset_of!(CpuState, segment_mask), 152);
         assert_eq!(std::mem::offset_of!(CpuState, transaction_version), 156);
+    }
+    #[test]
+    fn numeric_view_binds_the_owned_x87_layout_without_exposing_numeric_state() {
+        use crate::cpu::x86::X87State;
+
+        assert_eq!(
+            std::mem::size_of::<NumericView>(),
+            NUMERIC_VIEW_SIZE as usize
+        );
+        assert_eq!(std::mem::offset_of!(NumericView, version), 0);
+        assert_eq!(std::mem::offset_of!(NumericView, size), 4);
+        assert_eq!(std::mem::offset_of!(NumericView, x87_state), 8);
+        assert_eq!(std::mem::offset_of!(NumericView, selectors), 12);
+        assert_eq!(std::mem::size_of::<X87State>(), 100);
+        assert_eq!(std::mem::offset_of!(X87State, control), 0);
+        assert_eq!(std::mem::offset_of!(X87State, status), 2);
+        assert_eq!(std::mem::offset_of!(X87State, tag), 4);
+        assert_eq!(std::mem::offset_of!(X87State, opcode), 6);
+        assert_eq!(std::mem::offset_of!(X87State, instruction_pointer), 8);
+        assert_eq!(std::mem::offset_of!(X87State, data_pointer), 12);
+        assert_eq!(std::mem::offset_of!(X87State, code_selector), 16);
+        assert_eq!(std::mem::offset_of!(X87State, data_selector), 18);
+        assert_eq!(std::mem::offset_of!(X87State, registers), 20);
     }
     #[test]
     fn compiled_segment_profile_preserves_full_limits_and_tls_bases() {
