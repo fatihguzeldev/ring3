@@ -1782,3 +1782,125 @@ test('actual m64 comparison preserves whole-operand faults before empty-stack ef
     } finally {f.close();}
   }
 });
+
+function multiplyRaw64(bits) {
+  const exponent = Number(bits >> 52n & 0x7ffn), fraction = bits & 0xfffffffffffffn;
+  const sign = Number(bits >> 48n & 0x8000n);
+  assert(exponent < 0x7ff && (exponent !== 0 || fraction === 0n), 'test payload is a finite normal binary64 or signed zero');
+  return {sig: exponent ? (0x10000000000000n | fraction) << 11n : 0n, exp: exponent ? (exponent + 15360) | sign : sign};
+}
+
+function seedMultiplyResidualBank(f, left, {control, status, top, tag = 0}) {
+  const fp = new DataView(f.engine.memory.buffer, f.engine.base + 4236, 128);
+  fp.setUint16(16, control, true); fp.setUint16(18, status | top << 11, true);
+  fp.setUint16(20, (0xffff & ~(3 << (top * 2))) | tag << (top * 2), true);
+  fp.setUint16(22, 0x321, true); fp.setUint32(24, 0x12345678, true); fp.setUint32(28, 0x87654321, true);
+  fp.setUint16(32, 0x71, true); fp.setUint16(34, 0x72, true);
+  for (let index = 0; index < 8; index++) {
+    fp.setBigUint64(40 + index * 10, 0x8000000000000000n + (BigInt(index) << 40n), true);
+    fp.setUint16(48 + index * 10, 0x3fff, true);
+  }
+  fp.setBigUint64(40 + top * 10, left.sig, true); fp.setUint16(48 + top * 10, left.exp, true);
+  new DataView(f.engine.memory.buffer).setUint32(f.engine.base + 52, 0xcd7, true);
+}
+
+const multiplyResidualCases = [
+  {name: 'exact PC53 product', left: 0x4008000000000000n, right: 0x40000000, result: 0x4018000000000000n, inexact: false, incremented: false},
+  {name: 'negative residual', left: 0x3ff0000000000001n, right: 0x3f7fffff, result: 0x3fefffffe0000002n, inexact: true, incremented: true},
+  {name: 'positive residual', left: 0x3ff0000000000001n, right: 0x3f800001, result: 0x3ff0000020000001n, inexact: true, incremented: false},
+  {name: 'odd halfway product', left: 0x3ff0000000000001n, right: 0x3fc00000, result: 0x3ff8000000000002n, inexact: true, incremented: true},
+  {name: 'even halfway product', left: 0x3ff0000000000003n, right: 0x3fc00000, result: 0x3ff8000000000004n, inexact: true, incremented: false},
+  {name: 'exponent carry', left: 0x3ff5555555555555n, right: 0x3fc00000, result: 0x4000000000000000n, inexact: true, incremented: true},
+  {name: 'minimum positive residual 2^-651', left: 0x23d0000000000001n, right: 0x00800001, result: 0x1bf0000020000001n, inexact: true, incremented: false},
+  {name: 'minimum negative residual -2^-651', left: 0x23d0000000000001n, right: 0x00ffffff, result: 0x1bffffffe0000002n, inexact: true, incremented: true},
+  {name: 'maximum admitted exponent', left: 0x5c10000000000001n, right: 0x7f7fffff, result: 0x640fffffe0000002n, inexact: true, incremented: true},
+];
+
+function multiplyResidualOracle(c, {negativeLeft = false, negativeRight = false, top = 7, control = 0x023f, status = 0x4700, tag = 0} = {}) {
+  const registers = [0xaabbccdd, 0x89abcdef, 0xd5e6789a, 0x23456789, 0x2f00, 0x55443322, 0x66554433, 0x77665544];
+  const right = c.right | (negativeRight ? 0x80000000 : 0);
+  const right64 = c.right64 === undefined ? undefined : c.right64 | (negativeRight ? 1n << 63n : 0n);
+  const data = right64 === undefined ? dword(right) : [...dword(Number(right64 & 0xffffffffn)), ...dword(Number(right64 >> 32n))];
+  const f = fixture([0xb8, 0x78, 0x56, 0x34, 0x12, 0x64, c.right64 === undefined ? 0xd8 : 0xdc, 0x0d, ...dword(0x1004), 0x43], {
+    registers, data: data.map((value, index) => [0x2004 + index, value]), execution: {budget: 2},
+  });
+  rejectJsService(f);
+  const calls = memoryCalls(f);
+  try {
+    f.engine.ok('set_segment_base', 4, 0x1000);
+    const left = c.rawLeft ? {...c.rawLeft} : multiplyRaw64(c.left);
+    left.exp ^= negativeLeft ? 0x8000 : 0;
+    seedMultiplyResidualBank(f, left, {control, status, top, tag});
+    const scalar = new Uint8Array(f.engine.memory.buffer, f.engine.base, 56).slice(), banks = processBanks(f), fp = view(banks[0]);
+    view(scalar).setUint32(16, 0x12345678, true); view(scalar).setUint32(48, 0x100c, true);
+    const result = multiplyRaw64(c.result | (negativeLeft !== negativeRight ? 1n << 63n : 0n));
+    fp.setUint16(18, (fp.getUint16(18, true) & ~0x200) | (c.inexact ? 0x20 : 0) | (c.incremented ? 0x200 : 0), true);
+    fp.setUint16(20, (fp.getUint16(20, true) & ~(3 << (top * 2))) | (result.sig === 0n ? 1 << (top * 2) : 0), true);
+    fp.setUint16(22, c.right64 === undefined ? 0x00d : 0x40d, true);
+    fp.setUint32(24, 0x1005, true); fp.setUint32(28, 0x1004, true); fp.setUint16(32, 0x1b, true); fp.setUint16(34, 0x3b, true);
+    fp.setBigUint64(40 + top * 10, result.sig, true); fp.setUint16(48 + top * 10, result.exp, true);
+    const selected = f.cache.select(), state = f.slab();
+    const backing = state.getUint32(84, true), length = state.getUint32(88, true) * 4096;
+    const ram = new Uint8Array(f.engine.memory.buffer, backing, length).slice(), run = f.cache.execute(selected);
+    assert.deepEqual([run.coreReason, run.reason, run.retired, run.work, run.pc], [2, 1, 2, 2, 0x100c]);
+    assert.deepEqual(new Uint8Array(f.engine.memory.buffer, f.engine.base, 56), scalar);
+    assert.deepEqual(processBanks(f), banks);
+    assert.deepEqual(new Uint8Array(f.engine.memory.buffer, backing, length), ram);
+    assert.equal(f.slab().getUint32(48, true), 0);
+    assert.deepEqual(calls, {read: 0, write: 0});
+    // the existing u128 implementation also admits these inputs. this gate
+    // proves compatibility, not hardware-path execution or a performance gain.
+    serviceCounts(f, c.services ?? 0);
+  } finally {f.close();}
+}
+
+for (const [index, c] of multiplyResidualCases.entries()) test(`actual multiply residual oracle ${c.name} preserves every bank and source byte`, {skip}, () => {
+  for (let signs = 0; signs < 4; signs++) multiplyResidualOracle(c, {
+    negativeLeft: !!(signs & 1), negativeRight: !!(signs & 2), top: (index * 4 + signs) & 7,
+    control: (index + signs) & 1 ? 0x027f : 0x023f,
+    status: 0x4500 | (signs & 1 ? 0x200 : 0) | (signs & 2 ? 0x20 : 0) | (signs === 3 ? 0x8080 : 0), tag: (index + signs) % 3,
+  });
+});
+
+for (const c of [
+  {name: 'lower exponent outside hardware predicate', left: 0x23c0000000000001n, right: 0x00800001, result: 0x1be0000020000001n, inexact: true, incremented: false},
+  {name: 'upper exponent outside hardware predicate', left: 0x5c20000000000001n, right: 0x7f7fffff, result: 0x641fffffe0000002n, inexact: true, incremented: true},
+  {name: 'raw80 low bit outside binary64 precision', rawLeft: {sig: 0x8000000000000001n, exp: 0x3fff}, right: 0x3f800000, result: 0x3ff0000000000000n, inexact: true, incremented: false},
+  {name: 'full raw80 significand and exponent carry', rawLeft: {sig: 0xffffffffffffffffn, exp: 0x3fff}, right: 0x3f800000, result: 0x4000000000000000n, inexact: true, incremented: true},
+  {name: 'PC24 existing rounding', left: 0x3ff0000000000001n, right: 0x3f800001, result: 0x3ff0000020000000n, inexact: true, incremented: false, control: 0x003f},
+  {name: 'memory64 existing u128 path', left: 0x3ff0000000000001n, right64: 0x3ff0000020000000n, result: 0x3ff0000020000001n, inexact: true, incremented: false},
+  {name: 'signed zero existing path', left: 0n, right: 0x3f800000, result: 0n, inexact: false, incremented: false},
+  {name: 'unsupported CW existing service', left: 0x4008000000000000n, right: 0x40000000, result: 0x4018000000000000n, inexact: false, incremented: false, control: 0x033f, services: 1},
+]) test(`actual multiply residual fallback ${c.name} retains its previous admission`, {skip}, () => {
+  multiplyResidualOracle(c, {negativeLeft: true, control: c.control ?? 0x023f});
+});
+
+test('actual multiply residual fault and pending MF preserve the prefix full banks and original raw operand', {skip}, () => {
+  for (const pending of [false, true]) {
+    const f = fixture([0xb8, 0x78, 0x56, 0x34, 0x12, 0xd8, 0x0d, ...dword(0x2ffe), 0x43], {
+      data: [[0x2ffe, 0x5a], [0x2fff, 0xa5]], execution: {budget: 2},
+    });
+    rejectJsService(f);
+    const calls = memoryCalls(f);
+    try {
+      seedMultiplyResidualBank(f, multiplyRaw64(0x3ff0000000000001n), {control: pending ? 0x023e : 0x023f, status: pending ? 0x4701 : 0x4700, top: 7});
+      const scalar = new Uint8Array(f.engine.memory.buffer, f.engine.base, 56).slice(), banks = processBanks(f);
+      view(scalar).setUint32(16, 0x12345678, true); view(scalar).setUint32(48, 0x1005, true);
+      if (pending) view(banks[0]).setUint16(18, 0xff81, true);
+      const selected = f.cache.select(), state = f.slab();
+      const backing = state.getUint32(84, true), length = state.getUint32(88, true) * 4096;
+      const ram = new Uint8Array(f.engine.memory.buffer, backing, length).slice(), run = f.cache.execute(selected);
+      assert.deepEqual([run.coreReason, run.reason, run.retired, run.work, run.pc], [pending ? 9 : 3, pending ? 12 : 5, 1, 1, 0x1005]);
+      if (pending) assert.equal(f.engine.get(80), 0xff81);
+      else assert.deepEqual([f.engine.get(80), f.engine.get(84), f.engine.get(88), f.engine.get(92)], [1, 0x3000, 1, 4]);
+      assert.deepEqual(new Uint8Array(f.engine.memory.buffer, f.engine.base, 56), scalar);
+      assert.deepEqual(processBanks(f), banks);
+      assert.deepEqual(new Uint8Array(f.engine.memory.buffer, backing, length), ram);
+      assert.equal(f.slab().getUint32(48, true), 1);
+      assert.equal(calls.write, 0);
+      assert.equal(calls.read, pending ? 0 : 1);
+      event(f.engine, pending ? 16 : 0xffffffff, 0x1005, 1);
+      serviceCounts(f, pending ? 1 : 0);
+    } finally {f.close();}
+  }
+});
