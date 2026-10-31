@@ -2415,3 +2415,50 @@ test('actual fused page proofs survive read-only helpers and expire across write
     }
   }
 });
+
+test('actual pure FP services preserve page proofs while publishing dirty bytes', {skip}, () => {
+  for (const mutating of [true, false]) {
+    const code = mutating
+      ? [0xa3, 0, 0x20, 0, 0, 0xd9, 0xe8, 0xdb, 0x3d, 0x10, 0x20, 0, 0]
+      : [0xa3, 0, 0x20, 0, 0, 0xdb, 0xe3];
+    const f = fixture(code, {independent: false, registers: [0x12345678, 0, 0, 0, 0x2f00, 0, 0, 0]});
+    let active = false;
+    try {
+      const api = f.engine.api;
+      f.engine.ok('cpu_begin', ...KEY); active = true;
+      const context = api.cpu_context_ptr() >>> 0;
+      f.slab().setUint32(48, 4, true);
+      f.engine.ok('cpu_prepare', ...KEY, 0x1000, mutating ? 3 : 2);
+      const bytes = new Uint8Array(f.engine.memory.buffer, api.cpu_code_ptr() >>> 0, api.cpu_code_len() >>> 0);
+      const unit = new WebAssembly.Instance(new WebAssembly.Module(bytes), {env: {memory: f.engine.memory},
+        cpu: {read: api.cpu_runtime_read, write: api.cpu_runtime_write}});
+      assert.equal(unit.exports.run(context), 7);
+      let all = new DataView(f.engine.memory.buffer), state = f.slab();
+      const prefix = mutating ? 2 : 1, next = mutating ? 0x100d : 0x1007;
+      assert.deepEqual([state.getUint32(40, true), state.getUint32(56, true), state.getUint32(108, true)],
+        [mutating ? 0x1007 : 0x1005, prefix, 1]);
+      const header = state.getUint32(72, true), rows = all.getUint32(header + 16, true);
+      const epoch = all.getUint32(header, true), row = all.getBigUint64(rows + 2 * 8, true);
+      assert.equal(Number(row >> 32n), epoch); assert.equal(Number(row & 7n), 7);
+      const table = new Uint8Array(f.engine.memory.buffer, rows, 8 << 20).slice();
+      const backing = state.getUint32(84, true), length = state.getUint32(88, true) * 4096;
+      const ram = new Uint8Array(f.engine.memory.buffer, backing, length).slice();
+      const versionPointer = state.getUint32(156, true), version = all.getBigUint64(versionPointer, true);
+      assert.equal(api.cpu_runtime_instruction(context), 0);
+      all = new DataView(f.engine.memory.buffer); state = f.slab();
+      assert.deepEqual([state.getUint32(40, true), state.getUint32(56, true), state.getUint32(48, true), state.getUint32(108, true)],
+        [next, prefix + 1, 3 - prefix, 0]);
+      assert(all.getBigUint64(versionPointer, true) > version, 'the completed ordinary dirty batch was really published');
+      assert.equal(all.getUint32(header, true) === epoch, !mutating);
+      assert.deepEqual(new Uint8Array(f.engine.memory.buffer, rows, 8 << 20), table);
+      if (mutating) {
+        const slot = all.getUint32(state.getUint32(76, true) + 2 * 4, true) - 1;
+        ram.set([0, 0, 0, 0, 0, 0, 0, 0x80, 0xff, 0x3f], slot * 4096 + 0x10);
+      }
+      assert.deepEqual(new Uint8Array(f.engine.memory.buffer, backing, length), ram);
+    } finally {
+      if (active) f.engine.ok('cpu_end', ...KEY);
+      f.close();
+    }
+  }
+});

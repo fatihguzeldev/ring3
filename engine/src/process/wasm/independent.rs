@@ -84,14 +84,29 @@ impl IndependentSession {
 
     pub(super) fn flush(&mut self, memory: &mut AddressSpace) -> Result<(), HostError> {
         self.memory_cache.invalidate();
+        self.publish_dirty_preserving_memory(memory)
+    }
+
+    // dirty publication changes content versions and queue state, not translation authority.
+    pub(super) fn publish_dirty_preserving_memory(
+        &mut self,
+        memory: &mut AddressSpace,
+    ) -> Result<(), HostError> {
         self.dirty.len = self.state.dirty_len;
-        self.dirty.publish(memory).map_err(HostError::Memory)?;
+        if let Err(error) = self.dirty.publish(memory) {
+            self.memory_cache.invalidate();
+            return Err(HostError::Memory(error));
+        }
         self.state.dirty_len = 0;
         Ok(())
     }
 
     pub(super) fn refresh(&mut self, memory: &mut AddressSpace) {
         self.memory_cache.invalidate();
+        self.refresh_preserving_memory(memory);
+    }
+
+    pub(super) fn refresh_preserving_memory(&mut self, memory: &mut AddressSpace) {
         self.state.memory_cache = std::ptr::from_ref(&*self.memory_cache) as usize as u32;
         self.numeric_view.x87_state = std::ptr::from_ref(&self.numeric.x87) as usize as u32;
         self.numeric_view.selectors = self.segments.state.selectors.map(u32::from);
@@ -433,7 +448,7 @@ pub(super) fn paging_failure(state: &mut CpuState, error: CpuPagingError32, widt
     }
 }
 
-fn helper<const READ_ONLY: bool>(
+fn helper<const INVALIDATES_MEMORY: bool>(
     context: u32,
     operation: impl FnOnce(&mut EngineInstance, &mut IndependentSession) -> u32,
 ) -> u32 {
@@ -453,7 +468,7 @@ fn helper<const READ_ONLY: bool>(
             session.state.status = Status::Infrastructure as u32;
             return Status::Infrastructure as u32;
         }
-        if !READ_ONLY {
+        if INVALIDATES_MEMORY {
             session.memory_cache.invalidate();
         }
         operation(instance, session)
@@ -461,7 +476,7 @@ fn helper<const READ_ONLY: bool>(
 }
 
 pub(crate) fn cpu_runtime_read(context: u32, address: u32, width: u32) -> u32 {
-    helper::<true>(context, |instance, session| {
+    helper::<false>(context, |instance, session| {
         let memory = instance.memory.as_ref().unwrap();
         session.state.status = 0;
         match memory.core_read(address, width) {
@@ -475,7 +490,7 @@ pub(crate) fn cpu_runtime_read(context: u32, address: u32, width: u32) -> u32 {
 }
 
 pub(crate) fn cpu_runtime_write(context: u32, address: u32, width: u32, value: u32) -> u32 {
-    helper::<false>(context, |instance, session| {
+    helper::<true>(context, |instance, session| {
         let memory = instance.memory.as_mut().unwrap();
         session.dirty.len = session.state.dirty_len;
         session.state.status = match memory.runtime_store(&mut session.dirty, address, width, value)
@@ -497,8 +512,10 @@ pub(crate) fn cpu_instruction(low: u32, high: u32) -> u32 {
 }
 
 pub(crate) fn cpu_runtime_instruction(context: u32) -> u32 {
+    // instruction execution classifies memory effects before invoking semantics.
     helper::<false>(context, |instance, session| {
         let Some(attempts) = session.direct_instruction_calls.checked_add(1) else {
+            session.memory_cache.invalidate();
             session.state.status = Status::Infrastructure as u32;
             session.failed = true;
             return Status::Infrastructure as u32;

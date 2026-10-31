@@ -4,7 +4,7 @@ use crate::{
         runtime::{CpuState, ServiceSite, Status, numeric::NumericError},
         x86::{
             ControlOperation, PagingAccess32, Register32, SegmentAccess, SegmentContext,
-            SegmentRegister, StackPointerSize, State32, USER_MODE_ENVIRONMENT,
+            SegmentRegister, StackPointerSize, State32, USER_MODE_ENVIRONMENT, X87Operation,
             capabilities::CPU_ID_LEAVES,
             decode::{
                 BoundDecode, DecodeAuthority, DecodeError, DecodePolicy, DecodedOperation,
@@ -26,6 +26,54 @@ enum Effect {
     Trap(u32),
     SystemEntry(u32),
     Unsupported,
+}
+
+fn preserves_memory(operation: Operation) -> bool {
+    let operation = match operation {
+        Operation::X87 { operation, .. } => operation,
+        Operation::InitializeX87 => X87Operation::Initialize,
+        Operation::ClearX87Exceptions => X87Operation::ClearExceptions,
+        Operation::X87StatusToAx => X87Operation::StatusToAx,
+        _ => return false,
+    };
+    operation.write_size() == 0
+        && matches!(
+            operation,
+            X87Operation::Initialize
+                | X87Operation::ClearExceptions
+                | X87Operation::Wait
+                | X87Operation::Load(_)
+                | X87Operation::LoadRegister { .. }
+                | X87Operation::StoreRegister { .. }
+                | X87Operation::StoreRegisterNoUnderflow { .. }
+                | X87Operation::Exchange { .. }
+                | X87Operation::Binary { .. }
+                | X87Operation::BinaryMemory { .. }
+                | X87Operation::Compare { .. }
+                | X87Operation::CompareMemory { .. }
+                | X87Operation::ConditionalMove { .. }
+                | X87Operation::Test
+                | X87Operation::Examine
+                | X87Operation::ChangeSign
+                | X87Operation::Absolute
+                | X87Operation::SquareRoot
+                | X87Operation::RoundToInteger
+                | X87Operation::Scale
+                | X87Operation::Extract
+                | X87Operation::Remainder { .. }
+                | X87Operation::LoadConstant { .. }
+                | X87Operation::Free { .. }
+                | X87Operation::AdjustTop { .. }
+                | X87Operation::LoadControl
+                | X87Operation::StatusToAx
+                | X87Operation::LoadEnvironment { .. }
+                | X87Operation::Restore { .. }
+                | X87Operation::NoOperation
+                | X87Operation::Exp2MinusOne
+                | X87Operation::Log2Multiply { .. }
+                | X87Operation::PartialAtan
+                | X87Operation::Trigonometric { .. }
+        )
 }
 
 fn decode_instruction(
@@ -62,12 +110,20 @@ pub(super) fn execute(
     session: &mut IndependentSession,
 ) -> Result<(), HostError> {
     if session.state.status != Status::Instruction as u32 || session.state.remaining == 0 {
+        session.memory_cache.invalidate();
         return Err(HostError::InvalidRequest);
     }
-    let memory = instance.memory.as_mut().ok_or(HostError::Closed)?;
-    session.flush(memory)?;
+    let Some(memory) = instance.memory.as_mut() else {
+        session.memory_cache.invalidate();
+        return Err(HostError::Closed);
+    };
+    session.publish_dirty_preserving_memory(memory)?;
     let pc = session.state.eip;
-    let instruction = match session.cache.service(memory, pc)? {
+    let service = session.cache.service(memory, pc).map_err(|error| {
+        session.memory_cache.invalidate();
+        error
+    })?;
+    let instruction = match service {
         Some(site) => {
             #[cfg(feature = "observability")]
             let _scope = ring3_observability::current().scope(
@@ -88,6 +144,7 @@ pub(super) fn execute(
                 operation: *decoded.operation(),
             },
             Err(error) => {
+                session.memory_cache.invalidate();
                 decode_failure(&mut session.state, error)?;
                 session.refresh(memory);
                 return Ok(());
@@ -95,6 +152,10 @@ pub(super) fn execute(
         },
     };
     let operation = instruction.operation;
+    let preserve_memory = preserves_memory(operation);
+    if !preserve_memory {
+        session.memory_cache.invalidate();
+    }
     let next = instruction.next_pc;
     let before = memory.code_validation_version();
     let mut scalar = session.state.state();
@@ -104,6 +165,10 @@ pub(super) fn execute(
             .execute(memory, &mut scalar, &session.segments, &operation, next)
         {
             Ok(_) => Ok(Effect::Complete),
+            Err(NumericError::Unsupported) if preserve_memory => {
+                session.memory_cache.invalidate();
+                Ok(Effect::Unsupported)
+            }
             Err(NumericError::Unsupported) => {
                 if processor(instance.cpu_clock.timestamp(), &mut scalar, operation)? {
                     Ok(Effect::Complete)
@@ -158,9 +223,16 @@ pub(super) fn execute(
         Err(NumericError::Memory { error, width }) => {
             paging_failure(&mut session.state, error, width)
         }
-        Err(NumericError::Infrastructure) => return Err(HostError::Infrastructure),
+        Err(NumericError::Infrastructure) => {
+            session.memory_cache.invalidate();
+            return Err(HostError::Infrastructure);
+        }
     }
-    session.refresh(memory);
+    if preserve_memory {
+        session.refresh_preserving_memory(memory);
+    } else {
+        session.refresh(memory);
+    }
     Ok(())
 }
 
