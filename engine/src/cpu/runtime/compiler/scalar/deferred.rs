@@ -478,6 +478,43 @@ impl Output {
         self.operation = operation;
         match operation {
             Operation::Binary { .. }
+            | Operation::ArithmeticWord { .. }
+            | Operation::ReadArithmeticWord { .. }
+            | Operation::MemoryArithmeticWord { .. }
+            | Operation::LogicalWord { .. }
+            | Operation::ReadLogicalWord { .. }
+            | Operation::MemoryLogicalWord { .. }
+            | Operation::CompareWord { .. }
+            | Operation::TestWord { .. }
+            | Operation::MemoryCompareWord { .. }
+            | Operation::ReadCompareWord { .. }
+            | Operation::MemoryTestWord { .. }
+            | Operation::ArithmeticByte { .. }
+            | Operation::ReadArithmeticByte { .. }
+            | Operation::MemoryArithmeticByte { .. }
+            | Operation::LogicalByte { .. }
+            | Operation::ReadLogicalByte { .. }
+            | Operation::MemoryLogicalByte { .. }
+            | Operation::CompareByte { .. }
+            | Operation::ReadCompareByte { .. }
+            | Operation::TestByte { .. }
+            | Operation::MemoryPredicateByte { .. }
+            | Operation::UnaryByte {
+                kind: UnaryKind::Neg,
+                ..
+            }
+            | Operation::MemoryUnaryByte {
+                kind: UnaryKind::Neg,
+                ..
+            }
+            | Operation::UnaryWord {
+                kind: UnaryKind::Neg,
+                ..
+            }
+            | Operation::MemoryUnaryWord {
+                kind: UnaryKind::Neg,
+                ..
+            }
             | Operation::Unary {
                 kind: UnaryKind::Neg,
                 ..
@@ -489,6 +526,21 @@ impl Output {
                 self.capture_carry();
                 self.c().i32_const(0).local_set(PENDING);
                 self.recipe = None;
+                return;
+            }
+            Operation::AhToFlags => {
+                if self.recipe.is_some() {
+                    self.c().local_get(FLAGS).i32_const(!0x800).i32_and();
+                    self.bit(11);
+                    self.c()
+                        .i32_const(11)
+                        .i32_shl()
+                        .i32_or()
+                        .local_set(FLAGS)
+                        .i32_const(0)
+                        .local_set(PENDING);
+                    self.recipe = None;
+                }
                 return;
             }
             _ => {}
