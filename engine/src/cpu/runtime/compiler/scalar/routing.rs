@@ -1,7 +1,6 @@
 use super::*;
 
-const RETURN_PC: u32 = 77;
-const RETURN_ROUTE: u32 = 78;
+const RETURN_PREDICTION: u32 = 77;
 
 fn landing(entries: &[EntryPoint], pc: u32) -> i32 {
     entries
@@ -92,11 +91,11 @@ pub(super) fn next(
     match *instruction.operation() {
         Operation::Call { target } => {
             // a prediction never replaces the architectural stack read on return.
+            let route = landing(entries, fallthrough).wrapping_add(1) as u32 as u64;
+            let prediction = (route << 32) | u64::from(fallthrough);
             out.c()
-                .i32_const(fallthrough as i32)
-                .local_set(RETURN_PC)
-                .i32_const(landing(entries, fallthrough).wrapping_add(1))
-                .local_set(RETURN_ROUTE);
+                .i64_const(prediction as i64)
+                .local_set(RETURN_PREDICTION);
             match target {
                 BranchTarget::Direct(target) => {
                     out.c().i32_const(landing(entries, target.0)).local_set(A);
@@ -124,15 +123,22 @@ pub(super) fn next(
         }
         Operation::Return { .. } => {
             out.c()
-                .local_get(RETURN_ROUTE)
+                .local_get(RETURN_PREDICTION)
+                .i64_const(32)
+                .i64_shr_u()
+                .i32_wrap_i64()
                 .i32_eqz()
                 .i32_eqz()
                 .local_get(PC)
-                .local_get(RETURN_PC)
+                .local_get(RETURN_PREDICTION)
+                .i32_wrap_i64()
                 .i32_eq()
                 .i32_and()
                 .if_(BlockType::Result(ValType::I32))
-                .local_get(RETURN_ROUTE)
+                .local_get(RETURN_PREDICTION)
+                .i64_const(32)
+                .i64_shr_u()
+                .i32_wrap_i64()
                 .i32_const(1)
                 .i32_sub()
                 .else_();
