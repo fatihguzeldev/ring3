@@ -113,7 +113,6 @@ console.log('canonical self-interior ownership, forward gate, every quota prefix
     fs::remove_dir_all(scratch).unwrap();
 }
 
-
 #[test]
 fn generated_pending_flag_consumers_preserve_narrow_carry_overflow_and_partial_updates() {
     use std::{
@@ -290,36 +289,39 @@ fn generated_optional_page_cache_rejects_legacy_reserved_bytes_without_dereferen
     let result = Command::new("node").arg("--input-type=module").arg("-e").arg(r#"
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-const memory=new WebAssembly.Memory({initial:4}),ram=new Uint8Array(memory.buffer),d=new DataView(memory.buffer),ctx=0x8000,cache=0x9000;
+const memory=new WebAssembly.Memory({initial:225}),ram=new Uint8Array(memory.buffer),d=new DataView(memory.buffer);
+const ctx=0x530000,cache=0x531000,map=0x1000,perm=0x410000,back=0x520000,rows=0x610000;
 const put=(at,v)=>d.setUint32(at,v>>>0,true),word=(at,v)=>put(ctx+at,v);
 let helpers=0;
 const run=(await WebAssembly.instantiate(fs.readFileSync(`${process.argv[1]}/read.wasm`),{env:{memory},cpu:{read(){helpers++;throw Error('the unchanged direct mapping must remain usable');},write(){throw Error('unexpected write');}}})).instance.exports.run;
 function init(pointer){
   for(let i=0;i<ram.length;i++)ram[i]=(i*31+7)&255;
   word(0,1);word(4,160);[1,2,3,0x3000,0x4800,6,7,8].forEach((v,i)=>word(8+4*i,v));
-  for(const[at,v]of[[40,0x1000],[44,0x203],[48,1],[52,0],[56,0xffffffff],[72,pointer],[76,0x1000],[80,0x2000],[84,0x10000],[88,4],[152,0x1f]])word(at,v);
-  put(0x1000+3*4,1);ram[0x2000+3]=3;put(0x10000,0x12345678);helpers=0;
+  for(const[at,v]of[[40,0x1000],[44,0x203],[48,1],[52,0],[56,0xffffffff],[72,pointer],[76,map],[80,perm],[84,back],[88,4],[152,0x1f]])word(at,v);
+  put(map+3*4,1);ram[perm+3]=3;put(back,0x12345678);helpers=0;
 }
+function header(at,entries=rows){for(const[offset,value]of[[0,1],[4,0x434d3352],[8,32],[12,2],[16,entries],[20,1<<20],[24,0],[28,0]])put(at+offset,value);}
 function check(label,edit){
   const expected=ram.slice(),view=new DataView(expected.buffer);
   for(const[at,v]of[[8,0x12345678],[40,0x1002],[48,0],[52,0],[56,0]])view.setUint32(ctx+at,v,true);
   edit?.(view);
   assert.equal(run(ctx),0,label);assert.deepEqual(ram,expected,label);assert.equal(helpers,0,label);
 }
-for(const pointer of[0,1,15,0x20,0x1000,ctx,cache+4,ram.length-4112,ram.length-4111,ram.length-16,ram.length,0xfffffff0,0xffffffff]){
+for(const pointer of[0,1,15,0x20,0x1000,ctx,cache+4,ram.length-32,ram.length-31,ram.length-16,ram.length,0xfffffff0,0xffffffff]){
   init(pointer);check(`legacy opaque word ${pointer.toString(16)}`);
 }
-for(const[field,value]of[[0,0],[4,0],[4,0x434d3353],[8,0],[8,4096],[8,0xffffffff],[12,0],[12,2]]){
-  init(cache);for(const[at,v]of[[0,1],[4,0x434d3352],[8,4112],[12,1]])put(cache+at,v);put(cache+field,value);
+for(const[field,value]of[[0,0],[4,0],[4,0x434d3353],[8,0],[8,4112],[8,0xffffffff],[12,0],[12,1],[16,0],[16,rows+1],[16,rows+8],[16,0xfffffff8],[20,0],[20,(1<<20)-1],[20,(1<<20)+1],[24,1],[28,1]]){
+  init(cache);header(cache);put(cache+field,value);
   check(`malformed cache header field${field} value${value}`);
 }
 {
-  const tail=ram.length-4112,entry=ram.length-16;
-  init(tail);for(const[at,v]of[[0,1],[4,0x434d3352],[8,4112],[12,1]])put(tail+at,v);
-  word(20,0xff000);put(0x1000+255*4,1);ram[0x2000+255]=3;
-  check('the final complete cache span and last record remain usable',view=>{
-    for(const[at,v]of[[0,1],[4,255],[8,0x10000],[12,3]])view.setUint32(entry+at,v,true);
-  });
+  init(cache);header(cache);word(20,0xfffff000);put(map+0xfffff*4,1);ram[perm+0xfffff]=3;
+  check('the final flat row and exact table span remain usable',view=>view.setBigUint64(ram.length-8,0x100000003n,true));
+}
+{
+  const tail=ram.length-32,entries=0x600000;
+  init(tail);header(tail,entries);
+  check('the final complete header span remains usable',view=>view.setBigUint64(entries+3*8,0x100000003n,true));
 }
 console.log('optional page-cache admission preserves opaque legacy field72 and rejects unaligned, truncated, wrapped and malformed cache pointers without guest effects');
 "#).arg(&scratch).output().unwrap();

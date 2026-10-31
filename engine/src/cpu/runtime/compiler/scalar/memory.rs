@@ -10,6 +10,9 @@ const CACHE: u32 = 79;
 const CACHE_ENTRY: u32 = 80;
 const CACHE_FLAGS: u32 = 81;
 const CACHE_GENERATION: u32 = 82;
+const CACHE_RECORD: u32 = 83;
+const CACHE_ROWS: u32 = 84;
+const BACKING: u32 = 85;
 
 pub(super) fn initialize(out: &mut Output) {
     out.c()
@@ -25,7 +28,7 @@ pub(super) fn initialize(out: &mut Output) {
         .i32_and()
         .local_get(CACHE)
         .i64_extend_i32_u()
-        .i64_const(4112)
+        .i64_const(32)
         .i64_add()
         .memory_size(0)
         .i64_extend_i32_u()
@@ -40,18 +43,53 @@ pub(super) fn initialize(out: &mut Output) {
         .i32_eq()
         .local_get(CACHE)
         .i32_load(mem(8))
-        .i32_const(4112)
+        .i32_const(32)
         .i32_eq()
         .i32_and()
         .local_get(CACHE)
         .i32_load(mem(12))
-        .i32_const(1)
+        .i32_const(2)
         .i32_eq()
         .i32_and()
         .local_get(CACHE)
         .i32_load(mem(0))
+        .local_tee(CACHE_GENERATION)
         .i32_eqz()
         .i32_eqz()
+        .i32_and()
+        .local_get(CACHE)
+        .i32_load(mem(20))
+        .i32_const(1 << 20)
+        .i32_eq()
+        .i32_and()
+        .local_get(CACHE)
+        .i32_load(mem(24))
+        .i32_eqz()
+        .i32_and()
+        .local_get(CACHE)
+        .i32_load(mem(28))
+        .i32_eqz()
+        .i32_and()
+        .local_get(CACHE)
+        .i32_load(mem(16))
+        .local_tee(CACHE_ROWS)
+        .i32_eqz()
+        .i32_eqz()
+        .i32_and()
+        .local_get(CACHE_ROWS)
+        .i32_const(7)
+        .i32_and()
+        .i32_eqz()
+        .i32_and()
+        .local_get(CACHE_ROWS)
+        .i64_extend_i32_u()
+        .i64_const(8 * 1024 * 1024)
+        .i64_add()
+        .memory_size(0)
+        .i64_extend_i32_u()
+        .i64_const(16)
+        .i64_shl()
+        .i64_le_u()
         .i32_and()
         .i32_eqz()
         .if_(BlockType::Empty)
@@ -61,6 +99,22 @@ pub(super) fn initialize(out: &mut Output) {
         .else_()
         .i32_const(0)
         .local_set(CACHE)
+        .end()
+        .local_get(0)
+        .i32_load(mem(84))
+        .local_set(BACKING);
+}
+
+fn reload(out: &mut Output) {
+    out.c()
+        .local_get(CACHE)
+        .if_(BlockType::Empty)
+        .local_get(CACHE)
+        .i32_load(mem(0))
+        .local_set(CACHE_GENERATION)
+        .local_get(0)
+        .i32_load(mem(84))
+        .local_set(BACKING)
         .end();
 }
 
@@ -94,29 +148,25 @@ fn translate(out: &mut Output, width: u32, required: u32) {
         .i32_const((4096 - width) as i32)
         .i32_le_u()
         .if_(BlockType::Empty)
-        .local_get(CACHE)
-        .i32_load(mem(0))
-        .local_set(CACHE_GENERATION)
-        .local_get(CACHE)
+        .local_get(CACHE_ROWS)
         .local_get(PAGE)
-        .i32_const(255)
-        .i32_and()
-        .i32_const(4)
+        .i32_const(3)
         .i32_shl()
         .i32_add()
-        .i32_const(16)
-        .i32_add()
         .local_tee(CACHE_ENTRY)
-        .i32_load(mem(0))
+        .i64_load(MemArg {
+            offset: 0,
+            align: 3,
+            memory_index: 0,
+        })
+        .local_tee(CACHE_RECORD)
+        .i64_const(32)
+        .i64_shr_u()
+        .i32_wrap_i64()
         .local_get(CACHE_GENERATION)
         .i32_eq()
-        .local_get(CACHE_ENTRY)
-        .i32_load(mem(4))
-        .local_get(PAGE)
-        .i32_eq()
-        .i32_and()
-        .local_get(CACHE_ENTRY)
-        .i32_load(mem(12))
+        .local_get(CACHE_RECORD)
+        .i32_wrap_i64()
         .local_tee(CACHE_FLAGS)
         .i32_const(required as i32)
         .i32_and()
@@ -124,17 +174,19 @@ fn translate(out: &mut Output, width: u32, required: u32) {
         .i32_eq()
         .i32_and()
         .if_(BlockType::Empty)
-        .local_get(CACHE_ENTRY)
-        .i32_load(mem(8))
+        .local_get(CACHE_FLAGS)
+        .i32_const(12)
+        .i32_shr_u()
+        .local_tee(SLOT)
+        .i32_const(12)
+        .i32_shl()
+        .local_get(BACKING)
+        .i32_add()
         .local_get(ADDRESS)
         .i32_const(4095)
         .i32_and()
         .i32_add()
         .local_set(HOST)
-        .local_get(CACHE_FLAGS)
-        .i32_const(3)
-        .i32_shr_u()
-        .local_set(SLOT)
         .local_get(CACHE_FLAGS)
         .i32_const(7)
         .i32_and()
@@ -161,7 +213,7 @@ fn translate(out: &mut Output, width: u32, required: u32) {
         .i32_eqz()
         .i32_and()
         .local_get(SLOT)
-        .i32_const(0x1fff_ffff)
+        .i32_const(0x000f_ffff)
         .i32_le_u()
         .i32_and()
         .if_(BlockType::Empty);
@@ -172,27 +224,24 @@ fn translate(out: &mut Output, width: u32, required: u32) {
 fn cache_store(out: &mut Output) {
     out.c()
         .local_get(CACHE_ENTRY)
-        .local_get(PAGE)
-        .i32_store(mem(4))
-        .local_get(CACHE_ENTRY)
-        .local_get(HOST)
-        .local_get(ADDRESS)
-        .i32_const(4095)
-        .i32_and()
-        .i32_sub()
-        .i32_store(mem(8))
-        .local_get(CACHE_ENTRY)
+        .local_get(CACHE_GENERATION)
+        .i64_extend_i32_u()
+        .i64_const(32)
+        .i64_shl()
         .local_get(SLOT)
-        .i32_const(3)
+        .i32_const(12)
         .i32_shl()
         .local_get(CACHE_FLAGS)
         .i32_const(7)
         .i32_and()
         .i32_or()
-        .i32_store(mem(12))
-        .local_get(CACHE_ENTRY)
-        .local_get(CACHE_GENERATION)
-        .i32_store(mem(0));
+        .i64_extend_i32_u()
+        .i64_or()
+        .i64_store(MemArg {
+            offset: 0,
+            align: 3,
+            memory_index: 0,
+        });
 }
 
 fn translate_uncached(out: &mut Output, width: u32, required: u32) {
@@ -237,10 +286,9 @@ pub(super) fn read(out: &mut Output, width: u32, destination: u32) {
         .local_get(ADDRESS)
         .i32_const(width as i32)
         .call(0)
-        .local_set(destination)
-        .local_get(0)
-        .i32_load(mem(52))
-        .local_set(TEMP);
+        .local_set(destination);
+    reload(out);
+    out.c().local_get(0).i32_load(mem(52)).local_set(TEMP);
     out.failed(TEMP, false);
     out.c().end();
 }
@@ -290,7 +338,7 @@ fn admit_store(out: &mut Output) {
         .i32_eqz()
         .i32_and()
         .local_get(SLOT)
-        .i32_const(0x1fff_ffff)
+        .i32_const(0x000f_ffff)
         .i32_le_u()
         .i32_and()
         .if_(BlockType::Empty)
@@ -375,6 +423,7 @@ fn store(out: &mut Output, width: u32, value: u32) {
         .local_get(value)
         .call(1)
         .local_set(WRITE_STATUS);
+    reload(out);
     out.failed(WRITE_STATUS, true);
     out.c().end();
 }

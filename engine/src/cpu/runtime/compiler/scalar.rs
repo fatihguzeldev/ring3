@@ -180,6 +180,8 @@ pub(super) fn emit(blocks: &[Block], entries: &[EntryPoint]) -> Vec<u8> {
             (5, ValType::I32),
             (6, ValType::I64),
             (14, ValType::I32),
+            (1, ValType::I64),
+            (2, ValType::I32),
         ]),
         emitted_guest_write: false,
     };

@@ -243,8 +243,8 @@ fn fused_page_cache_preserves_memory_effects_and_helper_invalidation() {
     let result = Command::new("node").args(["--input-type=module", "-e", r#"
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-const memory=new WebAssembly.Memory({initial:4}),ram=new Uint8Array(memory.buffer),d=new DataView(memory.buffer);
-const ctx=0x8000,map=0x1000,perm=0x2000,exec=0x3000,cow=0x4000,bits=0x5000,slots=0x6000,seq=0x7000,cache=0x9000,back=0x10000;
+const memory=new WebAssembly.Memory({initial:132}),ram=new Uint8Array(memory.buffer),d=new DataView(memory.buffer);
+const ctx=0x8000,map=0x1000,perm=0x2000,exec=0x3000,cow=0x4000,bits=0x5000,slots=0x6000,seq=0x7000,cache=0x9000,back=0x10000,rows=0x40000;
 const put=(at,v)=>d.setUint32(at,v>>>0,true),get=at=>d.getUint32(at,true),word=(at,v)=>put(ctx+at,v);
 let mode='',helpers=0,cached=false;
 const invalidate=()=>{if(cached)put(cache,get(cache)+1);};
@@ -271,9 +271,9 @@ const imports={env:{memory},cpu:{
 const run={};for(const name of ['read','rmw'])run[name]=(await WebAssembly.instantiate(fs.readFileSync(`${process.argv[1]}/${name}.wasm`),imports)).instance.exports.run;
 function init(cacheOn){cached=cacheOn;helpers=0;ram.fill(0);word(0,1);word(4,160);[1,0x11223344,0x55667788,0x3000,0x6800,0xabcdef01,0x4ffe,0x76543210].forEach((v,i)=>word(8+i*4,v));
  for(const[a,v]of[[40,0x1000],[44,0xcd7],[48,3],[72,cacheOn?cache:0],[76,map],[80,perm],[84,back],[88,4],[92,exec],[96,cow],[100,bits],[104,slots],[112,4],[152,0x1f],[156,seq]])word(a,v);
- for(const[p,s]of[[3,1],[4,2],[5,3]]){put(map+p*4,s);ram[perm+p]=3;}put(cache,1);put(cache+4,0x434d3352);put(cache+8,4112);put(cache+12,1);d.setBigUint64(seq,10n,true);put(back,7);put(back+4096,0x10203040);put(back+8192,0x50607080);
+ for(const[p,s]of[[3,1],[4,2],[5,3]]){put(map+p*4,s);ram[perm+p]=3;}put(cache,1);put(cache+4,0x434d3352);put(cache+8,32);put(cache+12,2);put(cache+16,rows);put(cache+20,1<<20);d.setBigUint64(seq,10n,true);put(back,7);put(back+4096,0x10203040);put(back+8192,0x50607080);
 }
-function snapshot(){const out=ram.slice();out.fill(0,cache,cache+4112);new DataView(out.buffer).setUint32(ctx+72,0,true);return out;}
+function snapshot(){const out=ram.slice();out.fill(0,cache,cache+32);out.fill(0,rows,rows+8*1024*1024);new DataView(out.buffer).setUint32(ctx+72,0,true);return out;}
 for(mode of ['ordinary','remap','permission','guard','cow','code','saturation','dirty-capacity']){
  let expected;
  for(const cacheOn of [false,true]){
@@ -286,7 +286,7 @@ for(mode of ['ordinary','remap','permission','guard','cow','code','saturation','
   }
   const status=fn(ctx),observed={status,helpers,bytes:snapshot()};
   if(!cacheOn)expected=observed;else assert.deepEqual(observed,expected,mode);
-  if(cacheOn&&mode==='ordinary'){const entry=cache+16+3*16;assert.equal(get(entry),get(cache));assert.equal(get(entry+4),3);assert.equal(get(entry+8),back);assert.equal(get(entry+12)&7,7);assert.equal(get(ctx+108),1);assert.equal(get(back),9);}
+  if(cacheOn&&mode==='ordinary'){const entry=rows+3*8;assert.equal(d.getBigUint64(entry,true),(BigInt(get(cache))<<32n)|7n);assert.equal(get(ctx+108),1);assert.equal(get(back),9);}
   if(cacheOn&&(mode==='remap'||mode==='permission'||mode==='guard'))assert(helpers>=1);
  }
 }

@@ -2359,3 +2359,54 @@ for (const precision of [24, 53]) for (const odd of [false, true]) {
     } finally {f.close();}
   });
 }
+
+test('actual fused page proofs survive read-only helpers and expire across writes', {skip}, () => {
+  for (const probe of [
+    {address: 0x2000, width: 4, value: 0x12345678, status: 0},
+    {address: 0x2000, width: 0x104, value: 0x12345678, status: 0},
+    {address: 0x9000, width: 4, value: 0, status: 3},
+    {address: 0x2000, width: 3, value: 0, status: 8},
+  ]) {
+    const f = fixture([0xa1, 0, 0x20, 0, 0], {independent: false,
+      data: [[0x2000, 0x78], [0x2001, 0x56], [0x2002, 0x34], [0x2003, 0x12]]});
+    let active = false;
+    try {
+      f.engine.ok('cpu_begin', ...KEY); active = true;
+      const api = f.engine.api, context = api.cpu_context_ptr() >>> 0;
+      f.slab().setUint32(48, 2, true);
+      f.engine.ok('cpu_prepare', ...KEY, 0x1000, 1);
+      const bytes = new Uint8Array(f.engine.memory.buffer, api.cpu_code_ptr() >>> 0, api.cpu_code_len() >>> 0);
+      const unit = new WebAssembly.Instance(new WebAssembly.Module(bytes), {env: {memory: f.engine.memory},
+        cpu: {read: api.cpu_runtime_read, write: api.cpu_runtime_write}});
+      assert.equal(unit.exports.run(context), 0);
+      const all = new DataView(f.engine.memory.buffer), state = f.slab(), header = state.getUint32(72, true);
+      assert.deepEqual([4, 8, 12, 20].map(at => all.getUint32(header + at, true)), [0x434d3352, 32, 2, 1 << 20]);
+      const rows = all.getUint32(header + 16, true), epoch = all.getUint32(header, true);
+      const row = all.getBigUint64(rows + 2 * 8, true);
+      assert.equal(Number(row >> 32n), epoch);
+      assert.equal(Number(row & 7n), 3);
+      const table = new Uint8Array(f.engine.memory.buffer, rows, 8 << 20).slice();
+      const proof = new Uint8Array(f.engine.memory.buffer, header, 32).slice();
+      const backing = state.getUint32(84, true), length = state.getUint32(88, true) * 4096;
+      const ram = new Uint8Array(f.engine.memory.buffer, backing, length).slice(), banks = processBanks(f);
+      assert.equal(api.cpu_runtime_read(context, probe.address, probe.width) >>> 0, probe.value);
+      assert.equal(f.slab().getUint32(52, true), probe.status);
+      assert.deepEqual(new Uint8Array(f.engine.memory.buffer, header, 32), proof);
+      assert.deepEqual(new Uint8Array(f.engine.memory.buffer, rows, 8 << 20), table);
+      assert.deepEqual(new Uint8Array(f.engine.memory.buffer, backing, length), ram);
+      assert.deepEqual(processBanks(f), banks);
+      if (probe.width === 4 && probe.status === 0) {
+        assert.equal(api.cpu_runtime_write(context, 0x2000, 4, 0x87654321), 0);
+        const current = new DataView(f.engine.memory.buffer);
+        assert.notEqual(current.getUint32(header, true), epoch);
+        assert.equal(current.getBigUint64(rows + 2 * 8, true), row);
+        const slot = current.getUint32(f.slab().getUint32(76, true) + 2 * 4, true) - 1;
+        new DataView(ram.buffer).setUint32(slot * 4096, 0x87654321, true);
+        assert.deepEqual(new Uint8Array(f.engine.memory.buffer, backing, length), ram);
+      }
+    } finally {
+      if (active) f.engine.ok('cpu_end', ...KEY);
+      f.close();
+    }
+  }
+});

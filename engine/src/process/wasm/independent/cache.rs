@@ -189,7 +189,7 @@ impl CodeCache {
     pub(super) fn reserve_memory_cache(&mut self) -> Result<(), HostError> {
         self.limit = self
             .limit
-            .checked_sub(size_of::<crate::cpu::runtime::memory_cache::MemoryCache>())
+            .checked_sub(crate::cpu::runtime::memory_cache::RESIDENT_BYTES)
             .filter(|&limit| self.charged_bytes() <= limit)
             .ok_or(HostError::Infrastructure)?;
         Ok(())

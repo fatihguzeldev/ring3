@@ -41,7 +41,9 @@ impl IndependentSession {
             state: Box::default(),
             numeric: Box::default(),
             numeric_view: Box::default(),
-            memory_cache: Box::default(),
+            memory_cache: Box::new(
+                runtime::memory_cache::MemoryCache::new().map_err(|_| HostError::Infrastructure)?,
+            ),
             segments: instance.segment_context()?,
             dirty: DirtyPages::new(memory.capacity_pages()).map_err(HostError::Memory)?,
             cache,
@@ -370,8 +372,7 @@ pub(crate) fn cpu_dispatch_code_len() -> u32 {
 
 pub(crate) fn cpu_cache_bytes() -> u32 {
     inspect_session(|session| {
-        (session.cache.charged_bytes() + std::mem::size_of::<runtime::memory_cache::MemoryCache>())
-            as u32
+        (session.cache.charged_bytes() + runtime::memory_cache::RESIDENT_BYTES) as u32
     })
 }
 
@@ -430,7 +431,7 @@ pub(super) fn paging_failure(state: &mut CpuState, error: CpuPagingError32, widt
     }
 }
 
-fn helper(
+fn helper<const READ_ONLY: bool>(
     context: u32,
     operation: impl FnOnce(&mut EngineInstance, &mut IndependentSession) -> u32,
 ) -> u32 {
@@ -450,14 +451,16 @@ fn helper(
             session.state.status = Status::Infrastructure as u32;
             return Status::Infrastructure as u32;
         }
-        session.memory_cache.invalidate();
+        if !READ_ONLY {
+            session.memory_cache.invalidate();
+        }
         operation(instance, session)
     })
 }
 
 pub(crate) fn cpu_runtime_read(context: u32, address: u32, width: u32) -> u32 {
-    helper(context, |instance, session| {
-        let memory = instance.memory.as_mut().unwrap();
+    helper::<true>(context, |instance, session| {
+        let memory = instance.memory.as_ref().unwrap();
         session.state.status = 0;
         match memory.core_read(address, width) {
             Ok(value) => value,
@@ -470,7 +473,7 @@ pub(crate) fn cpu_runtime_read(context: u32, address: u32, width: u32) -> u32 {
 }
 
 pub(crate) fn cpu_runtime_write(context: u32, address: u32, width: u32, value: u32) -> u32 {
-    helper(context, |instance, session| {
+    helper::<false>(context, |instance, session| {
         let memory = instance.memory.as_mut().unwrap();
         session.dirty.len = session.state.dirty_len;
         session.state.status = match memory.runtime_store(&mut session.dirty, address, width, value)
@@ -492,7 +495,7 @@ pub(crate) fn cpu_instruction(low: u32, high: u32) -> u32 {
 }
 
 pub(crate) fn cpu_runtime_instruction(context: u32) -> u32 {
-    helper(context, |instance, session| {
+    helper::<false>(context, |instance, session| {
         let Some(attempts) = session.direct_instruction_calls.checked_add(1) else {
             session.state.status = Status::Infrastructure as u32;
             session.failed = true;
