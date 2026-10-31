@@ -960,11 +960,42 @@ test('actual SIMD transport and exact ADDPS preserve sticky MXCSR and pending x8
       assert.deepEqual(new Uint8Array(f.engine.memory.buffer, backing, length), ram);
     }
     serviceCounts(f, 0);
+    assert.equal(f.cache.stats().installedUnits, 1, 'budget resumes reuse every already compiled instruction');
   } finally {f.close();}
 });
 
 const directServiceSkip = skip || (!WebAssembly.Module.exports(artifact.module)
   .some(item => item.name === 'ring3_abi_v1_cpu_runtime_instruction') && 'artifact lacks the direct instruction service');
+
+test('actual numeric service resumes the compiled suffix without another admission', {skip}, () => {
+  const left = Array(4).fill(0x3dcccccd), right = Array(4).fill(0x3e4ccccd), result = Array(4).fill(0x3e99999a);
+  const data = [...left, ...right].flatMap((word, i) => dword(word).map((v, j) => [0x2000 + i * 4 + j, v]));
+  const f = fixture([0x0f, 0x28, 0x05, ...dword(0x2000), 0x0f, 0x58, 0x05, ...dword(0x2010),
+    0x0f, 0x29, 0x05, ...dword(0x2020)], {data, execution: {budget: 3, instructions: 3}});
+  try {
+    const scalar = new Uint8Array(f.engine.memory.buffer, f.engine.base, 56).slice(), banks = processBanks(f);
+    view(scalar).setUint32(48, 0x1015, true);
+    view(banks[0]).setUint32(144, 0x1fa0, true);
+    result.forEach((word, lane) => view(banks[0]).setUint32(160 + lane * 4, word, true));
+    const selected = f.cache.select(), state = f.slab();
+    const backing = state.getUint32(84, true), length = state.getUint32(88, true) * 4096;
+    const ram = new Uint8Array(f.engine.memory.buffer, backing, length).slice();
+    const slot = new DataView(f.engine.memory.buffer).getUint32(state.getUint32(76, true) + 8, true) - 1;
+    result.forEach((word, lane) => new DataView(ram.buffer).setUint32(slot * 4096 + 32 + lane * 4, word, true));
+    let run, retired = 0, work = 0;
+    for (let attempt = 0; attempt < 3; attempt++) {
+      run = f.cache.execute(attempt ? f.cache.select() : selected);
+      retired += run.retired; work += run.work;
+      if (run.coreReason !== 1) break;
+    }
+    assert.deepEqual([run.reason, retired, work, run.pc], [1, 3, 3, 0x1015]);
+    assert.deepEqual(new Uint8Array(f.engine.memory.buffer, f.engine.base, 56), scalar);
+    assert.deepEqual(processBanks(f), banks);
+    assert.deepEqual(new Uint8Array(f.engine.memory.buffer, backing, length), ram);
+    serviceCounts(f, 1);
+    assert.equal(f.cache.stats().installedUnits, 1, 'the exact service continuation is an existing landing');
+  } finally {f.close();}
+});
 
 for (const foreign of [false, true]) test(`actual direct service rejects ${foreign ? 'foreign context without counting it' : 'zero-quota continuation before effects'}`, {skip: directServiceSkip}, () => {
   const f = fixture([0xd9, 0xe8]);

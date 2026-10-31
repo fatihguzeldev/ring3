@@ -626,7 +626,7 @@ mod tests {
         let expected = code.services[0];
         let mut cache = CodeCache::new().unwrap();
         let slot = cache.install(code, &memory).unwrap();
-        assert_eq!(cache.lookup(expected.pc), None);
+        assert_eq!(cache.lookup(expected.pc), Some(slot));
         assert_eq!(cache.services, [[expected.pc, slot, 0]]);
         assert_eq!(cache.charged_bytes(), recomputed_bytes(&cache));
         let checks = cache.source_checks;

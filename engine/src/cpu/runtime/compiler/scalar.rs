@@ -1,4 +1,4 @@
-use super::Block;
+use super::{Block, EntryPoint};
 use crate::cpu::x86::{Register32, SegmentRegister, ir::*};
 use wasm_encoder::{
     BlockType, CodeSection, EntityType, ExportKind, ExportSection, Function, FunctionSection,
@@ -102,7 +102,35 @@ pub(super) fn supports(operation: &Operation) -> bool {
         )
 }
 
-pub(super) fn emit(blocks: &[Block]) -> Vec<u8> {
+fn entry_route(out: &mut Output, entries: &[EntryPoint]) {
+    if entries.is_empty() {
+        out.c().i32_const(-1);
+    } else if entries.len() == 1 {
+        let entry = &entries[0];
+        out.c()
+            .local_get(PC)
+            .i32_const(entry.pc as i32)
+            .i32_eq()
+            .if_(BlockType::Result(ValType::I32))
+            .i32_const(((entry.block << 6) | entry.instruction) as i32)
+            .else_()
+            .i32_const(-1)
+            .end();
+    } else {
+        let middle = entries.len() / 2;
+        out.c()
+            .local_get(PC)
+            .i32_const(entries[middle].pc as i32)
+            .i32_lt_u()
+            .if_(BlockType::Result(ValType::I32));
+        entry_route(out, &entries[..middle]);
+        out.c().else_();
+        entry_route(out, &entries[middle..]);
+        out.c().end();
+    }
+}
+
+pub(super) fn emit(blocks: &[Block], entries: &[EntryPoint]) -> Vec<u8> {
     let mut module = Module::new();
     let mut types = TypeSection::new();
     types.ty().function([ValType::I32; 3], [ValType::I32]);
@@ -164,38 +192,65 @@ pub(super) fn emit(blocks: &[Block]) -> Vec<u8> {
     {
         out.c().local_get(0).i32_load(mem(offset)).local_set(local);
     }
-    out.c().loop_(BlockType::Empty);
-    for block in blocks {
+    // Select a landing once, then retain ordinary instruction fallthrough.
+    // The two tables bound label nesting by blocks + instructions per block.
+    let block_count = blocks.len() as u32;
+    out.c().loop_(BlockType::Empty).block(BlockType::Empty);
+    for _ in blocks {
+        out.c().block(BlockType::Empty);
+    }
+    entry_route(&mut out, entries);
+    out.c()
+        .local_tee(A)
+        .i32_const(-1)
+        .i32_eq()
+        .if_(BlockType::Empty);
+    out.exit(0);
+    out.c()
+        .end()
+        .local_get(A)
+        .i32_const(6)
+        .i32_shr_u()
+        .br_table(0..block_count, block_count);
+    for (block_index, block) in blocks.iter().enumerate() {
+        out.c().end();
+        let remaining_blocks = block_count - block_index as u32;
+        let landing_count = (block.instructions.len() + usize::from(block.gate.is_some())) as u32;
+        for _ in 0..landing_count {
+            out.c().block(BlockType::Empty);
+        }
         out.c()
-            .local_get(PC)
-            .i32_const(block.pc as i32)
-            .i32_eq()
-            .if_(BlockType::Empty);
+            .local_get(A)
+            .i32_const(63)
+            .i32_and()
+            .br_table(0..landing_count, landing_count + remaining_blocks - 1);
         for instruction in &block.instructions {
+            out.c().end();
             out.c().local_get(REMAIN).i32_eqz().if_(BlockType::Empty);
             out.exit(2);
             out.c().end().i32_const(0).local_set(WRITE_STATUS);
             if !out.instruction(*instruction.operation(), instruction.next_pc().0) {
                 out.exit(7);
-                break;
+            } else {
+                out.c()
+                    .local_get(REMAIN)
+                    .i32_const(1)
+                    .i32_sub()
+                    .local_set(REMAIN)
+                    .local_get(RETIRED)
+                    .i32_const(1)
+                    .i32_add()
+                    .local_set(RETIRED)
+                    .local_get(WRITE_STATUS)
+                    .i32_const(6)
+                    .i32_eq()
+                    .if_(BlockType::Empty);
+                out.exit(6);
+                out.c().end();
             }
-            out.c()
-                .local_get(REMAIN)
-                .i32_const(1)
-                .i32_sub()
-                .local_set(REMAIN)
-                .local_get(RETIRED)
-                .i32_const(1)
-                .i32_add()
-                .local_set(RETIRED)
-                .local_get(WRITE_STATUS)
-                .i32_const(6)
-                .i32_eq()
-                .if_(BlockType::Empty);
-            out.exit(6);
-            out.c().end();
         }
         if let Some(gate) = block.gate {
+            out.c().end();
             out.c().local_get(REMAIN).i32_eqz().if_(BlockType::Empty);
             out.exit(2);
             out.c()
@@ -205,8 +260,9 @@ pub(super) fn emit(blocks: &[Block]) -> Vec<u8> {
                 .i32_store(mem(68));
             out.exit(5);
         }
-        out.c().br(1).end();
+        out.c().br(remaining_blocks);
     }
+    out.c().end();
     out.exit(0);
     out.c().end().unreachable().end();
     let mut code = CodeSection::new();

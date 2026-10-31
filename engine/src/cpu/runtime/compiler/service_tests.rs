@@ -30,10 +30,11 @@ fn service_capture_keeps_inline_numeric_interiors_and_exact_strict_operands() {
         )
         .unwrap();
     let code = compile(&memory, GuestAddress(0x1000), 4).unwrap();
-    assert_eq!(code.entries, [0x1000]);
+    assert_eq!(code.entries, [0x1000, 0x1001, 0x1003, 0x1006]);
     assert_eq!(code.services.len(), 2);
     for (site, pc) in code.services.iter().zip([0x1001, 0x1003]) {
-        assert!(!code.entries.contains(&pc));
+        assert_ne!(pc, 0x1000);
+        assert!(code.entries.contains(&pc));
         let decoded = decode_one(&memory, GuestAddress(pc)).unwrap();
         assert_eq!(site.pc, pc);
         assert_eq!(site.next_pc, decoded.next_pc().0);

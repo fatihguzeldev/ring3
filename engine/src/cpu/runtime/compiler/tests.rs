@@ -21,7 +21,7 @@ fn independent_compiler_owns_guest_source_dependencies() {
         .unwrap();
     let unit = compile(&memory, GuestAddress(0x1000), 64).unwrap();
     assert!(unit.is_current(&memory));
-    assert_eq!(unit.entries, [0x1000]);
+    assert_eq!(unit.entries, [0x1000, 0x1003]);
     memory.write(GuestAddress(0x3000), &[1]).unwrap();
     assert!(unit.is_current(&memory));
     memory.write(GuestAddress(0x1002), &[4]).unwrap();
@@ -123,7 +123,7 @@ fn independent_generated_wasm_executes_integer_calls_and_precise_faults() {
         .unwrap();
     for (name, pc) in [("unit-a", 0x1000), ("unit-b", 0x1040)] {
         let unit = compile(&memory, GuestAddress(pc), 2).unwrap();
-        assert_eq!(unit.entries, [pc]);
+        assert_eq!(unit.entries, [pc, pc + 1]);
         fs::write(scratch.join(format!("{name}.wasm")), &unit.wasm).unwrap();
     }
     for (name, code) in [

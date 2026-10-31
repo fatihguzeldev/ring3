@@ -1,4 +1,4 @@
-use std::collections::{BTreeSet, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
 use crate::{
     cpu::x86::{
@@ -66,6 +66,40 @@ struct Block {
     pc: u32,
     instructions: Vec<DecodedOperation>,
     gate: Option<u32>,
+}
+
+struct EntryPoint {
+    pc: u32,
+    block: u32,
+    instruction: u32,
+}
+
+fn entry_points(blocks: &[Block]) -> Vec<EntryPoint> {
+    let mut entries = BTreeMap::new();
+    for (block_index, block) in blocks.iter().enumerate() {
+        for (instruction_index, instruction) in block.instructions.iter().enumerate() {
+            entries
+                .entry(instruction.pc().0)
+                .or_insert((block_index, instruction_index));
+        }
+        if block.gate.is_some() {
+            let pc = block
+                .instructions
+                .last()
+                .map_or(block.pc, |instruction| instruction.next_pc().0);
+            entries
+                .entry(pc)
+                .or_insert((block_index, block.instructions.len()));
+        }
+    }
+    entries
+        .into_iter()
+        .map(|(pc, (block, instruction))| EntryPoint {
+            pc,
+            block: block as u32,
+            instruction: instruction as u32,
+        })
+        .collect()
 }
 
 pub fn compile(
@@ -190,11 +224,12 @@ pub fn compile_with_gates(
             });
         }
     }
-    let entries = blocks.iter().map(|block| block.pc).collect();
+    let points = entry_points(&blocks);
+    let entries = points.iter().map(|entry| entry.pc).collect();
     services.sort_unstable_by_key(|site| site.pc);
     services.dedup_by_key(|site| site.pc);
     Ok(CompiledUnit {
-        wasm: scalar::emit(&blocks),
+        wasm: scalar::emit(&blocks, &points),
         sources,
         entries,
         instruction_count: count,
@@ -210,6 +245,8 @@ mod exchange_tests;
 mod flags_tests;
 #[cfg(test)]
 mod memory_tests;
+#[cfg(test)]
+mod multi_entry_tests;
 #[cfg(test)]
 mod multiply_tests;
 #[cfg(test)]
