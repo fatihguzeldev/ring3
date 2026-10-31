@@ -152,6 +152,7 @@ pub(super) fn emit(
     types.ty().function([ValType::I32; 6], [ValType::I32]);
     types.ty().function([ValType::I32; 4], [ValType::I32; 3]);
     types.ty().function([ValType::I32; 3], [ValType::I32; 3]);
+    types.ty().function([ValType::I32; 13], []);
     module.section(&types);
     let mut imports = ImportSection::new();
     imports.import(
@@ -173,6 +174,7 @@ pub(super) fn emit(
     functions.function(3);
     functions.function(4);
     functions.function(5);
+    functions.function(6);
     module.section(&functions);
     let mut exports = ExportSection::new();
     exports.export("run", ExportKind::Func, 2);
@@ -346,8 +348,27 @@ pub(super) fn emit(
     code.function(&deferred::materializer());
     code.function(&memory_helpers::translation());
     code.function(&memory_helpers::admission());
+    code.function(&publication());
     module.section(&code);
     module.finish()
+}
+
+fn publication() -> Function {
+    let mut function = Function::new([]);
+    for (offset, parameter) in
+        (8..40)
+            .step_by(4)
+            .zip(1..9)
+            .chain([(40, 9), (44, 10), (48, 11), (56, 12)])
+    {
+        function
+            .instructions()
+            .local_get(0)
+            .local_get(parameter)
+            .i32_store(mem(offset));
+    }
+    function.instructions().end();
+    function
 }
 
 struct Output {
@@ -363,18 +384,14 @@ impl Output {
     }
     fn publish(&mut self) {
         self.materialize_flags();
-        for (offset, local) in
-            (8..40)
-                .step_by(4)
-                .zip(1..9)
-                .chain([(40, PC), (44, FLAGS), (48, REMAIN), (56, RETIRED)])
-        {
-            self.c().local_get(0).local_get(local);
+        self.c().local_get(0);
+        for local in (1..9).chain([PC, FLAGS, REMAIN, RETIRED]) {
+            self.c().local_get(local);
             if local == FLAGS {
                 self.c().i32_wrap_i64();
             }
-            self.c().i32_store(mem(offset));
         }
+        self.c().call(6);
     }
     fn exit(&mut self, status: i32) {
         self.publish();
