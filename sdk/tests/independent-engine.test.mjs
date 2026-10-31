@@ -2319,3 +2319,43 @@ test('actual FIST32 baseline completed executable alias store commits PE C1 pop 
     assert.deepEqual(calls, {read: 0, write: fist32NormalBaselineServices === 0 ? 1 : 0});
   } finally {f.close();}
 });
+
+for (const precision of [24, 53]) for (const odd of [false, true]) {
+  test(`actual memory PC${precision} ADD rounds the ${odd ? 'odd' : 'even'} midpoint before a store can clear C1`, {skip}, () => {
+    const left = precision === 24 ? dword(odd ? 0x3f800001 : 0x3f800000)
+      : [...dword(odd ? 1 : 0), ...dword(0x3ff00000)];
+    const right = precision === 24 ? dword(0x33800000) : [...dword(0), ...dword(0x3ca00000)];
+    const data = [...left.map((value, index) => [0x2000 + index, value]),
+      ...right.map((value, index) => [0x2008 + index, value])];
+    const f = fixture([0x64, precision === 24 ? 0xd9 : 0xdd, 0x05, ...dword(0x1000),
+      0x64, precision === 24 ? 0xd8 : 0xdc, 0x05, ...dword(0x1008), 0x43],
+      {data, execution: {budget: 2}});
+    try {
+      f.engine.ok('set_segment_base', 4, 0x1000);
+      seedMultiplyResidualBank(f, {sig: 0x8000000000000000n, exp: 0x3fff},
+        {control: 0x003f, status: 0x4020, top: 0, tag: 3});
+      const arenaFp = new DataView(f.engine.memory.buffer, f.engine.base + 4236, 128);
+      // exercise both encodings of the reserved CW bit6 without normalizing it.
+      arenaFp.setUint16(16, (precision === 24 ? 0x003f : 0x023f) | (odd ? 0x40 : 0), true);
+      arenaFp.setUint16(18, 0x4700, true); // C0/C2/C3 and old C1, fresh PE0.
+      const scalar = new Uint8Array(f.engine.memory.buffer, f.engine.base, 56).slice(), banks = processBanks(f), fp = view(banks[0]);
+      view(scalar).setUint32(48, 0x100e, true);
+      fp.setUint16(18, odd ? 0x7f20 : 0x7d20, true); fp.setUint16(20, 0x3fff, true);
+      fp.setUint16(22, precision === 24 ? 0x005 : 0x405, true);
+      fp.setUint32(24, 0x1007, true); fp.setUint32(28, 0x1008, true);
+      fp.setUint16(32, 0x1b, true); fp.setUint16(34, 0x3b, true);
+      const resultSignificand = !odd ? 0x8000000000000000n
+        : precision === 24 ? 0x8000020000000000n : 0x8000000000001000n;
+      fp.setBigUint64(110, resultSignificand, true); fp.setUint16(118, 0x3fff, true);
+      const selected = f.cache.select(), state = f.slab();
+      const backing = state.getUint32(84, true), length = state.getUint32(88, true) * 4096;
+      const ram = new Uint8Array(f.engine.memory.buffer, backing, length).slice(), run = f.cache.execute(selected);
+      assert.deepEqual([run.coreReason, run.reason, run.retired, run.work, run.pc], [2, 1, 2, 2, 0x100e]);
+      assert.deepEqual(new Uint8Array(f.engine.memory.buffer, f.engine.base, 56), scalar);
+      assert.deepEqual(processBanks(f), banks);
+      assert.deepEqual(new Uint8Array(f.engine.memory.buffer, backing, length), ram);
+      assert.equal(f.slab().getUint32(48, true), 0);
+      serviceCounts(f, 0);
+    } finally {f.close();}
+  });
+}
