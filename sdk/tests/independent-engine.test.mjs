@@ -2128,3 +2128,194 @@ test('actual FCHS baseline prefix quota stops before pending exception or stack 
     } finally {f.close();}
   }
 });
+
+const fist32NormalBaselineServices = 1;
+
+function fist32ExpectedBank(fp, c, {top, pop, opcode, pc = 0x1005, address = 0x1004, selector = 0x3b}) {
+  let status = (fp.getUint16(18, true) & ~0x200) | (c.exceptions ?? 0) | (c.incremented ? 0x200 : 0) | (c.extraStatus ?? 0);
+  if (pop) {
+    fp.setUint16(20, fp.getUint16(20, true) | 3 << (top * 2), true);
+    status = (status & ~0x3800) | ((top + 1) & 7) << 11;
+  }
+  fp.setUint16(18, status, true); fp.setUint16(22, opcode, true);
+  fp.setUint32(24, pc, true); fp.setUint32(28, address, true); fp.setUint16(32, 0x1b, true); fp.setUint16(34, selector, true);
+}
+
+function fist32LiteralOracle(c, {pop = true, top = 7, tag = 2, control = c.control ?? 0x003f, status = 0x4700} = {}) {
+  const modrm = c.truncate ? 0x0d : pop ? 0x1d : 0x15, opcode = 0x300 | modrm;
+  const f = fixture([0xb8, 0x78, 0x56, 0x34, 0x12, 0x64, 0xdb, modrm, ...dword(0x1004), 0x9b, 0x43], {
+    registers: [0xaabbccdd, 0x89abcdef, 0xd5e6789a, 0x23456789, 0x2f00, 0x55443322, 0x66554433, 0x77665544],
+    data: dword(0x5aa5c33c).map((value, index) => [0x2004 + index, value]), execution: {budget: 2},
+  });
+  rejectJsService(f);
+  const calls = memoryCalls(f), services = c.services ?? fist32NormalBaselineServices;
+  try {
+    f.engine.ok('set_segment_base', 4, 0x1000);
+    const source = c.raw ?? multiplyRaw64(c.bits);
+    seedMultiplyResidualBank(f, source, {control, status, top, tag: c.empty ? 3 : tag});
+    const scalar = new Uint8Array(f.engine.memory.buffer, f.engine.base, 56).slice(), banks = processBanks(f);
+    view(scalar).setUint32(16, 0x12345678, true); view(scalar).setUint32(48, 0x100c, true);
+    fist32ExpectedBank(view(banks[0]), c, {top, pop, opcode});
+    const selected = f.cache.select(), state = f.slab();
+    const backing = state.getUint32(84, true), length = state.getUint32(88, true) * 4096;
+    const slot = new DataView(f.engine.memory.buffer).getUint32(state.getUint32(76, true) + 8, true) - 1;
+    const ram = new Uint8Array(f.engine.memory.buffer, backing, length).slice();
+    new DataView(ram.buffer).setUint32(slot * 4096 + 4, c.word >>> 0, true);
+    const run = f.cache.execute(selected);
+    assert.deepEqual([run.coreReason, run.reason, run.retired, run.work, run.pc], [2, 1, 2, 2, 0x100c]);
+    assert.deepEqual(new Uint8Array(f.engine.memory.buffer, f.engine.base, 56), scalar);
+    assert.deepEqual(processBanks(f), banks);
+    assert.deepEqual(new Uint8Array(f.engine.memory.buffer, backing, length), ram);
+    assert.equal(f.slab().getUint32(48, true), 0);
+    serviceCounts(f, services);
+    assert.deepEqual(calls, {read: 0, write: 0});
+    if (c.deferred) {
+      const pending = f.cache.execute(f.cache.select());
+      assert.deepEqual([pending.coreReason, pending.reason, pending.retired, pending.work, pending.pc], [9, 12, 0, 0, 0x100c]);
+      assert.equal(f.engine.get(80), view(banks[0]).getUint16(18, true));
+      assert.deepEqual(new Uint8Array(f.engine.memory.buffer, f.engine.base, 56), scalar);
+      assert.deepEqual(processBanks(f), banks);
+      assert.deepEqual(new Uint8Array(f.engine.memory.buffer, backing, length), ram);
+      assert.equal(f.slab().getUint32(48, true), 2);
+      event(f.engine, 16, 0x100c, 0);
+      serviceCounts(f, services + 1);
+      assert.deepEqual(calls, {read: 0, write: 0});
+    }
+  } finally {f.close();}
+}
+
+const fist32NormalCases = [
+  {name: 'positive zero', bits: 0n, word: 0},
+  {name: 'negative zero', bits: 0x8000000000000000n, word: 0},
+  {name: 'positive half even zero', bits: 0x3fe0000000000000n, word: 0, exceptions: 0x20},
+  {name: 'negative half even zero', bits: 0xbfe0000000000000n, word: 0, exceptions: 0x20},
+  {name: 'positive odd tie increments magnitude', bits: 0x3ff8000000000000n, word: 2, exceptions: 0x20, incremented: true},
+  {name: 'negative odd tie increments magnitude', bits: 0xbff8000000000000n, word: 0xfffffffe, exceptions: 0x20, incremented: true},
+  {name: 'positive even tie keeps magnitude', bits: 0x4004000000000000n, word: 2, exceptions: 0x20},
+  {name: 'negative even tie keeps magnitude', bits: 0xc004000000000000n, word: 0xfffffffe, exceptions: 0x20},
+  {name: 'maximum plus quarter rounds inside range', bits: 0x41dfffffffd00000n, word: 0x7fffffff, exceptions: 0x20},
+  {name: 'minimum minus half rounds inside range', bits: 0xc1e0000000100000n, word: 0x80000000, exceptions: 0x20},
+  {name: 'exact positive endpoint ignores RC and masks', bits: 0x41dfffffffc00000n, word: 0x7fffffff, control: 0x0000},
+  {name: 'exact negative endpoint ignores RC and masks', bits: 0xc1e0000000000000n, word: 0x80000000, control: 0x0840},
+  {name: 'binary64 just above half', bits: 0x3fe0000000000001n, word: 1, exceptions: 0x20, incremented: true},
+  {name: 'binary64 just below half', bits: 0x3fdfffffffffffffn, word: 0, exceptions: 0x20},
+  {name: 'negative near minimum increments magnitude', bits: 0xc1dfffffffe00000n, word: 0x80000000, exceptions: 0x20, incremented: true},
+  {name: 'minimum normal binary64 rounds to zero', bits: 0x0010000000000000n, word: 0, exceptions: 0x20},
+];
+
+for (const [index, c] of fist32NormalCases.entries()) test(`actual FIST32 baseline ${c.name} preserves raw source ghosts and immediate flags`, {skip}, () => {
+  for (const pop of [false, true]) {
+    const control = c.control ?? [0x003f, 0x007f, 0x023f, 0x037f, 0x013f][index % 5];
+    fist32LiteralOracle(c, {pop, top: (index * 2 + Number(pop)) & 7, tag: (index + Number(pop)) % 3, control,
+      status: 0x4500 | (pop ? 0 : 0x200) | (!c.exceptions && control & 0x20 ? 0x20 : 0)});
+  }
+});
+
+for (const [index, c] of [
+  {name: 'maximum halfway overflows with IE and no new PE', bits: 0x41dfffffffe00000n, word: 0x80000000, exceptions: 1},
+  {name: 'minimum minus three quarters overflows with IE', bits: 0xc1e0000000180000n, word: 0x80000000, exceptions: 1},
+  {name: 'positive two to31 is invalid not valid negative minimum', bits: 0x41e0000000000000n, word: 0x80000000, exceptions: 1},
+  {name: 'raw80 bit beyond binary64 retains new PE', raw: {sig: 0x8000000000000001n, exp: 0x3fff}, word: 1, exceptions: 0x20},
+  {name: 'quiet NaN keeps source payload and raises IE', raw: {sig: 0xc123456789abcdefn, exp: 0x7fff}, word: 0x80000000, exceptions: 1},
+  {name: 'empty stack stores masked indefinite and raises SF IE', bits: 0x3ff8000000000000n, word: 0x80000000, exceptions: 0x41, empty: true},
+  {name: 'round down negative inexact', bits: 0xbff8000000000000n, word: 0xfffffffe, exceptions: 0x20, incremented: true, control: 0x047f},
+  {name: 'round up negative inexact', bits: 0xbff8000000000000n, word: 0xffffffff, exceptions: 0x20, control: 0x087f},
+  {name: 'round toward zero positive inexact', bits: 0x3ff8000000000000n, word: 1, exceptions: 0x20, control: 0x0c7f},
+  {name: 'FISTTP ignores nearest control and keeps its service', bits: 0x3ff8000000000000n, word: 1, exceptions: 0x20, truncate: true},
+].entries()) test(`actual FIST32 baseline fallback ${c.name}`, {skip}, () => {
+  fist32LiteralOracle({...c, services: 1}, {pop: true, top: index & 7, tag: index % 3});
+});
+
+test('actual FIST32 baseline unmasked PE commits store and pop before a later waiting MF', {skip}, () => {
+  fist32LiteralOracle({bits: 0x3ff8000000000000n, word: 2, exceptions: 0x20, incremented: true,
+    extraStatus: 0x8080, services: 1, control: 0x001f, deferred: true});
+});
+
+test('actual FIST32 baseline destination faults precede empty range and conversion effects while pending MF comes first', {skip}, () => {
+  for (const c of [
+    {address: 0x2ffe, detail: 1, fault: 0x3000},
+    {address: 0x2004, detail: 2, fault: 0x2004, readonly: true},
+    {address: 0x2ffe, detail: 1, fault: 0x3000, empty: true, services: 1},
+    {address: 0x2ffe, detail: 1, fault: 0x3000, bits: 0x41e0000000000000n, services: 1},
+    {address: 0x2ffe, empty: true, pending: true, services: 1},
+  ]) {
+    const f = fixture([0xb8, 0x78, 0x56, 0x34, 0x12, 0xdb, 0x1d, ...dword(c.address), 0x43], {
+      data: [[c.address, 0x5a], [c.address + 1, 0xa5]], execution: {budget: 2},
+    });
+    rejectJsService(f);
+    const calls = memoryCalls(f), services = c.services ?? fist32NormalBaselineServices;
+    try {
+      if (c.readonly) f.engine.ok('protect', 0x2000, 1, 1);
+      seedMultiplyResidualBank(f, multiplyRaw64(c.bits ?? 0x3ff8000000000000n), {
+        control: c.pending ? 0x003e : 0x003f, status: c.pending ? 0x4701 : 0x4700, top: 7, tag: c.empty ? 3 : 2,
+      });
+      const scalar = new Uint8Array(f.engine.memory.buffer, f.engine.base, 56).slice(), banks = processBanks(f);
+      view(scalar).setUint32(16, 0x12345678, true); view(scalar).setUint32(48, 0x1005, true);
+      if (c.pending) view(banks[0]).setUint16(18, 0xff81, true);
+      const selected = f.cache.select(), state = f.slab(), backing = state.getUint32(84, true), length = state.getUint32(88, true) * 4096;
+      const ram = new Uint8Array(f.engine.memory.buffer, backing, length).slice(), run = f.cache.execute(selected);
+      assert.deepEqual([run.coreReason, run.reason, run.retired, run.work, run.pc], [c.pending ? 9 : 3, c.pending ? 12 : 5, 1, 1, 0x1005]);
+      if (c.pending) assert.equal(f.engine.get(80), 0xff81);
+      else assert.deepEqual([f.engine.get(80), f.engine.get(84), f.engine.get(88), f.engine.get(92)], [c.detail, c.fault, 2, 4]);
+      assert.deepEqual(new Uint8Array(f.engine.memory.buffer, f.engine.base, 56), scalar);
+      assert.deepEqual(processBanks(f), banks);
+      assert.deepEqual(new Uint8Array(f.engine.memory.buffer, backing, length), ram);
+      assert.equal(f.slab().getUint32(48, true), 1);
+      event(f.engine, c.pending ? 16 : 0xffffffff, 0x1005, 1);
+      serviceCounts(f, services);
+      assert.deepEqual(calls, {read: 0, write: services === 0 ? 1 : 0});
+    } finally {f.close();}
+  }
+});
+
+test('actual FIST32 baseline prefix quota prevents pending and destination effects', {skip}, () => {
+  for (const pending of [false, true]) {
+    const f = fixture([0xb8, 0x78, 0x56, 0x34, 0x12, 0xdb, 0x1d, ...dword(0x2ffe)], {execution: {budget: 1}});
+    rejectJsService(f);
+    const calls = memoryCalls(f);
+    try {
+      seedMultiplyResidualBank(f, multiplyRaw64(0x3ff8000000000000n), {control: pending ? 0x003e : 0x003f, status: pending ? 0x4701 : 0x4700, top: 7, tag: 3});
+      const scalar = new Uint8Array(f.engine.memory.buffer, f.engine.base, 56).slice(), banks = processBanks(f);
+      view(scalar).setUint32(16, 0x12345678, true); view(scalar).setUint32(48, 0x1005, true);
+      const selected = f.cache.select(), state = f.slab(), backing = state.getUint32(84, true), length = state.getUint32(88, true) * 4096;
+      const ram = new Uint8Array(f.engine.memory.buffer, backing, length).slice(), run = f.cache.execute(selected);
+      assert.deepEqual([run.coreReason, run.reason, run.retired, run.work, run.pc], [2, 1, 1, 1, 0x1005]);
+      assert.deepEqual(new Uint8Array(f.engine.memory.buffer, f.engine.base, 56), scalar);
+      assert.deepEqual(processBanks(f), banks);
+      assert.deepEqual(new Uint8Array(f.engine.memory.buffer, backing, length), ram);
+      assert.equal(f.slab().getUint32(48, true), 0);
+      serviceCounts(f, 0); assert.deepEqual(calls, {read: 0, write: 0});
+    } finally {f.close();}
+  }
+});
+
+test('actual FIST32 baseline completed executable alias store commits PE C1 pop and metadata once', {skip}, () => {
+  const f = fixture(undefined, {windowsMappings: true, physicalPages: 1024, execution: {budget: 2}});
+  rejectJsService(f);
+  const calls = memoryCalls(f);
+  try {
+    const [writable, executable] = sharedViews(f, 0x40, [2, 0x24]);
+    const oldCode = [0xb8, 1, 0, 0, 0, 0xeb, 0xf9];
+    f.engine.request(Uint8Array.from(oldCode)); f.engine.ok('upload', writable, oldCode.length);
+    new DataView(f.engine.memory.buffer).setUint32(f.engine.base + 48, executable, true);
+    const old = f.cache.select(); assert.equal(f.cache.execute(old).reason, 1);
+    replaceCode(f, [0xb8, 0x78, 0x56, 0x34, 0x12, 0xdb, 0x1d, ...dword(writable), 0x43]);
+    new DataView(f.engine.memory.buffer).setUint32(f.engine.base + 48, 0x1000, true);
+    seedMultiplyResidualBank(f, multiplyRaw64(0x3ff8000000000000n), {control: 0x003f, status: 0x4700, top: 7, tag: 2});
+    const scalar = new Uint8Array(f.engine.memory.buffer, f.engine.base, 56).slice(), banks = processBanks(f);
+    view(scalar).setUint32(16, 0x12345678, true); view(scalar).setUint32(48, 0x100b, true);
+    fist32ExpectedBank(view(banks[0]), {exceptions: 0x20, incremented: true}, {top: 7, pop: true, opcode: 0x31d, address: writable, selector: 0x23});
+    const selected = f.cache.select(), state = f.slab(), backing = state.getUint32(84, true), length = state.getUint32(88, true) * 4096;
+    const slot = new DataView(f.engine.memory.buffer).getUint32(state.getUint32(76, true) + (writable >>> 12) * 4, true) - 1;
+    const ram = new Uint8Array(f.engine.memory.buffer, backing, length).slice(); new DataView(ram.buffer).setUint32(slot * 4096 + (writable & 4095), 2, true);
+    const run = f.cache.execute(selected);
+    assert.deepEqual([run.coreReason, run.reason, run.retired, run.work, run.pc], [6, 6, 2, 2, 0x100b]);
+    assert.deepEqual(new Uint8Array(f.engine.memory.buffer, f.engine.base, 56), scalar);
+    assert.deepEqual(processBanks(f), banks);
+    assert.deepEqual(new Uint8Array(f.engine.memory.buffer, backing, length), ram);
+    assert.equal(f.slab().getUint32(48, true), 0);
+    f.cache.import(); assert.equal(f.cache.table.get(old.slot), null);
+    serviceCounts(f, fist32NormalBaselineServices);
+    assert.deepEqual(calls, {read: 0, write: fist32NormalBaselineServices === 0 ? 1 : 0});
+  } finally {f.close();}
+});
