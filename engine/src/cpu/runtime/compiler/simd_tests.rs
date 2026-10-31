@@ -2,6 +2,161 @@ use super::*;
 use crate::memory::{PageRange, Permissions};
 
 #[test]
+fn generated_numeric_view_prefixes_preserve_lazy_bank_order_and_exact_bounds() {
+    use std::{
+        fs,
+        process::Command,
+        time::{SystemTime, UNIX_EPOCH},
+    };
+    let scratch = std::env::temp_dir().join(format!(
+        "ring3-runtime-numeric-views-{}-{}",
+        std::process::id(),
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    fs::create_dir(&scratch).unwrap();
+    let mut memory = AddressSpace::new(1).unwrap();
+    memory
+        .map_zeroed(
+            PageRange::new(GuestAddress(0x1000), 1).unwrap(),
+            Permissions::ALL,
+        )
+        .unwrap();
+    for (name, bytes, limit) in [
+        ("integer", vec![0xb8, 0x78, 0x56, 0x34, 0x12, 0x90], 2),
+        ("x87", vec![0xb8, 0x78, 0x56, 0x34, 0x12, 0xd9, 0xe8], 2),
+        (
+            "simd",
+            vec![0xb8, 0x78, 0x56, 0x34, 0x12, 0x0f, 0x28, 0xc1],
+            2,
+        ),
+        (
+            "x87-simd",
+            vec![0xb8, 0x78, 0x56, 0x34, 0x12, 0xd9, 0xe8, 0x0f, 0x28, 0xc1],
+            3,
+        ),
+        (
+            "simd-x87",
+            vec![0xb8, 0x78, 0x56, 0x34, 0x12, 0x0f, 0x28, 0xc1, 0xd9, 0xe8],
+            3,
+        ),
+    ] {
+        memory.write(GuestAddress(0x1000), &bytes).unwrap();
+        fs::write(
+            scratch.join(format!("{name}.wasm")),
+            compile(&memory, GuestAddress(0x1000), limit).unwrap().wasm,
+        )
+        .unwrap();
+    }
+    let result = Command::new("node").arg("--input-type=module").arg("-e").arg(r#"
+import assert from 'node:assert/strict';import fs from 'node:fs';
+const root=process.argv[1],memory=new WebAssembly.Memory({initial:1}),ram=new Uint8Array(memory.buffer),data=new DataView(memory.buffer),state=0x8000,view=0x9000,x87=0xa000,simd=0xa100;
+const word=(at,value)=>data.setUint32(state+at,value>>>0,true),put=(at,value)=>data.setUint32(at,value>>>0,true);
+let fpAt=x87,simdAt=simd;
+const imports={env:{memory},cpu:{read(){throw Error('register-only numeric fixture must not call cpu.read');},write(){throw Error('register-only numeric fixture must not call cpu.write');}}};
+const programs=new Map([['integer',[['mov',5],['nop',1]]],['x87',[['mov',5],['x87',2]]],['simd',[['mov',5],['simd',3]]],['x87-simd',[['mov',5],['x87',2],['simd',3]]],['simd-x87',[['mov',5],['simd',3],['x87',2]]]]),functions=new Map(),modules=new Map();
+for(const name of programs.keys()){
+  const module=new WebAssembly.Module(fs.readFileSync(`${root}/${name}.wasm`));
+  assert.deepEqual(WebAssembly.Module.imports(module).map(x=>`${x.module}.${x.name}:${x.kind}`),['env.memory:memory','cpu.read:function','cpu.write:function']);
+  assert.deepEqual(WebAssembly.Module.exports(module).map(x=>[x.name,x.kind]),[['run','function']]);
+  modules.set(name,module);
+  functions.set(name,new WebAssembly.Instance(module,imports).exports.run);
+}
+function init(quota){
+  for(let i=0;i<ram.length;i++)ram[i]=(i*37+11)&255;ram.fill(0,state,state+160);ram.fill(0,view,view+40);
+  word(0,1);word(4,160);[0xaabbccdd,2,3,4,0x4800,6,7,8].forEach((v,i)=>word(8+4*i,v));word(40,0x1000);word(44,0xcd7);word(48,quota);word(124,view);word(152,0x1f);
+  put(view,1);put(view+4,40);put(view+8,x87);put(view+36,simd);[0x23,0x1b,0x23,0x23,0x3b,0x43].forEach((v,i)=>put(view+12+4*i,v));
+  data.setUint16(x87,0x037f,true);data.setUint16(x87+2,0x4700,true);data.setUint16(x87+4,0xffff,true);put(simd,0x1fbf);fpAt=x87;simdAt=simd;
+  [0x7f801234,0xffc54321,0x80000000,1].forEach((v,i)=>put(simd+20+4*i,v));
+}
+function edgeView(size){const at=ram.length-36;ram.set(ram.slice(view,view+36),at);put(at+4,size);word(124,at);}
+function edgeX87(){fpAt=ram.length-100;ram.set(ram.slice(x87,x87+100),fpAt);put(view+8,fpAt);}
+function edgeSimd(){simdAt=ram.length-132;ram.set(ram.slice(simd,simd+132),simdAt);put(view+36,simdAt);}
+const cases=[
+  ['valid',()=>{},true,true],
+  ['36-byte-prefix',()=>put(view+4,36),true,false],
+  ['maximum-reported-size',()=>put(view+4,0xffffffff),true,true],
+  ['physical-36-reported-36',()=>edgeView(36),true,false],
+  ['physical-36-reported-40',()=>edgeView(40),true,false],
+  ['physical-36-reported-maximum',()=>edgeView(0xffffffff),true,false],
+  ['zero-view',()=>word(124,0),false,false],
+  ['overflow-view',()=>word(124,0xfffffff0),false,false],
+  ['misaligned-view',()=>word(124,view+1),false,false],
+  ['unknown-view-version',()=>put(view,2),false,false],
+  ['short-view-header',()=>put(view+4,35),false,false],
+  ['zero-x87-bank',()=>put(view+8,0),false,true],
+  ['misaligned-x87-bank',()=>put(view+8,x87+1),false,true],
+  ['x87-span-96',()=>put(view+8,ram.length-96),false,true],
+  ['overflow-x87-bank',()=>put(view+8,0xfffffffc),false,true],
+  ['exact-x87-span-100',edgeX87,true,true],
+  ['zero-simd-bank',()=>put(view+36,0),true,false],
+  ['misaligned-simd-bank',()=>put(view+36,simd+1),true,false],
+  ['simd-span-128',()=>put(view+36,ram.length-128),true,false],
+  ['overflow-simd-bank',()=>put(view+36,0xfffffffc),true,false],
+  ['exact-simd-span-132',edgeSimd,true,true],
+  ['pending-unmasked-x87',()=>{data.setUint16(x87,0x037e,true);data.setUint16(x87+2,1,true);},false,true],
+  ['reserved-mxcsr',()=>put(simd,0x10000),true,false],
+];
+for(const[label,mutate,x87OK,simdOK]of cases)for(const[name,steps]of programs)for(const quota of[0,1,2,3]){
+  init(quota);mutate();const expected=ram.slice(),d=new DataView(expected.buffer);let remaining=quota,retired=0,pc=0x1000,status=0;
+  for(const[kind,length]of steps){
+    if(!remaining){status=2;break;}
+    if(kind==='x87'&&!x87OK||kind==='simd'&&!simdOK){status=7;break;}
+    if(kind==='mov')d.setUint32(state+8,0x12345678,true);
+    if(kind==='x87'){
+      for(const[at,value]of[[2,0x7d00],[4,0x3fff],[6,0x1e8],[16,0x1b]])d.setUint16(fpAt+at,value,true);
+      d.setUint32(fpAt+8,pc,true);expected.set([0,0,0,0,0,0,0,0x80,0xff,0x3f],fpAt+90);
+    }
+    if(kind==='simd')expected.set(expected.slice(simdAt+20,simdAt+36),simdAt+4);
+    remaining--;retired++;pc+=length;
+  }
+  for(const[at,value]of[[40,pc],[48,remaining],[52,status],[56,retired]])d.setUint32(state+at,value,true);
+  assert.equal(functions.get(name)(state),status,`${label}/${name}/quota${quota}`);
+  assert.deepEqual(ram,expected,`${label}/${name}/quota${quota}: full RAM, independent banks, exact first reached guard and prefix`);
+}
+function completedMixed(bytes,context,fp,vector){
+  const expected=bytes.slice(),d=new DataView(expected.buffer);
+  for(const[at,value]of[[8,0x12345678],[40,0x100a],[48,0],[52,0],[56,3]])d.setUint32(context+at,value,true);
+  for(const[at,value]of[[2,0x7d00],[4,0x3fff],[6,0x1e8],[16,0x1b]])d.setUint16(fp+at,value,true);
+  d.setUint32(fp+8,0x1005,true);expected.set([0,0,0,0,0,0,0,0x80,0xff,0x3f],fp+90);
+  expected.set(expected.slice(vector+20,vector+36),vector+4);return expected;
+}
+// one compiled module, two imported memories and repeated fresh invocations.
+const otherMemory=new WebAssembly.Memory({initial:1}),otherRAM=new Uint8Array(otherMemory.buffer),otherData=new DataView(otherMemory.buffer),otherState=0x8100,otherView=0x9200,otherFP=0xa400,otherSIMD=0xa500;
+const otherRun=new WebAssembly.Instance(modules.get('x87-simd'),{env:{memory:otherMemory},cpu:imports.cpu}).exports.run;
+for(let round=0;round<3;round++){
+  init(3);
+  if(round===1){
+    const changedView=0x9400;fpAt=0xa800;simdAt=0xa900;
+    ram.set(ram.slice(view,view+40),changedView);ram.set(ram.slice(x87,x87+100),fpAt);ram.set(ram.slice(simd,simd+132),simdAt);
+    put(changedView+8,fpAt);put(changedView+36,simdAt);word(124,changedView);put(simdAt+20,0xdeadbeef);
+  }
+  const expected=completedMixed(ram,state,fpAt,simdAt);
+  assert.equal(functions.get('x87-simd')(state),0);assert.deepEqual(ram,expected,'same instance must rebind both bank proofs between invocations');
+  otherRAM.fill(0x6b);otherRAM.fill(0,otherState,otherState+160);otherRAM.fill(0,otherView,otherView+40);
+  for(const[at,value]of[[0,1],[4,160],[40,0x1000],[44,0xcd7],[48,3],[124,otherView],[152,0x1f]])otherData.setUint32(otherState+at,value,true);
+  for(const[at,value]of[[0,1],[4,40],[8,otherFP],[16,0x1b],[36,otherSIMD]])otherData.setUint32(otherView+at,value,true);
+  otherData.setUint16(otherFP,0x007f,true);otherData.setUint16(otherFP+2,0x4700,true);otherData.setUint16(otherFP+4,0xffff,true);otherData.setUint32(otherSIMD,0xffff,true);
+  [0xcafebabe,round,0x7fc01234,0x80000000].forEach((v,i)=>otherData.setUint32(otherSIMD+20+i*4,v,true));
+  const otherExpected=completedMixed(otherRAM,otherState,otherFP,otherSIMD);
+  assert.equal(otherRun(otherState),0);assert.deepEqual(otherRAM,otherExpected,'private proof helpers must use their own imported memory and context');
+  assert.deepEqual(ram,expected,'the other instance must not change the first memory');
+}
+console.log('numeric-view baseline: both bank orders, integer prefix/quota, physical36/40, minimum headers, exact100/132 bounds, pointer overflow/alignment, pendingMF and MXCSR full-RAM passed');
+"#).arg(&scratch).output().unwrap();
+    assert!(
+        result.status.success(),
+        "fixture {} failed:\n{}\n{}",
+        scratch.display(),
+        String::from_utf8_lossy(&result.stdout),
+        String::from_utf8_lossy(&result.stderr)
+    );
+    fs::remove_dir_all(scratch).unwrap();
+}
+
+#[test]
 fn generated_simd_exact_add_and_transport_preserve_banks_and_atomic_memory() {
     use std::{
         fs,
