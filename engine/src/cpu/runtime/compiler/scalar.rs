@@ -12,6 +12,7 @@ mod memory;
 mod multiply;
 mod narrow;
 mod rotate;
+mod routing;
 mod shift;
 mod simd;
 mod string;
@@ -170,7 +171,7 @@ pub(super) fn emit(blocks: &[Block], entries: &[EntryPoint]) -> Vec<u8> {
             (9, ValType::F64),
             (5, ValType::I32),
             (6, ValType::I64),
-            (3, ValType::I32),
+            (10, ValType::I32),
         ]),
         emitted_guest_write: false,
     };
@@ -196,22 +197,16 @@ pub(super) fn emit(blocks: &[Block], entries: &[EntryPoint]) -> Vec<u8> {
     {
         out.c().local_get(0).i32_load(mem(offset)).local_set(local);
     }
-    // Select a landing once, then retain ordinary instruction fallthrough.
-    // The two tables bound label nesting by blocks + instructions per block.
+    out.c().loop_(BlockType::Empty);
+    entry_route(&mut out, entries);
+    out.c().local_set(A);
+    // the two tables bound label nesting by blocks plus instructions per block.
     let block_count = blocks.len() as u32;
     out.c().loop_(BlockType::Empty).block(BlockType::Empty);
     for _ in blocks {
         out.c().block(BlockType::Empty);
     }
-    entry_route(&mut out, entries);
     out.c()
-        .local_tee(A)
-        .i32_const(-1)
-        .i32_eq()
-        .if_(BlockType::Empty);
-    out.exit(0);
-    out.c()
-        .end()
         .local_get(A)
         .i32_const(6)
         .i32_shr_u()
@@ -268,11 +263,20 @@ pub(super) fn emit(blocks: &[Block], entries: &[EntryPoint]) -> Vec<u8> {
                 .i32_store(mem(68));
             out.exit(5);
         }
+        if routing::next(&mut out, blocks, entries, block_index) {
+            out.c()
+                .local_get(A)
+                .i32_const(-2)
+                .i32_eq()
+                .if_(BlockType::Empty)
+                .br(remaining_blocks + 2)
+                .end();
+        }
         out.c().br(remaining_blocks);
     }
     out.c().end();
     out.exit(0);
-    out.c().end().unreachable().end();
+    out.c().end().unreachable().end().unreachable().end();
     let mut code = CodeSection::new();
     code.function(&out.function);
     module.section(&code);
