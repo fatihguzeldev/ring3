@@ -179,6 +179,7 @@ pub(super) fn emit(
     module.section(&exports);
     let mut out = Output {
         native_memory_bound: binding.is_some(),
+        return_prediction_possible: routing::return_prediction_possible(blocks, entries),
         function: Function::new([
             (8, ValType::I32),
             (1, ValType::I64),
@@ -353,6 +354,7 @@ pub(super) fn emit(
 
 struct Output {
     native_memory_bound: bool,
+    return_prediction_possible: bool,
     function: Function,
     emitted_guest_write: bool,
     recipe: Option<deferred::Recipe>,

@@ -30,6 +30,22 @@ fn static_targets(block: &Block) -> [Option<u32>; 2] {
     }
 }
 
+pub(super) fn return_prediction_possible(blocks: &[Block], entries: &[EntryPoint]) -> bool {
+    blocks
+        .iter()
+        .flat_map(|block| &block.instructions)
+        .any(|instruction| {
+            let Operation::Call { target } = *instruction.operation() else {
+                return false;
+            };
+            landing(entries, instruction.next_pc().0) >= 0
+                && match target {
+                    BranchTarget::Direct(target) => landing(entries, target.0) >= 0,
+                    _ => true,
+                }
+        })
+}
+
 pub(super) fn self_loop(blocks: &[Block], entries: &[EntryPoint], index: usize) -> bool {
     blocks[index].gate.is_none()
         && static_targets(&blocks[index])
@@ -90,12 +106,14 @@ pub(super) fn next(
     let fallthrough = instruction.next_pc().0;
     match *instruction.operation() {
         Operation::Call { target } => {
-            // a prediction never replaces the architectural stack read on return.
-            let route = landing(entries, fallthrough).wrapping_add(1) as u32 as u64;
-            let prediction = (route << 32) | u64::from(fallthrough);
-            out.c()
-                .i64_const(prediction as i64)
-                .local_set(RETURN_PREDICTION);
+            if out.return_prediction_possible {
+                // a prediction never replaces the architectural stack read on return.
+                let route = landing(entries, fallthrough).wrapping_add(1) as u32 as u64;
+                let prediction = (route << 32) | u64::from(fallthrough);
+                out.c()
+                    .i64_const(prediction as i64)
+                    .local_set(RETURN_PREDICTION);
+            }
             match target {
                 BranchTarget::Direct(target) => {
                     out.c().i32_const(landing(entries, target.0)).local_set(A);
@@ -122,6 +140,10 @@ pub(super) fn next(
                 .local_set(A);
         }
         Operation::Return { .. } => {
+            if !out.return_prediction_possible {
+                out.c().i32_const(-2).local_set(A);
+                return true;
+            }
             out.c()
                 .local_get(RETURN_PREDICTION)
                 .i64_const(32)
