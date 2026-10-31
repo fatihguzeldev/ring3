@@ -933,6 +933,32 @@ for (const odd of [false, true]) test(`actual PC53 ADD rounds the ${odd ? 'odd' 
   } finally {f.close();}
 });
 
+for (const control of [0x003f, 0x023f]) for (const reverse of [false, true])
+test(`actual PC${control === 0x003f ? 24 : 53} ${reverse ? 'reverse subtraction' : 'subtraction'} preserves the lost-addend PE C1 state`, {skip}, () => {
+  const opcode = reverse ? 0xe9 : 0xe1;
+  const f = fixture([0xd8, opcode], {fpControl: control, fpStatus: 0x4000, execution: {budget: 1}});
+  try {
+    const bank = f.engine.base + 4236, arena = new DataView(f.engine.memory.buffer);
+    arena.setUint16(bank + 20, 0xfff0, true);
+    const tinyExponent = 0x3fff - (control === 0x003f ? 60 : 100);
+    new Uint8Array(f.engine.memory.buffer, bank + 40, 20).set([
+      0, 0, 0, 0, 0, 0, 0, 0x80, 0xff, 0x3f,
+      0, 0, 0, 0, 0, 0, 0, 0x80, tinyExponent & 255, tinyExponent >>> 8]);
+    const scalar = new Uint8Array(f.engine.memory.buffer, f.engine.base, 56).slice(), banks = processBanks(f), fp = view(banks[0]);
+    view(scalar).setUint32(48, 0x1002, true);
+    fp.setUint16(18, 0x4220, true); fp.setUint16(22, opcode, true);
+    fp.setUint32(24, 0x1000, true); fp.setUint16(32, 0x1b, true);
+    banks[0].set([0, 0, 0, 0, 0, 0, 0, 0x80, 0xff, reverse ? 0xbf : 0x3f], 40);
+    const selected = f.cache.select(), state = f.slab(), backing = state.getUint32(84, true), length = state.getUint32(88, true) * 4096;
+    const ram = new Uint8Array(f.engine.memory.buffer, backing, length).slice(), run = f.cache.execute(selected);
+    assert.deepEqual([run.reason, run.retired, run.work, run.pc], [1, 1, 1, 0x1002]);
+    assert.deepEqual(new Uint8Array(f.engine.memory.buffer, f.engine.base, 56), scalar);
+    assert.deepEqual(processBanks(f), banks);
+    assert.deepEqual(new Uint8Array(f.engine.memory.buffer, backing, length), ram);
+    serviceCounts(f, 0);
+  } finally {f.close();}
+});
+
 test('actual SIMD transport and exact ADDPS preserve sticky MXCSR and pending x87 state at each budget', {skip}, () => {
   const left = [0x3f800000, 0x40000000, 0x40400000, 0x40800000], right = [0x3f000000, 0x3f800000, 0x40000000, 0x40800000];
   const result = [0x3fc00000, 0x40400000, 0x40a00000, 0x41000000];

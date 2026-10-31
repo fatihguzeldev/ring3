@@ -62,11 +62,20 @@ fn lower(operation: Operation) -> Option<Arithmetic> {
     };
     if !matches!(
         kind,
-        X87Binary::Add | X87Binary::Multiply | X87Binary::Divide
+        X87Binary::Add
+            | X87Binary::Subtract
+            | X87Binary::ReverseSubtract
+            | X87Binary::Multiply
+            | X87Binary::Divide
     ) {
         return None;
     }
-    if memory_width == 8 && !matches!(kind, X87Binary::Add | X87Binary::Divide) {
+    if memory_width == 8
+        && !matches!(
+            kind,
+            X87Binary::Add | X87Binary::Subtract | X87Binary::ReverseSubtract | X87Binary::Divide
+        )
+    {
         return None;
     }
     Some(Arithmetic {
@@ -103,6 +112,18 @@ fn reject_non_normal(out: &mut Output, bits: u32) {
     x87::miss_if(out);
 }
 
+fn as_addition(out: &mut Output, kind: X87Binary) -> X87Binary {
+    let operand = match kind {
+        X87Binary::Subtract => RIGHT,
+        X87Binary::ReverseSubtract => LEFT,
+        _ => return kind,
+    };
+    // both original operands have been guarded. negation is exact, including
+    // signed zero; finite nearest addition then uses the unchanged add proof.
+    out.c().local_get(operand).f64_neg().local_set(operand);
+    X87Binary::Add
+}
+
 fn emit_pc24(
     out: &mut Output,
     kind: X87Binary,
@@ -123,6 +144,7 @@ fn emit_pc24(
             .f64_promote_f32()
             .local_set(RIGHT);
     }
+    let kind = as_addition(out, kind);
     if kind == X87Binary::Divide {
         out.c().local_get(RIGHT).f64_const(0.0.into()).f64_eq();
         x87::miss_if(out);
@@ -321,6 +343,7 @@ fn reject_non_normal64(out: &mut Output) {
 
 fn emit_pc53_add(
     out: &mut Output,
+    kind: X87Binary,
     destination: u8,
     source: Option<u8>,
     address: Option<EffectiveAddress>,
@@ -357,6 +380,7 @@ fn emit_pc53_add(
                 .local_set(RIGHT);
         }
     }
+    as_addition(out, kind);
     out.c()
         .local_get(LEFT)
         .local_get(RIGHT)
@@ -448,8 +472,11 @@ pub(super) fn emit(out: &mut Output, operation: Operation) -> bool {
         .i32_const(0x023f)
         .i32_eq()
         .if_(BlockType::Empty);
-    if kind == X87Binary::Add {
-        emit_pc53_add(out, destination, source, address, memory_width);
+    if matches!(
+        kind,
+        X87Binary::Add | X87Binary::Subtract | X87Binary::ReverseSubtract
+    ) {
+        emit_pc53_add(out, kind, destination, source, address, memory_width);
     } else if kind == X87Binary::Divide {
         if !x87_divide::emit_pc53(out, operation) {
             out.exit(7);

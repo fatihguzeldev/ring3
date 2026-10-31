@@ -531,3 +531,360 @@ console.log('PC53 ADD wide53 reg/pop/m32/m64/FS, CW023f/027f immediate PE/C1 ful
     );
     fs::remove_dir_all(scratch).unwrap();
 }
+
+#[test]
+fn generated_x87_subtract_and_reverse_subtract_preserve_exact_rounding_state() {
+    use crate::cpu::x86::X87Binary;
+    use std::{
+        fs,
+        process::Command,
+        time::{SystemTime, UNIX_EPOCH},
+    };
+    let scratch = std::env::temp_dir().join(format!(
+        "ring3-runtime-x87-subtract-{}-{}",
+        std::process::id(),
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    fs::create_dir(&scratch).unwrap();
+    let mut memory = AddressSpace::new(2).unwrap();
+    for address in [0x1000, 0x3000] {
+        memory
+            .map_zeroed(
+                PageRange::new(GuestAddress(address), 1).unwrap(),
+                Permissions::ALL,
+            )
+            .unwrap();
+    }
+    let forms = [
+        ("s-reg", &[0xd8, 0xe1][..], 0, false),
+        ("r-reg", &[0xd8, 0xe9][..], 0, true),
+        ("s-dest", &[0xdc, 0xe9][..], 0, false),
+        ("r-dest", &[0xdc, 0xe1][..], 0, true),
+        ("s-pop", &[0xde, 0xe9][..], 0, false),
+        ("r-pop", &[0xde, 0xe1][..], 0, true),
+        ("s-self", &[0xd8, 0xe0][..], 0, false),
+        ("r-self", &[0xd8, 0xe8][..], 0, true),
+        ("s-m32", &[0xd8, 0x23][..], 4, false),
+        ("r-m32", &[0xd8, 0x2b][..], 4, true),
+        ("s-m64", &[0xdc, 0x23][..], 8, false),
+        ("r-m64", &[0xdc, 0x2b][..], 8, true),
+        ("fs-s32", &[0x64, 0xd8, 0x23][..], 4, false),
+        ("fs-r32", &[0x64, 0xd8, 0x2b][..], 4, true),
+        ("fs-s64", &[0x64, 0xdc, 0x23][..], 8, false),
+        ("fs-r64", &[0x64, 0xdc, 0x2b][..], 8, true),
+    ];
+    let pc24: Vec<_> = [
+        (0x40400000, 0x40000000),
+        (0xc0400000, 0x40000000),
+        (0x3f800000, 0x21800000),
+        (0x3f800000, 0xa1800000),
+        (0x3f800000, 0x33000000),
+        (0x3f7fffff, 0x33000000),
+        (0x3f800001, 0x33800000),
+        (0xbf800001, 0xb3800000),
+        (0, 0),
+        (0, 0x80000000),
+        (0x80000000, 0),
+        (0x80000000, 0x80000000),
+        (0x00800000, 0x80800001),
+        (0x00800001, 0x80800002),
+        (0x00800000, 0x00800001),
+        (0x7f7fffff, 0xff7fffff),
+    ]
+    .into_iter()
+    .map(|(a, b)| {
+        (
+            f64::from(f32::from_bits(a)).to_bits(),
+            f64::from(f32::from_bits(b)).to_bits(),
+        )
+    })
+    .collect();
+    let pc53 = [
+        (0x4008000000000000, 0x4000000000000000),
+        (0xc008000000000000, 0x4000000000000000),
+        (0x3ff0000000000000, 0x39b0000000000000),
+        (0x3ff0000000000000, 0xb9b0000000000000),
+        (0x3ff0000000000000, 0x3c90000000000000),
+        (0x3fefffffffffffff, 0x3c90000000000000),
+        (0x3ff0000000000001, 0x3ca0000000000000),
+        (0xbff0000000000001, 0xbca0000000000000),
+        (0x3ff123456789abcd, 0x3ff123456789abcc),
+        (0, 0),
+        (0, 0x8000000000000000),
+        (0x8000000000000000, 0),
+        (0x8000000000000000, 0x8000000000000000),
+        (0x0010000000000000, 0x8010000000000001),
+        (0x0010000000000001, 0x8010000000000002),
+        (0x0010000000000000, 0x0010000000000001),
+        (0x7fefffffffffffff, 0xffefffffffffffff),
+    ];
+    let mut cases = Vec::new();
+    for (name, code, width, reverse) in forms {
+        memory.write(GuestAddress(0x1000), code).unwrap();
+        fs::write(
+            scratch.join(format!("{name}.wasm")),
+            compile(&memory, GuestAddress(0x1000), 1).unwrap().wasm,
+        )
+        .unwrap();
+        let decoded = decode_one(&memory, GuestAddress(0x1000)).unwrap();
+        let Operation::X87 { operation, .. } = *decoded.operation() else {
+            panic!("expected x87 subtraction");
+        };
+        let kind = match operation {
+            X87Operation::Binary { kind, .. } | X87Operation::BinaryMemory { kind, .. } => kind,
+            _ => panic!("expected binary x87"),
+        };
+        assert_eq!(
+            kind,
+            if reverse {
+                X87Binary::ReverseSubtract
+            } else {
+                X87Binary::Subtract
+            }
+        );
+        for (precision, pairs) in [(24, pc24.as_slice()), (53, pc53.as_slice())] {
+            if precision == 24 && width == 8 {
+                continue;
+            }
+            for &(a, mut b) in pairs {
+                if name.ends_with("self") {
+                    b = a;
+                }
+                let bits32 = (f64::from_bits(b) as f32).to_bits();
+                if width == 4 && f64::from(f32::from_bits(bits32)).to_bits() != b {
+                    continue;
+                }
+                let words = if width == 8 {
+                    [b as u32, (b >> 32) as u32]
+                } else {
+                    [bits32, 0]
+                };
+                for control in if precision == 24 {
+                    [0x003f, 0x007f]
+                } else {
+                    [0x023f, 0x027f]
+                } {
+                    for top in 0..8 {
+                        for status in [0x450f, 0x472f] {
+                            let mut before = state(control, top);
+                            before.status = (top << 11) | status;
+                            let destination = match operation {
+                                X87Operation::Binary {
+                                    destination,
+                                    source,
+                                    ..
+                                } => {
+                                    operand64(&mut before, destination, a);
+                                    operand64(&mut before, source, b);
+                                    destination
+                                }
+                                _ => {
+                                    operand64(&mut before, 0, a);
+                                    0
+                                }
+                            };
+                            let fs = name.starts_with("fs");
+                            let mut segments = SegmentContext::default();
+                            segments.state.selectors = [0x23, 0x1b, 0x23, 0x23, 0x3b, 0x43];
+                            if fs {
+                                segments.state.bases[4] = 0x1000;
+                            }
+                            let mut scalar = State32 {
+                                registers: [
+                                    0x11223344,
+                                    0x55667788,
+                                    0x99aabbcc,
+                                    if fs { 0x2001 } else { 0x3000 },
+                                    0x4800,
+                                    0x12345678,
+                                    0x87654321,
+                                    0xaabbccdd,
+                                ],
+                                eip: 0x1000,
+                                eflags: 0xcd7,
+                            };
+                            let mut input = Vec::new();
+                            for word in words {
+                                input.extend_from_slice(&word.to_le_bytes());
+                            }
+                            if width != 0 {
+                                memory
+                                    .write(
+                                        GuestAddress(if fs { 0x3001 } else { 0x3000 }),
+                                        &input[..width as usize],
+                                    )
+                                    .unwrap();
+                            }
+                            let mut numeric = NumericState::default();
+                            numeric.x87 = before;
+                            numeric
+                                .execute(
+                                    &mut memory,
+                                    &mut scalar,
+                                    &segments,
+                                    decoded.operation(),
+                                    decoded.next_pc().0,
+                                )
+                                .unwrap();
+                            let result = numeric.x87.registers
+                                [(usize::from(top) + usize::from(destination)) & 7];
+                            let significand = u64::from_le_bytes(result[..8].try_into().unwrap());
+                            let exponent = u16::from_le_bytes([result[8], result[9]]) & 0x7fff;
+                            let range = if precision == 24 {
+                                16257..=16510
+                            } else {
+                                15361..=17406
+                            };
+                            let admitted =
+                                significand == 0 && exponent == 0 || range.contains(&exponent);
+                            if (name == "s-reg" || name == "r-reg") && top == 0 && status == 0x450f
+                            {
+                                if a == 0x4008000000000000 && b == 0x4000000000000000 {
+                                    assert_eq!(
+                                        result,
+                                        [
+                                            0,
+                                            0,
+                                            0,
+                                            0,
+                                            0,
+                                            0,
+                                            0,
+                                            0x80,
+                                            0xff,
+                                            if reverse { 0xbf } else { 0x3f }
+                                        ]
+                                    );
+                                    assert_eq!(numeric.x87.status, 0x450f);
+                                }
+                                if a == 0x3ff0000000000000
+                                    && b == (if precision == 24 {
+                                        0x3c30000000000000
+                                    } else {
+                                        0x39b0000000000000
+                                    })
+                                {
+                                    assert_eq!(
+                                        result,
+                                        [
+                                            0,
+                                            0,
+                                            0,
+                                            0,
+                                            0,
+                                            0,
+                                            0,
+                                            0x80,
+                                            0xff,
+                                            if reverse { 0xbf } else { 0x3f }
+                                        ]
+                                    );
+                                    assert_eq!(numeric.x87.status, 0x472f);
+                                }
+                                if a << 1 == 0 && b << 1 == 0 {
+                                    let negative = if reverse {
+                                        b >> 63 != 0 && a >> 63 == 0
+                                    } else {
+                                        a >> 63 != 0 && b >> 63 == 0
+                                    };
+                                    assert_eq!(
+                                        result,
+                                        [
+                                            0,
+                                            0,
+                                            0,
+                                            0,
+                                            0,
+                                            0,
+                                            0,
+                                            0,
+                                            0,
+                                            if negative { 0x80 } else { 0 }
+                                        ]
+                                    );
+                                    assert_eq!(numeric.x87.status, 0x450f);
+                                }
+                            }
+                            cases.push(format!("{{\"name\":\"{name}\",\"before\":{:?},\"after\":{:?},\"words\":{:?},\"width\":{width},\"fs\":{fs},\"status\":{},\"next\":{},\"quota\":{},\"retired\":{}}}", raw(before), raw(if admitted {numeric.x87} else {before}), words, if admitted {0} else {7}, if admitted {decoded.next_pc().0} else {0x1000}, u32::from(!admitted), u32::from(admitted)));
+                        }
+                    }
+                }
+            }
+        }
+    }
+    for (name, a, b, control, variant) in [
+        ("s-reg", 0x3ff0000000000000, 0x4000000000000000, 0x037f, 0),
+        ("r-reg", 0x3ff0000000000000, 0x4000000000000000, 0x063f, 0),
+        ("s-reg", 0x3ff0000000000001, 0x4000000000000000, 0x003f, 0),
+        ("r-reg", 0x3ff0000000000000, 0x4000000000000000, 0x023f, 1),
+        ("s-reg", 1, 0x3ff0000000000000, 0x023f, 0),
+        ("r-reg", 0x7ff0000000000000, 0x3ff0000000000000, 0x023f, 0),
+        ("s-reg", 0x7ff8000000000001, 0x3ff0000000000000, 0x023f, 0),
+        ("s-reg", 0x3ff0000000000000, 0x4000000000000000, 0x023f, 2),
+        ("r-reg", 0x3ff0000000000000, 0x4000000000000000, 0x023f, 3),
+        ("s-m64", 0x3ff0000000000000, 0x4000000000000000, 0x003f, 0),
+        ("fs-r64", 0x3ff0000000000000, 0x4000000000000000, 0x023f, 4),
+        ("fs-r64", 0x3ff0000000000000, 0x4000000000000000, 0x023f, 5),
+        ("s-m32", 0x3ff0000000000000, 0x4000000000000000, 0x023e, 6),
+        ("r-m32", 0x3ff0000000000000, 0x4000000000000000, 0x003f, 7),
+    ] {
+        let mut before = state(control, 0);
+        before.status = 0x4220;
+        operand64(&mut before, 0, a);
+        operand64(&mut before, 1, b);
+        if variant == 1 {
+            before.registers[0][0] |= 1;
+        }
+        if variant == 2 {
+            before.tag |= 3 << 2;
+        }
+        if variant == 3 {
+            before.tag |= 3;
+        }
+        if variant == 6 {
+            before.status |= 1;
+        }
+        let width = if name.ends_with("64") {
+            8
+        } else if name.ends_with("32") {
+            4
+        } else {
+            0
+        };
+        let words = if width == 8 {
+            [b as u32, (b >> 32) as u32]
+        } else {
+            [(f64::from_bits(b) as f32).to_bits(), 0]
+        };
+        cases.push(format!("{{\"name\":\"{name}\",\"before\":{:?},\"after\":{:?},\"words\":{:?},\"width\":{width},\"fs\":{},\"status\":{},\"next\":4096,\"quota\":1,\"retired\":0,\"cross\":{},\"unreadable\":{},\"noRead\":{},\"fault\":{}}}", raw(before), raw(before), words, name.starts_with("fs"), if variant == 7 {3} else {7}, variant == 4, variant == 5, variant == 6, variant == 7));
+    }
+    fs::write(scratch.join("cases.json"), format!("[{}]", cases.join(","))).unwrap();
+    let result = Command::new("node").arg("--input-type=module").arg("-e").arg(r#"
+import assert from 'node:assert/strict';import fs from 'node:fs';
+const root=process.argv[1],memory=new WebAssembly.Memory({initial:4}),data=new DataView(memory.buffer),ram=new Uint8Array(memory.buffer),ptr=0x8000,bridge=0xa000,fp=0xb000,map=0x1000,permissions=0x2000,backing=0x10000;
+const word=(at,value)=>data.setUint32(ptr+at,value>>>0,true),get=at=>data.getUint32(ptr+at,true);let current,reads=0;
+const imports={env:{memory},cpu:{read(p,address,width){reads++;assert(!current.noRead);assert.equal(width,4);assert.equal(address,current.fs?0x3001:0x3000);word(52,current.fault?3:0);if(current.fault){word(60,address);word(68,4);return 0;}return current.words[0];},write(){throw Error('subtraction cannot write guest RAM');}}};const functions=new Map();
+for(const item of JSON.parse(fs.readFileSync(`${root}/cases.json`))){
+  current=item;reads=0;ram.fill(0);word(0,1);word(4,160);[0x11223344,0x55667788,0x99aabbcc,item.cross?0x3ff9:item.fs?0x2001:0x3000,0x4800,0x12345678,0x87654321,0xaabbccdd].forEach((v,i)=>word(8+i*4,v));
+  word(40,0x1000);word(44,0xcd7);word(48,1);word(124,bridge);word(152,63);if(item.fs)word(116,0x1000);data.setUint32(bridge,1,true);data.setUint32(bridge+4,40,true);data.setUint32(bridge+8,fp,true);[0x23,0x1b,0x23,0x23,0x3b,0x43].forEach((v,i)=>data.setUint32(bridge+12+i*4,v,true));ram.set(item.before,fp);
+  if(item.width===8){word(76,map);word(80,permissions);word(84,backing);word(88,4);data.setUint32(map+12,1,true);data.setUint8(permissions+3,item.unreadable?0:1);data.setUint32(backing+(item.fs?1:0),item.words[0],true);data.setUint32(backing+(item.fs?5:4),item.words[1],true);}
+  const regs=Array.from({length:8},(_,i)=>get(8+i*4)),beforeRAM=ram.slice(backing,backing+16384);
+  if(!functions.has(item.name))functions.set(item.name,(await WebAssembly.instantiate(fs.readFileSync(`${root}/${item.name}.wasm`),imports)).instance.exports.run);
+  assert.equal(functions.get(item.name)(ptr),item.status,`${item.name} subtraction precision/domain`);assert.deepEqual([...ram.slice(fp,fp+100)],item.after,`${item.name} full raw80/ghost/TOP/tag/PE/C1/CW/metadata immediately after math`);
+  assert.deepEqual(Array.from({length:8},(_,i)=>get(8+i*4)),regs);assert.deepEqual([get(40),get(44),get(48),get(56)],[item.next,0xcd7,item.quota,item.retired]);assert.deepEqual(ram.slice(backing,backing+16384),beforeRAM);
+  if(item.width===8||item.noRead)assert.equal(reads,0);if(item.fault){assert.equal(reads,1);assert.equal(get(60),0x3000);assert.equal(get(68),4);}
+}
+console.log('PC24/PC53 SUB/RSUB strict full-state oracle, signed zero/cancellation/ties/losttiny/subnormal residual, register orientations/pop/FS and neutral domain/fault boundaries passed');
+"#).arg(&scratch).output().unwrap();
+    assert!(
+        result.status.success(),
+        "fixture {} failed:\n{}\n{}",
+        scratch.display(),
+        String::from_utf8_lossy(&result.stdout),
+        String::from_utf8_lossy(&result.stderr)
+    );
+    fs::remove_dir_all(scratch).unwrap();
+}
