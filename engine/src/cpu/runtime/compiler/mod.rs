@@ -176,6 +176,8 @@ mod memory_tests;
 #[cfg(test)]
 mod multiply_tests;
 #[cfg(test)]
+mod rotate_tests;
+#[cfg(test)]
 mod shift_tests;
 #[cfg(test)]
 mod simd_tests;

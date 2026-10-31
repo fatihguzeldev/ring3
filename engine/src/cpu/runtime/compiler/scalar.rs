@@ -11,6 +11,7 @@ mod flags;
 mod memory;
 mod multiply;
 mod narrow;
+mod rotate;
 mod shift;
 mod simd;
 mod string;
@@ -52,6 +53,7 @@ pub(super) fn supports(operation: &Operation) -> bool {
         || exchange::supports(operation)
         || flags::supports(operation)
         || shift::supports(operation)
+        || rotate::supports(operation)
         || simd::supports(operation)
         || x87::supports(operation)
         || x87_arithmetic::supports(operation)
@@ -908,6 +910,7 @@ impl Output {
                     && !exchange::emit(self, operation)
                     && !flags::emit(self, operation)
                     && !shift::emit(self, operation)
+                    && !rotate::emit(self, operation)
                     && !simd::emit(self, operation)
                     && !x87::emit(self, operation)
                     && !x87_arithmetic::emit(self, operation)

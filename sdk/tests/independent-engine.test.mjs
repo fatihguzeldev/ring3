@@ -767,6 +767,31 @@ test('actual special x87 infinity transport retains the independent service and 
   } finally {f.close();}
 });
 
+test('actual MSVCRT rotate and XLAT sequence preserves CH AL aliases and exact budget progress', {skip}, () => {
+  const registers = [0x12345678, 0x89abf034, 0xd5e6789a, 0x2000, 0x2f00, 0x55443322, 0x66554433, 0x77665544];
+  const f = fixture([0xd0, 0xc5, 0x8a, 0xc5, 0x24, 0x0f, 0xd7], {registers, data: [[0x2001, 0x5a]], execution: {budget: 1}});
+  try {
+    const scalar = new Uint8Array(f.engine.memory.buffer, f.engine.base, 56).slice(), banks = processBanks(f);
+    let ram, backing, length;
+    for (const [pc, eax, ecx, flags] of [[0x1002, 0x12345678, 0x89abe134, 3], [0x1004, 0x123456e1, 0x89abe134, 3],
+      [0x1006, 0x12345601, 0x89abe134, 2], [0x1007, 0x1234565a, 0x89abe134, 2]]) {
+      const selected = f.cache.select(), state = f.slab();
+      if (!ram) {
+        backing = state.getUint32(84, true); length = state.getUint32(88, true) * 4096;
+        ram = new Uint8Array(f.engine.memory.buffer, backing, length).slice();
+      }
+      view(scalar).setUint32(16, eax, true); view(scalar).setUint32(20, ecx, true);
+      view(scalar).setUint32(48, pc, true); view(scalar).setUint32(52, flags, true);
+      const run = f.cache.execute(selected);
+      assert.deepEqual([run.reason, run.retired, run.work, run.pc], [1, 1, 1, pc]);
+      assert.deepEqual(new Uint8Array(f.engine.memory.buffer, f.engine.base, 56), scalar);
+      assert.deepEqual(processBanks(f), banks);
+      assert.deepEqual(new Uint8Array(f.engine.memory.buffer, backing, length), ram);
+    }
+    serviceCounts(f, 0);
+  } finally {f.close();}
+});
+
 test('actual binary64 transport preserves PC53 raw payload and FS metadata at separate budget boundaries', {skip}, () => {
   const payload = [0, 8, 0, 0, 0, 0, 0, 0x80, 0xff, 0x3f];
   const input = [1, 0, 0, 0, 0, 0, 0xf0, 0x3f];
