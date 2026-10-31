@@ -76,19 +76,6 @@ fn access(width: u32) -> MemArg {
     }
 }
 
-fn present(out: &mut Output, fields: &[u64]) {
-    for (index, &field) in fields.iter().enumerate() {
-        out.c()
-            .local_get(0)
-            .i32_load(mem(field))
-            .i32_eqz()
-            .i32_eqz();
-        if index != 0 {
-            out.c().i32_and();
-        }
-    }
-}
-
 fn translate(out: &mut Output, width: u32, required: u32) {
     out.c()
         .i32_const(0)
@@ -210,67 +197,18 @@ fn cache_store(out: &mut Output) {
 
 fn translate_uncached(out: &mut Output, width: u32, required: u32) {
     out.c()
-        .i32_const(0)
-        .local_set(READY)
+        .local_get(0)
         .local_get(ADDRESS)
-        .i32_const(12)
-        .i32_shr_u()
-        .local_set(PAGE);
-    present(out, &[76, 80, 84]);
-    out.c()
-        .local_get(ADDRESS)
-        .i32_const(4095)
-        .i32_and()
-        .i32_const((4096 - width) as i32)
-        .i32_le_u()
-        .i32_and()
-        .if_(BlockType::Empty)
-        .local_get(0)
-        .i32_load(mem(76))
-        .local_get(PAGE)
-        .i32_const(2)
-        .i32_shl()
-        .i32_add()
-        .i32_load(mem(0))
-        .local_tee(SLOT)
-        .i32_eqz()
-        .i32_eqz()
-        .local_get(SLOT)
-        .local_get(0)
-        .i32_load(mem(88))
-        .i32_le_u()
-        .i32_and()
-        .if_(BlockType::Empty)
-        .local_get(0)
-        .i32_load(mem(80))
-        .local_get(PAGE)
-        .i32_add()
-        .i32_load8_u(access(1))
-        .local_tee(CACHE_FLAGS)
-        .i32_const((required | 8) as i32)
-        .i32_and()
+        .i32_const(width as i32)
         .i32_const(required as i32)
-        .i32_eq()
-        .if_(BlockType::Empty)
-        .local_get(SLOT)
-        .i32_const(1)
-        .i32_sub()
-        .local_tee(SLOT)
-        .i32_const(12)
-        .i32_shl()
-        .local_get(0)
-        .i32_load(mem(84))
-        .i32_add()
-        .local_get(ADDRESS)
-        .i32_const(4095)
-        .i32_and()
-        .i32_add()
+        .call(4)
+        .local_set(CACHE_FLAGS)
+        .local_set(SLOT)
         .local_set(HOST)
-        .i32_const(1)
-        .local_set(READY)
-        .end()
-        .end()
-        .end();
+        .local_get(CACHE_FLAGS)
+        .i32_eqz()
+        .i32_eqz()
+        .local_set(READY);
 }
 
 pub(super) fn read(out: &mut Output, width: u32, destination: u32) {
@@ -383,78 +321,16 @@ fn admit_store(out: &mut Output) {
 }
 
 fn admit_store_uncached(out: &mut Output) {
-    out.c().local_get(READY).if_(BlockType::Empty);
-    present(out, &[92, 100, 104, 156]);
     out.c()
-        .if_(BlockType::Empty)
-        .local_get(0)
-        .i32_load(mem(108))
-        .local_set(LENGTH)
-        .local_get(LENGTH)
-        .local_get(0)
-        .i32_load(mem(112))
-        .i32_le_u()
-        .local_get(SLOT)
-        .local_get(0)
-        .i32_load(mem(112))
-        .i32_lt_u()
-        .i32_and()
-        .local_get(0)
-        .i32_load(mem(156))
-        .i64_load(MemArg {
-            offset: 0,
-            align: 3,
-            memory_index: 0,
-        })
-        .i64_const(-1)
-        .i64_ne()
-        .i32_and()
-        .local_get(0)
-        .i32_load(mem(92))
-        .local_get(SLOT)
-        .i32_const(2)
-        .i32_shl()
-        .i32_add()
-        .i32_load(mem(0))
-        .i32_eqz()
-        .i32_and()
-        .local_get(0)
-        .i32_load(mem(96))
-        .local_tee(BIT)
-        .if_(BlockType::Result(ValType::I32))
-        .local_get(BIT)
-        .local_get(PAGE)
-        .i32_const(2)
-        .i32_shl()
-        .i32_add()
-        .i32_load(mem(0))
-        .i32_eqz()
-        .else_()
-        .i32_const(1)
-        .end()
-        .i32_and()
-        .local_set(READY)
-        .else_()
-        .i32_const(0)
-        .local_set(READY)
-        .end()
-        .end()
         .local_get(READY)
         .if_(BlockType::Empty)
         .local_get(0)
-        .i32_load(mem(100))
+        .local_get(PAGE)
         .local_get(SLOT)
-        .i32_add()
-        .i32_load8_u(access(1))
-        .local_tee(BIT)
-        .i32_eqz()
-        .if_(BlockType::Empty)
-        .local_get(LENGTH)
-        .local_get(0)
-        .i32_load(mem(112))
-        .i32_lt_u()
+        .call(5)
+        .local_set(BIT)
+        .local_set(LENGTH)
         .local_set(READY)
-        .end()
         .end();
 }
 

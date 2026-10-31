@@ -10,6 +10,7 @@ mod deferred;
 mod exchange;
 mod flags;
 mod memory;
+mod memory_helpers;
 mod multiply;
 mod narrow;
 mod rotate;
@@ -141,6 +142,8 @@ pub(super) fn emit(blocks: &[Block], entries: &[EntryPoint]) -> Vec<u8> {
     types.ty().function([ValType::I32; 4], [ValType::I32]);
     types.ty().function([ValType::I32], [ValType::I32]);
     types.ty().function([ValType::I32; 6], [ValType::I32]);
+    types.ty().function([ValType::I32; 4], [ValType::I32; 3]);
+    types.ty().function([ValType::I32; 3], [ValType::I32; 3]);
     module.section(&types);
     let mut imports = ImportSection::new();
     imports.import(
@@ -160,6 +163,8 @@ pub(super) fn emit(blocks: &[Block], entries: &[EntryPoint]) -> Vec<u8> {
     let mut functions = FunctionSection::new();
     functions.function(2);
     functions.function(3);
+    functions.function(4);
+    functions.function(5);
     module.section(&functions);
     let mut exports = ExportSection::new();
     exports.export("run", ExportKind::Func, 2);
@@ -284,6 +289,8 @@ pub(super) fn emit(blocks: &[Block], entries: &[EntryPoint]) -> Vec<u8> {
     let mut code = CodeSection::new();
     code.function(&out.function);
     code.function(&deferred::materializer());
+    code.function(&memory_helpers::translation());
+    code.function(&memory_helpers::admission());
     module.section(&code);
     module.finish()
 }
