@@ -86,6 +86,8 @@ impl IndependentSession {
     pub(super) fn refresh(&mut self, memory: &mut AddressSpace) {
         self.numeric_view.x87_state = std::ptr::from_ref(&self.numeric.x87) as usize as u32;
         self.numeric_view.selectors = self.segments.state.selectors.map(u32::from);
+        self.numeric_view.simd_state =
+            std::ptr::from_ref(&self.numeric.vectors.simd) as usize as u32;
         self.state.numeric = std::ptr::from_ref(&*self.numeric_view) as usize as u32;
         let view = memory.core_view();
         self.state.mappings = view.mappings as u32;

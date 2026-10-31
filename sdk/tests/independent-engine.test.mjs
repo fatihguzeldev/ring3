@@ -707,7 +707,7 @@ for (const c of [
   {name: 'unmasked ADD', operation: 0x05, left: 0x40400000, right: 0x40000000, output: 0x40a00000,
     raw: [0, 0, 0, 0, 0, 0, 0, 0xa0, 1, 0x40], control: 0x003e, status: 0x4020, inline: false},
   {name: 'inexact DIV', operation: 0x35, left: 0x3f800000, right: 0x40400000, output: 0x3eaaaaab,
-    raw: [0, 0, 0, 0, 0, 0xab, 0xaa, 0xaa, 0xfd, 0x3f], control: 0x003f, status: 0x4000, inline: false},
+    raw: [0, 0, 0, 0, 0, 0xab, 0xaa, 0xaa, 0xfd, 0x3f], control: 0x003f, status: 0x4000, inline: true},
 ]) test(`actual x87 ${c.name} preserves raw CW sticky PE C3 and the strict arithmetic result`, {skip}, () => {
   const registers = [0x12345678, 0x89abcdef, 0xd5e6789a, 0x23456789, 0x2f00, 0x55443322, 0x66554433, 0x77665544];
   const data = [...dword(c.left).map((value, index) => [0x2000 + index, value]),
@@ -764,6 +764,128 @@ test('actual special x87 infinity transport retains the independent service and 
     assert.deepEqual(processBanks(f), banks);
     assert.deepEqual(new Uint8Array(f.engine.memory.buffer, backing, length), ram);
     serviceCounts(f, 2);
+  } finally {f.close();}
+});
+
+test('actual binary64 transport preserves PC53 raw payload and FS metadata at separate budget boundaries', {skip}, () => {
+  const payload = [0, 8, 0, 0, 0, 0, 0, 0x80, 0xff, 0x3f];
+  const input = [1, 0, 0, 0, 0, 0, 0xf0, 0x3f];
+  const f = fixture([0x64, 0xdd, 0x05, ...dword(0x1001), 0x64, 0xdd, 0x1d, ...dword(0x1011)], {
+    fpControl: 0x023f, fpStatus: 0x4220, execution: {budget: 1}, data: input.map((v, i) => [0x2001 + i, v])});
+  try {
+    f.engine.ok('set_segment_base', 4, 0x1000);
+    const scalar = new Uint8Array(f.engine.memory.buffer, f.engine.base, 56).slice(), banks = processBanks(f), fp = view(banks[0]);
+    let ram, backing, length, slot;
+    for (const [next, status, tag, opcode, pc, offset] of [[0x1007, 0x7820, 0x3fff, 0x505, 0x1000, 0x1001],
+      [0x100e, 0x4020, 0xffff, 0x51d, 0x1007, 0x1011]]) {
+      const selected = f.cache.select(), state = f.slab();
+      if (!ram) {
+        backing = state.getUint32(84, true); length = state.getUint32(88, true) * 4096;
+        ram = new Uint8Array(f.engine.memory.buffer, backing, length).slice();
+        slot = new DataView(f.engine.memory.buffer).getUint32(state.getUint32(76, true) + 8, true) - 1;
+      }
+      view(scalar).setUint32(48, next, true); fp.setUint16(18, status, true); fp.setUint16(20, tag, true);
+      fp.setUint16(22, opcode, true); fp.setUint32(24, pc, true); fp.setUint32(28, offset, true);
+      fp.setUint16(32, 0x1b, true); fp.setUint16(34, 0x3b, true); banks[0].set(payload, 110);
+      if (next === 0x100e) ram.set(input, slot * 4096 + 0x11);
+      const run = f.cache.execute(selected);
+      assert.deepEqual([run.reason, run.retired, run.work, run.pc], [1, 1, 1, next]);
+      assert.deepEqual(new Uint8Array(f.engine.memory.buffer, f.engine.base, 56), scalar);
+      assert.deepEqual(processBanks(f), banks);
+      assert.deepEqual(new Uint8Array(f.engine.memory.buffer, backing, length), ram);
+    }
+    serviceCounts(f, 0);
+  } finally {f.close();}
+});
+
+test('actual binary64 cross-page store delegates the whole width before fault and pop', {skip}, () => {
+  const f = fixture([0xdd, 0x1d, ...dword(0x2ffc)], {fpControl: 0x023f, fpStatus: 0x4200,
+    data: [[0x2ffc, 0x5a], [0x2fff, 0xa5]], execution: {budget: 1}});
+  try {
+    const bank = f.engine.base + 4236, arena = new DataView(f.engine.memory.buffer);
+    arena.setUint16(bank + 20, 0xfffc, true);
+    new Uint8Array(f.engine.memory.buffer, bank + 40, 10).set([0, 8, 0, 0, 0, 0, 0, 0x80, 0xff, 0x3f]);
+    const scalar = new Uint8Array(f.engine.memory.buffer, f.engine.base, 56).slice(), banks = processBanks(f);
+    const selected = f.cache.select(), state = f.slab(), backing = state.getUint32(84, true), length = state.getUint32(88, true) * 4096;
+    const ram = new Uint8Array(f.engine.memory.buffer, backing, length).slice(), run = f.cache.execute(selected);
+    assert.deepEqual([run.reason, run.retired, run.work, run.pc], [5, 0, 0, 0x1000]);
+    assert.deepEqual([f.engine.get(80), f.engine.get(84), f.engine.get(88), f.engine.get(92)], [1, 0x3000, 2, 8]);
+    assert.deepEqual(new Uint8Array(f.engine.memory.buffer, f.engine.base, 56), scalar);
+    assert.deepEqual(processBanks(f), banks);
+    assert.deepEqual(new Uint8Array(f.engine.memory.buffer, backing, length), ram);
+    serviceCounts(f, 1);
+  } finally {f.close();}
+});
+
+test('actual inexact PC24 division publishes PE and C1 before a later store can clear C1', {skip}, () => {
+  const f = fixture([0xd8, 0xf1], {fpControl: 0x003f, fpStatus: 0x4000, execution: {budget: 1}});
+  try {
+    const bank = f.engine.base + 4236, arena = new DataView(f.engine.memory.buffer);
+    arena.setUint16(bank + 20, 0xfff0, true);
+    new Uint8Array(f.engine.memory.buffer, bank + 40, 20).set([0, 0, 0, 0, 0, 0, 0, 0x80, 0xff, 0x3f,
+      0, 0, 0, 0, 0, 0, 0, 0xc0, 0, 0x40]);
+    const scalar = new Uint8Array(f.engine.memory.buffer, f.engine.base, 56).slice(), banks = processBanks(f), fp = view(banks[0]);
+    view(scalar).setUint32(48, 0x1002, true); fp.setUint16(18, 0x4220, true); fp.setUint16(22, 0xf1, true);
+    fp.setUint32(24, 0x1000, true); fp.setUint16(32, 0x1b, true);
+    banks[0].set([0, 0, 0, 0, 0, 0xab, 0xaa, 0xaa, 0xfd, 0x3f], 40);
+    const selected = f.cache.select(), state = f.slab(), backing = state.getUint32(84, true), length = state.getUint32(88, true) * 4096;
+    const ram = new Uint8Array(f.engine.memory.buffer, backing, length).slice(), run = f.cache.execute(selected);
+    assert.deepEqual([run.reason, run.retired, run.work, run.pc], [1, 1, 1, 0x1002]);
+    assert.deepEqual(new Uint8Array(f.engine.memory.buffer, f.engine.base, 56), scalar);
+    assert.deepEqual(processBanks(f), banks);
+    assert.deepEqual(new Uint8Array(f.engine.memory.buffer, backing, length), ram);
+    serviceCounts(f, 0);
+  } finally {f.close();}
+});
+
+for (const odd of [false, true]) test(`actual PC53 ADD rounds the ${odd ? 'odd' : 'even'} midpoint and publishes PE C1 at its budget boundary`, {skip}, () => {
+  const f = fixture([0xd8, 0xc1], {fpControl: 0x023f, fpStatus: 0x4200, execution: {budget: 1}});
+  try {
+    const bank = f.engine.base + 4236, arena = new DataView(f.engine.memory.buffer);
+    arena.setUint16(bank + 20, 0xfff0, true);
+    new Uint8Array(f.engine.memory.buffer, bank + 40, 20).set([0, odd ? 8 : 0, 0, 0, 0, 0, 0, 0x80, 0xff, 0x3f,
+      0, 0, 0, 0, 0, 0, 0, 0x80, 0xca, 0x3f]);
+    const scalar = new Uint8Array(f.engine.memory.buffer, f.engine.base, 56).slice(), banks = processBanks(f), fp = view(banks[0]);
+    view(scalar).setUint32(48, 0x1002, true); fp.setUint16(18, odd ? 0x4220 : 0x4020, true);
+    fp.setUint16(22, 0xc1, true); fp.setUint32(24, 0x1000, true); fp.setUint16(32, 0x1b, true);
+    banks[0].set([0, odd ? 16 : 0, 0, 0, 0, 0, 0, 0x80, 0xff, 0x3f], 40);
+    const selected = f.cache.select(), state = f.slab(), backing = state.getUint32(84, true), length = state.getUint32(88, true) * 4096;
+    const ram = new Uint8Array(f.engine.memory.buffer, backing, length).slice(), run = f.cache.execute(selected);
+    assert.deepEqual([run.reason, run.retired, run.work, run.pc], [1, 1, 1, 0x1002]);
+    assert.deepEqual(new Uint8Array(f.engine.memory.buffer, f.engine.base, 56), scalar);
+    assert.deepEqual(processBanks(f), banks);
+    assert.deepEqual(new Uint8Array(f.engine.memory.buffer, backing, length), ram);
+    serviceCounts(f, 0);
+  } finally {f.close();}
+});
+
+test('actual SIMD transport and exact ADDPS preserve sticky MXCSR and pending x87 state at each budget', {skip}, () => {
+  const left = [0x3f800000, 0x40000000, 0x40400000, 0x40800000], right = [0x3f000000, 0x3f800000, 0x40000000, 0x40800000];
+  const result = [0x3fc00000, 0x40400000, 0x40a00000, 0x41000000];
+  const data = [...left, ...right].flatMap((word, i) => dword(word).map((v, j) => [0x2000 + i * 4 + j, v]));
+  const f = fixture([0x0f, 0x28, 0x05, ...dword(0x2000), 0x0f, 0x58, 0x05, ...dword(0x2010),
+    0x0f, 0x29, 0x05, ...dword(0x2020)], {data, fpControl: 0x003e, fpStatus: 1, execution: {budget: 1}});
+  try {
+    new DataView(f.engine.memory.buffer).setUint32(f.engine.base + 4236 + 144, 0x1fa0, true);
+    const scalar = new Uint8Array(f.engine.memory.buffer, f.engine.base, 56).slice(), banks = processBanks(f);
+    let ram, backing, length, slot;
+    for (const [index, next] of [0x1007, 0x100e, 0x1015].entries()) {
+      const selected = f.cache.select(), state = f.slab();
+      if (!ram) {
+        backing = state.getUint32(84, true); length = state.getUint32(88, true) * 4096;
+        ram = new Uint8Array(f.engine.memory.buffer, backing, length).slice();
+        slot = new DataView(f.engine.memory.buffer).getUint32(state.getUint32(76, true) + 8, true) - 1;
+      }
+      view(scalar).setUint32(48, next, true);
+      (index ? result : left).forEach((word, lane) => view(banks[0]).setUint32(160 + lane * 4, word, true));
+      if (index === 2) result.forEach((word, lane) => new DataView(ram.buffer).setUint32(slot * 4096 + 32 + lane * 4, word, true));
+      const run = f.cache.execute(selected);
+      assert.deepEqual([run.reason, run.retired, run.work, run.pc], [1, 1, 1, next]);
+      assert.deepEqual(new Uint8Array(f.engine.memory.buffer, f.engine.base, 56), scalar);
+      assert.deepEqual(processBanks(f), banks);
+      assert.deepEqual(new Uint8Array(f.engine.memory.buffer, backing, length), ram);
+    }
+    serviceCounts(f, 0);
   } finally {f.close();}
 });
 

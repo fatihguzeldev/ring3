@@ -50,9 +50,9 @@ pub(super) fn supports(operation: &Operation) -> bool {
 fn supported(operation: X87Operation) -> bool {
     matches!(
         operation,
-        X87Operation::Load(X87Format::Float32)
+        X87Operation::Load(X87Format::Float32 | X87Format::Float64)
             | X87Operation::Store {
-                format: X87Format::Float32,
+                format: X87Format::Float32 | X87Format::Float64,
                 truncate: false,
                 ..
             }
@@ -107,7 +107,7 @@ pub(super) fn enter(out: &mut Output, waiting: bool) {
         .local_get(TMP)
         .i32_load(mem(4))
         .i32_const(36)
-        .i32_ne()
+        .i32_lt_u()
         .i32_or();
     miss_if(out);
     out.c().local_get(TMP).i32_load(mem(8)).local_set(STATE);
@@ -160,7 +160,7 @@ fn raw_address(out: &mut Output) {
 }
 
 /// load an occupied normal/zero cell, preserving its raw80 bits in RAW/TMP.
-fn read_raw(out: &mut Output, index: u8) {
+pub(super) fn read_raw(out: &mut Output, index: u8) {
     physical(out, index);
     out.c()
         .local_get(TAG)
@@ -256,7 +256,104 @@ pub(super) fn read_raw_f32(out: &mut Output, index: u8, destination: u32) {
         .local_set(destination);
 }
 
-fn raw_from_f32_bits(out: &mut Output, bits: u32) {
+/// exact binary64 values occupy 53 significand bits and a bounded exponent range.
+pub(super) fn read_raw_f64(out: &mut Output, index: u8, destination: u32) {
+    read_raw(out, index);
+    out.c()
+        .local_get(TMP)
+        .i32_const(0x7fff)
+        .i32_and()
+        .if_(BlockType::Result(ValType::I64));
+    out.c()
+        .local_get(TMP)
+        .i32_const(0x7fff)
+        .i32_and()
+        .i32_const(15361)
+        .i32_sub()
+        .i32_const(2045)
+        .i32_gt_u()
+        .local_get(RAW)
+        .i64_const(0x7ff)
+        .i64_and()
+        .i64_eqz()
+        .i32_eqz()
+        .i32_or();
+    miss_if(out);
+    out.c()
+        .local_get(TMP)
+        .i32_const(0x7fff)
+        .i32_and()
+        .i32_const(15360)
+        .i32_sub()
+        .i64_extend_i32_u()
+        .i64_const(52)
+        .i64_shl()
+        .local_get(RAW)
+        .i64_const(11)
+        .i64_shr_u()
+        .i64_const(0x000f_ffff_ffff_ffff)
+        .i64_and()
+        .i64_or()
+        .else_()
+        .i64_const(0)
+        .end()
+        .local_get(TMP)
+        .i32_const(0x8000)
+        .i32_and()
+        .i64_extend_i32_u()
+        .i64_const(48)
+        .i64_shl()
+        .i64_or()
+        .f64_reinterpret_i64()
+        .local_set(destination);
+}
+
+pub(super) fn raw_from_f64_bits(out: &mut Output) {
+    out.c()
+        .local_get(RAW)
+        .i64_const(52)
+        .i64_shr_u()
+        .i32_wrap_i64()
+        .i32_const(0x7ff)
+        .i32_and()
+        .if_(BlockType::Result(ValType::I32))
+        .local_get(RAW)
+        .i64_const(52)
+        .i64_shr_u()
+        .i32_wrap_i64()
+        .i32_const(0x7ff)
+        .i32_and()
+        .i32_const(15360)
+        .i32_add()
+        .else_()
+        .i32_const(0)
+        .end()
+        .local_get(RAW)
+        .i64_const(48)
+        .i64_shr_u()
+        .i32_wrap_i64()
+        .i32_const(0x8000)
+        .i32_and()
+        .i32_or()
+        .local_set(TMP)
+        .local_get(TMP)
+        .i32_const(0x7fff)
+        .i32_and()
+        .if_(BlockType::Result(ValType::I64))
+        .local_get(RAW)
+        .i64_const(0x000f_ffff_ffff_ffff)
+        .i64_and()
+        .i64_const(0x0010_0000_0000_0000)
+        .i64_or()
+        .i64_const(11)
+        .i64_shl()
+        .else_()
+        .i64_const(0)
+        .end()
+        .local_set(RAW);
+}
+
+pub(super) fn raw_from_f32_bits(out: &mut Output, bits: u32) {
     out.c()
         .local_get(bits)
         .i32_const(23)
@@ -301,7 +398,7 @@ fn raw_from_f32_bits(out: &mut Output, bits: u32) {
         .local_set(TMP);
 }
 
-fn write_raw(out: &mut Output, index: u8) {
+pub(super) fn write_raw(out: &mut Output, index: u8) {
     physical(out, index);
     raw_address(out);
     out.c().local_get(RAW).i64_store(mem(0));
@@ -339,6 +436,16 @@ pub(super) fn commit_raw_f32(out: &mut Output, index: u8, value: u32) {
         .i32_reinterpret_f32()
         .local_set(R);
     raw_from_f32_bits(out, R);
+    write_raw(out, index);
+}
+
+/// the caller proves a finite normal/zero result before committing binary64.
+pub(super) fn commit_raw_f64(out: &mut Output, index: u8, value: u32) {
+    out.c()
+        .local_get(value)
+        .i64_reinterpret_f64()
+        .local_set(RAW);
+    raw_from_f64_bits(out);
     write_raw(out, index);
 }
 
@@ -487,6 +594,41 @@ pub(super) fn emit(out: &mut Output, operation: Operation) -> bool {
             clear_c1(out);
             top(out, -1);
         }
+        X87Operation::Load(X87Format::Float64) => {
+            out.address(address.expect("decoded binary64 load"));
+            memory::read_words(out, &[A, B], 1);
+            out.c()
+                .local_get(A)
+                .i64_extend_i32_u()
+                .local_get(B)
+                .i64_extend_i32_u()
+                .i64_const(32)
+                .i64_shl()
+                .i64_or()
+                .local_set(RAW)
+                .local_get(RAW)
+                .i64_const(0x7ff0_0000_0000_0000)
+                .i64_and()
+                .i64_const(0x7ff0_0000_0000_0000)
+                .i64_eq()
+                .local_get(RAW)
+                .i64_const(0x7fff_ffff_ffff_ffff)
+                .i64_and()
+                .i64_const(1)
+                .i64_sub()
+                .i64_const(0x000f_ffff_ffff_fffe)
+                .i64_le_u()
+                .i32_or();
+            miss_if(out);
+            out.c()
+                .local_get(RAW)
+                .f64_reinterpret_i64()
+                .local_set(VALUE);
+            push_space(out);
+            commit_raw_f64(out, 7, VALUE);
+            clear_c1(out);
+            top(out, -1);
+        }
         X87Operation::Store {
             format: X87Format::Float32,
             pop: popping,
@@ -500,6 +642,30 @@ pub(super) fn emit(out: &mut Output, operation: Operation) -> bool {
                 .local_set(R);
             out.address(address.expect("decoded memory store"));
             out.write(4, R);
+            clear_c1(out);
+            if popping {
+                pop(out);
+            }
+        }
+        X87Operation::Store {
+            format: X87Format::Float64,
+            pop: popping,
+            ..
+        } => {
+            read_raw_f64(out, 0, VALUE);
+            out.c()
+                .local_get(VALUE)
+                .i64_reinterpret_f64()
+                .local_tee(RAW)
+                .i32_wrap_i64()
+                .local_set(A)
+                .local_get(RAW)
+                .i64_const(32)
+                .i64_shr_u()
+                .i32_wrap_i64()
+                .local_set(B);
+            out.address(address.expect("decoded binary64 store"));
+            memory::write_words(out, &[A, B], 1);
             clear_c1(out);
             if popping {
                 pop(out);

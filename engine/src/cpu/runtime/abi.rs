@@ -3,7 +3,7 @@ use crate::cpu::x86::{SegmentContext, State32};
 pub const ABI_VERSION: u32 = 1;
 pub const ABI_SIZE: u32 = 160;
 pub const NUMERIC_VIEW_VERSION: u32 = 1;
-pub const NUMERIC_VIEW_SIZE: u32 = 36;
+pub const NUMERIC_VIEW_SIZE: u32 = 40;
 
 #[derive(Clone, Debug)]
 #[repr(C)]
@@ -12,6 +12,7 @@ pub struct NumericView {
     pub size: u32,
     pub x87_state: u32,
     pub selectors: [u32; 6],
+    pub simd_state: u32,
 }
 
 impl Default for NumericView {
@@ -21,6 +22,7 @@ impl Default for NumericView {
             size: NUMERIC_VIEW_SIZE,
             x87_state: 0,
             selectors: [0; 6],
+            simd_state: 0,
         }
     }
 }
@@ -154,7 +156,7 @@ mod tests {
     }
     #[test]
     fn numeric_view_binds_the_owned_x87_layout_without_exposing_numeric_state() {
-        use crate::cpu::x86::X87State;
+        use crate::cpu::x86::{X87State, simd::SimdState};
 
         assert_eq!(
             std::mem::size_of::<NumericView>(),
@@ -164,6 +166,10 @@ mod tests {
         assert_eq!(std::mem::offset_of!(NumericView, size), 4);
         assert_eq!(std::mem::offset_of!(NumericView, x87_state), 8);
         assert_eq!(std::mem::offset_of!(NumericView, selectors), 12);
+        assert_eq!(std::mem::offset_of!(NumericView, simd_state), 36);
+        assert_eq!(std::mem::size_of::<SimdState>(), 132);
+        assert_eq!(std::mem::offset_of!(SimdState, mxcsr), 0);
+        assert_eq!(std::mem::offset_of!(SimdState, xmm), 4);
         assert_eq!(std::mem::size_of::<X87State>(), 100);
         assert_eq!(std::mem::offset_of!(X87State, control), 0);
         assert_eq!(std::mem::offset_of!(X87State, status), 2);

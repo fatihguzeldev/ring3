@@ -222,34 +222,9 @@ pub(super) fn write_after_modify(out: &mut Output, width: u32, value: u32) {
 
 fn store(out: &mut Output, width: u32, value: u32) {
     admit_store(out);
-    out.c()
-        .local_get(READY)
-        .if_(BlockType::Empty)
-        .local_get(BIT)
-        .i32_eqz()
-        .if_(BlockType::Empty)
-        .local_get(0)
-        .i32_load(mem(104))
-        .local_get(LENGTH)
-        .i32_const(2)
-        .i32_shl()
-        .i32_add()
-        .local_get(SLOT)
-        .i32_store(mem(0))
-        .local_get(0)
-        .i32_load(mem(100))
-        .local_get(SLOT)
-        .i32_add()
-        .i32_const(1)
-        .i32_store8(access(1))
-        .local_get(0)
-        .local_get(LENGTH)
-        .i32_const(1)
-        .i32_add()
-        .i32_store(mem(108))
-        .end()
-        .local_get(HOST)
-        .local_get(value);
+    out.c().local_get(READY).if_(BlockType::Empty);
+    record_store(out);
+    out.c().local_get(HOST).local_get(value);
     match width {
         1 => {
             out.c().i32_store8(access(1));
@@ -273,4 +248,78 @@ fn store(out: &mut Output, width: u32, value: u32) {
         .local_set(WRITE_STATUS);
     out.failed(WRITE_STATUS, true);
     out.c().end();
+}
+
+fn record_store(out: &mut Output) {
+    out.c()
+        .local_get(BIT)
+        .i32_eqz()
+        .if_(BlockType::Empty)
+        .local_get(0)
+        .i32_load(mem(104))
+        .local_get(LENGTH)
+        .i32_const(2)
+        .i32_shl()
+        .i32_add()
+        .local_get(SLOT)
+        .i32_store(mem(0))
+        .local_get(0)
+        .i32_load(mem(100))
+        .local_get(SLOT)
+        .i32_add()
+        .i32_const(1)
+        .i32_store8(access(1))
+        .local_get(0)
+        .local_get(LENGTH)
+        .i32_const(1)
+        .i32_add()
+        .i32_store(mem(108))
+        .end();
+}
+
+fn wide_access(out: &mut Output, words: &[u32], alignment: u32, write: bool) {
+    assert!(matches!(words.len(), 2 | 4));
+    assert!(alignment.is_power_of_two() && alignment <= 16);
+    let width = words.len() as u32 * 4;
+    out.segment(width, write);
+    if alignment != 1 {
+        out.c()
+            .local_get(ADDRESS)
+            .i32_const((alignment - 1) as i32)
+            .i32_and()
+            .if_(BlockType::Empty);
+        out.exit(7);
+        out.c().end();
+    }
+    translate(out, width, if write { 2 } else { 1 });
+    if write {
+        admit_store(out);
+    }
+    out.c().local_get(READY).i32_eqz().if_(BlockType::Empty);
+    out.exit(7);
+    out.c().end();
+}
+
+// wide accesses only commit within one fully admitted ordinary page. all other
+// cases return the whole instruction to its canonical service before effects.
+pub(super) fn read_words(out: &mut Output, words: &[u32], alignment: u32) {
+    wide_access(out, words, alignment, false);
+    for (index, &local) in words.iter().enumerate() {
+        out.c()
+            .local_get(HOST)
+            .i32_load(mem(index as u64 * 4))
+            .local_set(local);
+    }
+}
+
+pub(super) fn write_words(out: &mut Output, words: &[u32], alignment: u32) {
+    wide_access(out, words, alignment, true);
+    record_store(out);
+    for (index, &local) in words.iter().enumerate() {
+        out.c()
+            .local_get(HOST)
+            .local_get(local)
+            .i32_store(mem(index as u64 * 4));
+    }
+    out.c().i32_const(0).local_set(WRITE_STATUS);
 }

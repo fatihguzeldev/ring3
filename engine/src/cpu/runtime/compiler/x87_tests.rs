@@ -107,3 +107,92 @@ console.log('inline x87 raw80 normal/zero transport, allTOP/index stack ghost/ta
     );
     fs::remove_dir_all(scratch).unwrap();
 }
+
+#[test]
+fn generated_x87_binary64_transport_uses_whole_canonical_spans_before_fp_commit() {
+    use std::{
+        fs,
+        process::Command,
+        time::{SystemTime, UNIX_EPOCH},
+    };
+    let scratch = std::env::temp_dir().join(format!(
+        "ring3-runtime-x87-f64-{}-{}",
+        std::process::id(),
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    fs::create_dir(&scratch).unwrap();
+    let mut memory = AddressSpace::new(1).unwrap();
+    memory
+        .map_zeroed(
+            PageRange::new(GuestAddress(0x1000), 1).unwrap(),
+            Permissions::ALL,
+        )
+        .unwrap();
+    for (name, code, count) in [
+        ("load", &[0xdd, 0x03][..], 1),
+        ("fs-load", &[0x64, 0xdd, 0x03][..], 1),
+        ("store", &[0xdd, 0x13][..], 1),
+        ("pop-store", &[0xdd, 0x1b][..], 1),
+        ("fs-pop-store", &[0x64, 0xdd, 0x1b][..], 1),
+        ("twice", &[0xdd, 0x13, 0xdd, 0x13][..], 2),
+    ] {
+        memory.write(GuestAddress(0x1000), code).unwrap();
+        fs::write(
+            scratch.join(format!("{name}.wasm")),
+            compile(&memory, GuestAddress(0x1000), count).unwrap().wasm,
+        )
+        .unwrap();
+    }
+    let result = Command::new("node").arg("--input-type=module").arg("-e").arg(r#"
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+const root=process.argv[1],memory=new WebAssembly.Memory({initial:4}),ram=new Uint8Array(memory.buffer),data=new DataView(memory.buffer);
+const ptr=0x8000,bridge=0xa000,fp=0xb000,map=0x1000,permissions=0x2000,executable=0x3000,cow=0x4000,dirty=0x5000,slots=0x6000,version=0x7000,backing=0x10000;
+const word=(at,value)=>data.setUint32(ptr+at,value>>>0,true),get=at=>data.getUint32(ptr+at,true),put=(at,value)=>data.setUint32(at,value>>>0,true),half=(at,value)=>data.setUint16(fp+at,value,true),short=at=>data.getUint16(fp+at,true);
+const bank=()=>[...ram.slice(fp,fp+100)],guest=()=>[...ram.slice(backing,backing+4*4096)],regs=()=>Array.from({length:8},(_,i)=>get(8+i*4));
+let imports=0;
+const functions=new Map();for(const name of['load','fs-load','store','pop-store','fs-pop-store','twice'])functions.set(name,(await WebAssembly.instantiate(fs.readFileSync(`${root}/${name}.wasm`),{env:{memory},cpu:{read(){imports++;throw new Error('wide x87 cannot split or delegate a read');},write(){imports++;throw new Error('wide x87 cannot split or delegate a store');}}})).instance.exports.run);
+function raw(significand,exponent){const bytes=new Uint8Array(10),d=new DataView(bytes.buffer);d.setBigUint64(0,significand,true);d.setUint16(8,exponent,true);return[...bytes];}
+// Binary64 boundary literals are independent of the emitted pack/unpack code.
+const values=[
+ [0n,raw(0n,0)], [0x8000000000000000n,raw(0n,0x8000)],
+ [0x3ff0000000000000n,raw(0x8000000000000000n,0x3fff)],
+ [0x3ff0000000000001n,raw(0x8000000000000800n,0x3fff)],
+ [0xc02a000000000000n,raw(0xd000000000000000n,0xc002)],
+ [0x0010000000000000n,raw(0x8000000000000000n,0x3c01)],
+ [0x7fefffffffffffffn,raw(0xfffffffffffff800n,0x43fe)],
+];
+function init(top=0,cw=0x023f,address=0x3000,fsPrefix=false,quota=1){ram.fill(0);word(0,1);word(4,160);[0xaabbccdd,0x12345678,0x87654321,address,0x4800,6,7,8].forEach((v,i)=>word(8+4*i,v));word(40,0x1000);word(44,0xcd7);word(48,quota);word(124,bridge);word(152,63);if(fsPrefix)word(116,0x1000);put(bridge,1);put(bridge+4,36);put(bridge+8,fp);[0x23,0x1b,0x23,0x23,0x3b,0x43].forEach((v,i)=>put(bridge+12+i*4,v));half(0,cw);half(2,(top<<11)|0x4220);half(4,0xffff);half(6,0x321);put(fp+8,0x11223344);put(fp+12,0x55667788);half(16,0x71);half(18,0x73);for(let i=0;i<80;i++)data.setUint8(fp+20+i,0x80+i);for(const[at,v]of[[76,map],[80,permissions],[84,backing],[88,4],[92,executable],[96,cow],[100,dirty],[104,slots],[112,4],[156,version]])word(at,v);put(map+3*4,1);put(map+4*4,2);data.setUint8(permissions+3,3);data.setUint8(permissions+4,3);data.setBigUint64(version,10n,true);for(let i=0;i<4*4096;i++)ram[backing+i]=(i*13+0x51)&255;imports=0;}
+function slot(index,payload){ram.set(payload,fp+20+10*index);half(4,(short(4)&~(3<<(index*2)))|((payload.slice(0,8).every(x=>x===0)?1:0)<<(index*2)));}
+function expected(before,{status,tag,opcode,fdp,ds,fip=0x1000,slots=[]}){const bytes=Uint8Array.from(before),d=new DataView(bytes.buffer);for(const[at,value]of[[2,status],[4,tag],[6,opcode],[16,0x1b],[18,ds]])if(value!==undefined)d.setUint16(at,value,true);d.setUint32(8,fip,true);if(fdp!==undefined)d.setUint32(12,fdp,true);for(const[payload,index]of slots)bytes.set(payload,20+10*index);return[...bytes];}
+function done(name,next=0x1002,retired=1){const beforeRegs=regs();assert.equal(functions.get(name)(ptr),0,name);assert.deepEqual(regs(),beforeRegs);assert.deepEqual([get(40),get(44),get(48),get(52),get(56)],[next,0xcd7,0,0,retired]);assert.equal(imports,0);}
+function miss(name){const before=bank(),beforeGuest=guest(),beforeRegs=regs(),length=get(108),bits=[...ram.slice(dirty,dirty+4)],queue=[...ram.slice(slots,slots+16)];assert.equal(functions.get(name)(ptr),7,name);assert.deepEqual(bank(),before);assert.deepEqual(guest(),beforeGuest);assert.deepEqual(regs(),beforeRegs);assert.deepEqual([get(40),get(44),get(48),get(52),get(56)],[0x1000,0xcd7,1,7,0]);assert.equal(get(108),length);assert.deepEqual([...ram.slice(dirty,dirty+4)],bits);assert.deepEqual([...ram.slice(slots,slots+16)],queue);assert.equal(imports,0);}
+for(const cw of[0x003f,0x007f,0x023f,0x027f,0x037f,0x0b7f])for(const[bits,payload]of values)for(const[top,address,fsPrefix]of[[0,0x3000,false],[7,0x3001,false],[3,0x3ff8,false],[4,0x2001,true]]){init(top,cw,address,fsPrefix);const linear=address+(fsPrefix?0x1000:0),host=backing+(linear-0x3000);data.setBigUint64(host,bits,true);const before=bank(),beforeGuest=guest(),dest=(top+7)&7,newTag=(0xffff&~(3<<(dest*2)))|((bits&0x7fffffffffffffffn?0:1)<<(dest*2));done(fsPrefix?'fs-load':'load',fsPrefix?0x1003:0x1002);assert.deepEqual(bank(),expected(before,{status:0x4020|(dest<<11),tag:newTag,opcode:0x503,fdp:address,ds:fsPrefix?0x3b:0x23,slots:[[payload,dest]]}));assert.deepEqual(guest(),beforeGuest);assert.equal(get(108),0);}
+for(const[bits,payload]of values)for(const[name,pop,fsPrefix]of[['store',false,false],['pop-store',true,false],['fs-pop-store',true,true]])for(const[top,address]of[[0,0x3000],[7,0x3001],[3,0x3ff8]]){const logical=fsPrefix?address-0x1000:address;init(top,0x023f,logical,fsPrefix);slot(top,payload);const before=bank(),beforeGuest=guest(),tag=short(4),expectedGuest=Uint8Array.from(beforeGuest);new DataView(expectedGuest.buffer).setBigUint64(address-0x3000,bits,true);done(name,fsPrefix?0x1003:0x1002);assert.deepEqual(guest(),[...expectedGuest]);assert.deepEqual(bank(),expected(before,{status:0x4020|(((top+(pop?1:0))&7)<<11),tag:pop?tag|(3<<(top*2)):tag,opcode:pop?0x51b:0x513,fdp:logical,ds:fsPrefix?0x3b:0x23}));assert.equal(get(108),1);assert.equal(data.getUint8(dirty),1);assert.equal(data.getUint32(slots,true),0);assert.equal(data.getBigUint64(version,true),10n);}
+init(7,0x023f,0x3001,false,2);slot(7,values[3][1]);const twiceBefore=bank();done('twice',0x1004,2);assert.deepEqual(bank(),expected(twiceBefore,{status:0x7820,tag:short(4),opcode:0x513,fip:0x1002,fdp:0x3001,ds:0x23}));assert.equal(get(108),1);
+for(const bits of[1n,0x000fffffffffffffn,0x8000000000000001n,0x7ff0000000000000n,0xfff0000000000000n,0x7ff8000000000123n,0x7ff0000000000123n]){init();data.setBigUint64(backing,bits,true);miss('load');}
+for(const payload of[raw(0x8000000000000001n,0x3fff),raw(0x8000000000000000n,0x3c00),raw(0x8000000000000000n,0x43ff),raw(0x8000000000000000n,0x7fff),raw(1n,0)]){init();slot(0,payload);miss('pop-store');}
+for(const[name,mutate]of[
+ ['load',()=>word(76,0)], ['load',()=>put(map+3*4,0)], ['load',()=>data.setUint8(permissions+3,0)], ['load',()=>data.setUint8(permissions+3,11)],
+ ['load',()=>word(20,0x3ff9)], ['pop-store',()=>word(20,0x3ff9)],
+ ['pop-store',()=>data.setUint8(permissions+3,1)], ['pop-store',()=>put(executable,1)], ['pop-store',()=>put(cow+3*4,1)],
+ ['pop-store',()=>data.setBigUint64(version,0xffffffffffffffffn,true)], ['pop-store',()=>word(112,0)], ['pop-store',()=>word(108,5)],
+]){init();slot(0,values[2][1]);mutate();miss(name);}
+init();miss('pop-store');
+init();half(4,0);miss('load');
+init();half(0,0x023e);half(2,1);put(map+3*4,0);miss('load');
+init();slot(0,values[2][1]);word(20,0xfffffffc);const beforeSegment=bank(),beforeRAM=guest();assert.equal(functions.get('pop-store')(ptr),9);assert.deepEqual(bank(),beforeSegment);assert.deepEqual(guest(),beforeRAM);assert.deepEqual([get(40),get(48),get(56),get(68)],[0x1000,1,0,13]);assert.equal(imports,0);
+console.log('binary64 canonical whole-span normal/zero loads/stores, PC53/CW preservation, raw80 boundaries/metadata/TOP/ghost, dirty dedup and preeffect service misses passed');
+"#).arg(&scratch).output().unwrap();
+    assert!(
+        result.status.success(),
+        "fixture {} failed:\n{}\n{}",
+        scratch.display(),
+        String::from_utf8_lossy(&result.stdout),
+        String::from_utf8_lossy(&result.stderr)
+    );
+    fs::remove_dir_all(scratch).unwrap();
+}

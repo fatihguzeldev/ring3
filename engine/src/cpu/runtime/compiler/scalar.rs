@@ -12,6 +12,7 @@ mod memory;
 mod multiply;
 mod narrow;
 mod shift;
+mod simd;
 mod string;
 mod x87;
 mod x87_arithmetic;
@@ -51,6 +52,7 @@ pub(super) fn supports(operation: &Operation) -> bool {
         || exchange::supports(operation)
         || flags::supports(operation)
         || shift::supports(operation)
+        || simd::supports(operation)
         || x87::supports(operation)
         || x87_arithmetic::supports(operation)
         || matches!(
@@ -131,6 +133,8 @@ pub(super) fn emit(blocks: &[Block]) -> Vec<u8> {
             (2, ValType::I64),
             (3, ValType::F32),
             (9, ValType::F64),
+            (5, ValType::I32),
+            (6, ValType::I64),
         ]),
     };
     out.c()
@@ -904,6 +908,7 @@ impl Output {
                     && !exchange::emit(self, operation)
                     && !flags::emit(self, operation)
                     && !shift::emit(self, operation)
+                    && !simd::emit(self, operation)
                     && !x87::emit(self, operation)
                     && !x87_arithmetic::emit(self, operation)
                 {
