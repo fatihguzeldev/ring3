@@ -1125,3 +1125,335 @@ console.log('PC24/PC53 SUB/RSUB strict full-state oracle, signed zero/cancellati
     );
     fs::remove_dir_all(scratch).unwrap();
 }
+
+#[test]
+fn generated_x87_f32_stores_round_f64_normals_without_changing_raw_operands() {
+    use std::{
+        fs,
+        process::Command,
+        time::{SystemTime, UNIX_EPOCH},
+    };
+    let scratch = std::env::temp_dir().join(format!(
+        "ring3-runtime-f32-stores-{}-{}",
+        std::process::id(),
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    fs::create_dir(&scratch).unwrap();
+    let mut memory = AddressSpace::new(3).unwrap();
+    for address in [0x1000, 0x3000, 0x4000] {
+        memory
+            .map_zeroed(
+                PageRange::new(GuestAddress(address), 1).unwrap(),
+                Permissions::ALL,
+            )
+            .unwrap();
+    }
+    let forms: &[(&str, &[u8], bool)] = &[
+        ("fst", &[0xd9, 0x13], false),
+        ("fstp", &[0xd9, 0x1b], false),
+        ("fs-fstp", &[0x64, 0xd9, 0x1b], true),
+    ];
+    for &(name, code, _) in forms {
+        memory.write(GuestAddress(0x1000), code).unwrap();
+        fs::write(
+            scratch.join(format!("{name}.wasm")),
+            compile(&memory, GuestAddress(0x1000), 1).unwrap().wasm,
+        )
+        .unwrap();
+    }
+    let mut cases = Vec::new();
+    let mut add = |label: &str,
+                   bits: u64,
+                   control: u16,
+                   old_status: u16,
+                   top: u16,
+                   form: &str,
+                   mode: u8,
+                   wide: bool,
+                   eligible: bool,
+                   literal: Option<(u32, bool, bool)>| {
+        let &(_, code, fs_prefix) = forms.iter().find(|(name, _, _)| *name == form).unwrap();
+        let linear = if fs_prefix { 0x4000 } else { 0x3000 };
+        let range = PageRange::new(GuestAddress(linear), 1).unwrap();
+        memory.protect(range, Permissions::READ_WRITE).unwrap();
+        memory
+            .write(GuestAddress(linear), &0xdead_beef_u32.to_le_bytes())
+            .unwrap();
+        memory
+            .protect(
+                range,
+                if mode == 1 || mode == 3 {
+                    Permissions::READ
+                } else if mode == 2 {
+                    Permissions::ALL
+                } else {
+                    Permissions::READ_WRITE
+                },
+            )
+            .unwrap();
+        memory.write(GuestAddress(0x1000), code).unwrap();
+        let decoded = decode_one(&memory, GuestAddress(0x1000)).unwrap();
+        let mut before = state(control, top);
+        before.status = (top << 11) | old_status;
+        operand64(&mut before, 0, bits);
+        let physical = usize::from(top);
+        if wide {
+            before.registers[physical][0] |= 1;
+        }
+        let mut numeric = NumericState::default();
+        numeric.x87 = before;
+        let mut segments = SegmentContext::default();
+        segments.state.selectors = [0x23, 0x1b, 0x23, 0x23, 0x3b, 0x43];
+        if fs_prefix {
+            segments.state.bases[4] = 0x1000;
+        }
+        let mut scalar = State32 {
+            registers: [0x11223344, 2, 3, 0x3000, 0x4800, 6, 7, 8],
+            eip: 0x1000,
+            eflags: 0xcd7,
+        };
+        let result = numeric.execute(
+            &mut memory,
+            &mut scalar,
+            &segments,
+            decoded.operation(),
+            decoded.next_pc().0,
+        );
+        let mut output = [0; 4];
+        memory.read(GuestAddress(linear), &mut output).unwrap();
+        let output = u32::from_le_bytes(output);
+        if mode == 3 {
+            assert!(
+                matches!(
+                    result,
+                    Err(crate::cpu::runtime::numeric::NumericError::Cpu { vector: 16, .. })
+                ),
+                "{label}: pending MF precedes readonly destination"
+            );
+            assert_eq!(numeric.x87.status & 0x8080, 0x8080);
+            assert_eq!(output, 0xdead_beef);
+        } else if mode == 1 {
+            assert!(matches!(
+                result,
+                Err(crate::cpu::runtime::numeric::NumericError::Memory { width: 4, .. })
+            ));
+            assert_eq!(
+                numeric.x87, before,
+                "faulting store retains the entire original bank"
+            );
+            assert_eq!(output, 0xdead_beef);
+        } else {
+            let outcome = result.unwrap();
+            assert_eq!(outcome.code_invalidated, mode == 2);
+            if let Some((expected, inexact, incremented)) = literal {
+                assert_eq!(output, expected, "{label}: literal binary32 output");
+                assert_eq!(
+                    numeric.x87.status & 0x20 != 0,
+                    inexact || old_status & 0x20 != 0,
+                    "{label}: sticky PE"
+                );
+                assert_eq!(
+                    numeric.x87.status & 0x200 != 0,
+                    incremented,
+                    "{label}: magnitude C1"
+                );
+            }
+            assert_eq!(
+                numeric.x87.registers, before.registers,
+                "FST/FSTP never replace their raw source payload"
+            );
+            assert_eq!(numeric.x87.control, control);
+            assert_eq!(numeric.x87.instruction_pointer, 0x1000);
+            assert_eq!(numeric.x87.data_pointer, 0x3000);
+            if label == "unmasked-PM" {
+                assert_eq!(output, 0x3f80_0002);
+                assert_eq!(
+                    numeric.x87.status & 0x82a0,
+                    0x82a0,
+                    "unmasked PE commits the store and summary before a later waiting fault"
+                );
+                assert_eq!(numeric.x87.top(), 1);
+            }
+        }
+        assert_eq!(scalar.eflags, 0xcd7);
+        let status = if mode == 3 || !eligible {
+            7
+        } else if mode == 1 {
+            3
+        } else if mode == 2 {
+            6
+        } else {
+            0
+        };
+        let completed = status == 0 || status == 6;
+        let after = if completed { numeric.x87 } else { before };
+        let case_label =
+            format!("{label}-cw{control:04x}-sw{old_status:04x}-top{top}-mode{mode}-wide{wide}");
+        cases.push(format!("{{\"label\":\"{case_label}\",\"form\":\"{form}\",\"before\":{:?},\"after\":{:?},\"status\":{status},\"next\":{},\"remaining\":{},\"retired\":{},\"linear\":{linear},\"fs\":{fs_prefix},\"mode\":{mode},\"output\":{},\"writes\":{}}}",
+            raw(before), raw(after), if completed { decoded.next_pc().0 } else { 0x1000 }, u32::from(!completed), u32::from(completed), if completed { output } else { 0xdead_beef }, u32::from(status != 7)));
+    };
+    // nearest-only expansion: each sign, every TOP, FST/FSTP/FS, fresh and sticky PE.
+    let inexact = [
+        ("tie-even", 0x3ff0_0000_1000_0000_u64, 0x3f80_0000, false),
+        ("tie-odd", 0x3ff0_0000_3000_0000, 0x3f80_0002, true),
+        ("carry", 0x3fff_ffff_f000_0000, 0x4000_0000, true),
+        ("minnormal-half", 0x3810_0000_1000_0000, 0x0080_0000, false),
+        ("next-above-one", 0x3ff0_0000_0000_0001, 0x3f80_0000, false),
+        ("next-below-one", 0x3fef_ffff_ffff_ffff, 0x3f80_0000, true),
+    ];
+    for &(label, input, output, incremented) in &inexact {
+        for negative in [false, true] {
+            let bits = input | if negative { 1_u64 << 63 } else { 0 };
+            let output = output | if negative { 1_u32 << 31 } else { 0 };
+            for top in 0..8 {
+                for &(form, _, _) in forms {
+                    for old_status in [0x4700, 0x472f] {
+                        add(
+                            label,
+                            bits,
+                            0x023f,
+                            old_status,
+                            top,
+                            form,
+                            0,
+                            false,
+                            true,
+                            Some((output, true, incremented)),
+                        );
+                    }
+                }
+            }
+            for control in [0x003f, 0x007f, 0x027f, 0x033f, 0x037f, 0x013f, 0x133f] {
+                add(
+                    label,
+                    bits,
+                    control,
+                    0x4700,
+                    0,
+                    "fstp",
+                    0,
+                    false,
+                    true,
+                    Some((output, true, incremented)),
+                );
+            }
+        }
+    }
+    // exact transport keeps its existing CW independence, including unmasked PM.
+    for (label, bits, output) in [
+        ("zero", 0_u64, 0_u32),
+        ("one", 0x3ff0_0000_0000_0000, 0x3f80_0000),
+        ("minnormal", 0x3810_0000_0000_0000, 0x0080_0000),
+        ("maxfinite", 0x47ef_ffff_e000_0000, 0x7f7f_ffff),
+    ] {
+        for negative in [false, true] {
+            for control in [
+                0x0000, 0x003e, 0x001f, 0x043f, 0x083f, 0x0c3f, 0xffff, 0x023f,
+            ] {
+                add(
+                    label,
+                    bits | if negative { 1_u64 << 63 } else { 0 },
+                    control,
+                    0x4700,
+                    7,
+                    "fstp",
+                    0,
+                    false,
+                    true,
+                    Some((
+                        output | if negative { 1_u32 << 31 } else { 0 },
+                        false,
+                        false,
+                    )),
+                );
+            }
+        }
+    }
+    // outside the bounded domain: canonical conversion stays authoritative.
+    for (label, bits, control, wide) in [
+        ("f32-subnormal", 0x36a0_0000_0000_0000, 0x023f, false),
+        ("underflow-to-zero", 0x3690_0000_0000_0000, 0x023f, false),
+        ("below-minnormal", 0x380f_ffff_ffff_ffff, 0x023f, false),
+        ("above-maxfinite", 0x47ef_ffff_e000_0001, 0x023f, false),
+        ("overflow", 0x47f0_0000_0000_0000, 0x023f, false),
+        ("infinity", 0x7ff0_0000_0000_0000, 0x023f, false),
+        ("quiet-nan", 0x7ff8_0000_0000_1234, 0x023f, false),
+        ("signaling-nan", 0x7ff0_0000_0000_1234, 0x023f, false),
+        ("extended-precision", 0x3ff0_0000_0000_0000, 0x023f, true),
+        ("round-down", 0x3ff0_0000_1000_0000, 0x043f, false),
+        ("round-up", 0x3ff0_0000_1000_0000, 0x083f, false),
+        ("round-zero", 0x3ff0_0000_1000_0000, 0x0c3f, false),
+        ("unmasked-IV", 0x3ff0_0000_1000_0000, 0x003e, false),
+        ("unmasked-PM", 0x3ff0_0000_3000_0000, 0x001f, false),
+    ] {
+        add(
+            label, bits, control, 0x4700, 0, "fstp", 0, wide, false, None,
+        );
+    }
+    for &(form, _, _) in forms {
+        for negative in [false, true] {
+            for &(label, input, _, _) in &inexact[..2] {
+                for mode in [1, 2] {
+                    add(
+                        label,
+                        input | if negative { 1_u64 << 63 } else { 0 },
+                        0x023f,
+                        0x4700,
+                        7,
+                        form,
+                        mode,
+                        false,
+                        true,
+                        None,
+                    );
+                }
+            }
+        }
+        add(
+            "pending-before-store-fault",
+            0x3ff0_0000_3000_0000,
+            0x003e,
+            1,
+            7,
+            form,
+            3,
+            false,
+            false,
+            None,
+        );
+    }
+    drop(add);
+    fs::write(scratch.join("cases.json"), format!("[{}]", cases.join(","))).unwrap();
+    let result = Command::new("node").arg("--input-type=module").arg("-e").arg(r#"
+import assert from 'node:assert/strict';import fs from 'node:fs';
+const root=process.argv[1],memory=new WebAssembly.Memory({initial:1}),data=new DataView(memory.buffer),ram=new Uint8Array(memory.buffer),state=0x8000,view=0x9800,fp=0xa000;
+const word=(at,value)=>data.setUint32(state+at,value>>>0,true);let current,writes=0;
+const imports={env:{memory},cpu:{read(){throw Error('FST/FSTP must not read guest RAM');},write(context,address,width,value){assert.equal(context,state);assert.equal(address,current.linear);assert.equal(width,4);writes++;assert.notEqual(current.mode,3,'pending MF precedes any destination access');if(current.mode===1){word(52,3);word(60,address);word(64,0x20204);word(68,4);return 3;}data.setUint32(address,value>>>0,true);const status=current.mode===2?6:0;word(52,status);return status;}}};
+const functions=new Map();
+for(current of JSON.parse(fs.readFileSync(`${root}/cases.json`))){
+  for(let i=0;i<ram.length;i++)ram[i]=(i*37+11)&255;ram.fill(0,state,state+160);ram.fill(0,view,view+36);
+  word(0,1);word(4,160);[0x11223344,2,3,0x3000,0x4800,6,7,8].forEach((v,i)=>word(8+4*i,v));word(40,0x1000);word(44,0xcd7);word(48,1);word(124,view);word(152,0x1f);if(current.fs)word(116,0x1000);
+  data.setUint32(view,1,true);data.setUint32(view+4,36,true);data.setUint32(view+8,fp,true);[0x23,0x1b,0x23,0x23,0x3b,0x43].forEach((v,i)=>data.setUint32(view+12+4*i,v,true));ram.set(current.before,fp);data.setUint32(current.linear,0xdeadbeef,true);
+  const before=ram.slice(),expected=ram.slice(),d=new DataView(expected.buffer);expected.set(current.after,fp);d.setUint32(current.linear,current.output,true);
+  for(const[at,value]of[[40,current.next],[48,current.remaining],[52,current.status],[56,current.retired]])d.setUint32(state+at,value,true);
+  if(current.status===3)for(const[at,value]of[[60,current.linear],[64,0x20204],[68,4]])d.setUint32(state+at,value,true);
+  if(!functions.has(current.form))functions.set(current.form,(await WebAssembly.instantiate(fs.readFileSync(`${root}/${current.form}.wasm`),imports)).instance.exports.run);
+  writes=0;const status=functions.get(current.form)(state);
+  if(status===7){const neutral=before.slice();new DataView(neutral.buffer).setUint32(state+52,7,true);assert.deepEqual(ram,neutral,'service fallback is neutral before effects');assert.equal(writes,0);}
+  assert.equal(status,current.status,`${current.label}/${current.form}: required compiled admission, not an architectural failure claim about the baseline`);
+  assert.deepEqual(ram,expected,`${current.label}/${current.form}: complete bank/raw ghosts/CW/PE/C1/pop/meta, scalar/RAM and exact budget immediately after store`);assert.equal(writes,current.writes);
+}
+console.log('bounded f64-to-f32 FST/FSTP: strict/literal rounding and C1, all TOP/PC/signs, exact-CW compatibility, fault/SMC/pending priority and full RAM passed');
+"#).arg(&scratch).output().unwrap();
+    assert!(
+        result.status.success(),
+        "fixture {} failed:\n{}\n{}",
+        scratch.display(),
+        String::from_utf8_lossy(&result.stdout),
+        String::from_utf8_lossy(&result.stderr)
+    );
+    fs::remove_dir_all(scratch).unwrap();
+}

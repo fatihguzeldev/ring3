@@ -1590,3 +1590,113 @@ test('actual pending FWAIT preserves its completed prefix and publishes the prec
     event(f.engine, 16, 0x1005, 1);
   } finally {f.close();}
 });
+
+function seedInexactF32StoreBank(f, oldC1 = 0x200) {
+  const bank = f.engine.base + 4236, fp = new DataView(f.engine.memory.buffer, bank, 128);
+  fp.setUint16(16, 0x003f, true);
+  fp.setUint16(18, 0x7d00 | oldC1, true); // top7, c0/c2/c3, fresh pe0.
+  fp.setUint16(20, 0x3fff, true); // only physical7/st0 is occupied.
+  fp.setUint16(22, 0x321, true);
+  fp.setUint32(24, 0x12345678, true); fp.setUint32(28, 0x87654321, true);
+  fp.setUint16(32, 0x71, true); fp.setUint16(34, 0x72, true);
+  for (let index = 0; index < 8; index++) {
+    fp.setBigUint64(40 + index * 10, 0x8000000000000000n + (BigInt(index) << 40n), true);
+    fp.setUint16(48 + index * 10, 0x3fff, true);
+  }
+  // exactly representable f64 0x3ff0000030000000 = 1 + 3*2^-24.
+  // nearest-even f32 is0x3f800002, PE1/C1=1; the source raw80 stays intact.
+  fp.setBigUint64(110, 0x8000018000000000n, true);
+}
+
+test('actual inexact FSTP publishes the rounded FS store raw ghosts and immediate PE C1 after its prefix', {skip}, () => {
+  const registers = [0xaabbccdd, 0x89abcdef, 0xd5e6789a, 0x23456789, 0x2f00, 0x55443322, 0x66554433, 0x77665544];
+  const f = fixture([0xb8, 0x78, 0x56, 0x34, 0x12, 0x64, 0xd9, 0x1d, ...dword(0x1004), 0x43], {
+    registers, data: dword(0xdeadbeef).map((value, index) => [0x2004 + index, value]), execution: {budget: 2},
+  });
+  rejectJsService(f);
+  try {
+    f.engine.ok('set_segment_base', 4, 0x1000);
+    seedInexactF32StoreBank(f);
+    const scalar = new Uint8Array(f.engine.memory.buffer, f.engine.base, 56).slice(), banks = processBanks(f);
+    view(scalar).setUint32(16, 0x12345678, true); view(scalar).setUint32(48, 0x100c, true);
+    const fp = view(banks[0]);
+    fp.setUint16(18, 0x4720, true); fp.setUint16(20, 0xffff, true); fp.setUint16(22, 0x11d, true);
+    fp.setUint32(24, 0x1005, true); fp.setUint32(28, 0x1004, true);
+    fp.setUint16(32, 0x1b, true); fp.setUint16(34, 0x3b, true);
+    const selected = f.cache.select(), state = f.slab();
+    const backing = state.getUint32(84, true), length = state.getUint32(88, true) * 4096;
+    const ram = new Uint8Array(f.engine.memory.buffer, backing, length).slice();
+    const slot = new DataView(f.engine.memory.buffer).getUint32(state.getUint32(76, true) + 2 * 4, true) - 1;
+    new DataView(ram.buffer).setUint32(slot * 4096 + 4, 0x3f800002, true);
+    const run = f.cache.execute(selected);
+    assert.deepEqual([run.coreReason, run.reason, run.retired, run.work, run.pc], [2, 1, 2, 2, 0x100c]);
+    assert.deepEqual(new Uint8Array(f.engine.memory.buffer, f.engine.base, 56), scalar);
+    assert.deepEqual(processBanks(f), banks);
+    assert.deepEqual(new Uint8Array(f.engine.memory.buffer, backing, length), ram);
+    assert.equal(f.slab().getUint32(48, true), 0);
+    serviceCounts(f, 0);
+  } finally {f.close();}
+});
+
+test('actual inexact FSTP late readonly-page fault retains PE C1 raw ghosts and metadata before its pop', {skip}, () => {
+  for (const oldC1 of [0, 0x200]) {
+    const f = fixture([0xb8, 0x78, 0x56, 0x34, 0x12, 0xd9, 0x1d, ...dword(0x2ffe), 0x43], {
+      data: [[0x2ffe, 0x5a], [0x2fff, 0xa5]], execution: {budget: 2},
+    });
+    rejectJsService(f);
+    const calls = memoryCalls(f);
+    try {
+      f.engine.ok('map', 0x3000, 1, 3);
+      f.engine.ok('write8', 0x3000, 0x66); f.engine.ok('write8', 0x3001, 0x99);
+      f.engine.ok('protect', 0x3000, 1, 1);
+      seedInexactF32StoreBank(f, oldC1);
+      const scalar = new Uint8Array(f.engine.memory.buffer, f.engine.base, 56).slice(), banks = processBanks(f);
+      view(scalar).setUint32(16, 0x12345678, true); view(scalar).setUint32(48, 0x1005, true);
+      const selected = f.cache.select(), state = f.slab();
+      const backing = state.getUint32(84, true), length = state.getUint32(88, true) * 4096;
+      const ram = new Uint8Array(f.engine.memory.buffer, backing, length).slice(), run = f.cache.execute(selected);
+      assert.deepEqual([run.coreReason, run.reason, run.retired, run.work, run.pc], [3, 5, 1, 1, 0x1005]);
+      assert.deepEqual([f.engine.get(80), f.engine.get(84), f.engine.get(88), f.engine.get(92)], [2, 0x3000, 2, 4]);
+      assert.deepEqual(new Uint8Array(f.engine.memory.buffer, f.engine.base, 56), scalar);
+      assert.deepEqual(processBanks(f), banks);
+      assert.deepEqual(new Uint8Array(f.engine.memory.buffer, backing, length), ram);
+      assert.equal(f.slab().getUint32(48, true), 1);
+      event(f.engine, 0xffffffff, 0x1005, 1);
+      serviceCounts(f, 0);
+      assert(calls.write > 0, 'the full cross-page permission check retains the actual canonical write helper');
+    } finally {f.close();}
+  }
+});
+
+test('actual inexact FSTP executable-alias SMC commits PE C1 pop and metadata before leaving its prefix', {skip}, () => {
+  const f = fixture(undefined, {windowsMappings: true, physicalPages: 1024, execution: {budget: 2}});
+  rejectJsService(f);
+  try {
+    const [writable, executable] = sharedViews(f, 0x40, [2, 0x24]);
+    f.engine.request(Uint8Array.from([0xb8, 1, 0, 0, 0, 0xeb, 0xf9])); f.engine.ok('upload', writable, 7);
+    new DataView(f.engine.memory.buffer).setUint32(f.engine.base + 48, executable, true);
+    const old = f.cache.select(); assert.equal(f.cache.execute(old).reason, 1);
+    replaceCode(f, [0xb8, 0x78, 0x56, 0x34, 0x12, 0xd9, 0x1d, ...dword(writable), 0x43]);
+    new DataView(f.engine.memory.buffer).setUint32(f.engine.base + 48, 0x1000, true);
+    seedInexactF32StoreBank(f);
+    const scalar = new Uint8Array(f.engine.memory.buffer, f.engine.base, 56).slice(), banks = processBanks(f);
+    view(scalar).setUint32(16, 0x12345678, true); view(scalar).setUint32(48, 0x100b, true);
+    const fp = view(banks[0]);
+    fp.setUint16(18, 0x4720, true); fp.setUint16(20, 0xffff, true); fp.setUint16(22, 0x11d, true);
+    fp.setUint32(24, 0x1005, true); fp.setUint32(28, writable, true);
+    fp.setUint16(32, 0x1b, true); fp.setUint16(34, 0x23, true);
+    const selected = f.cache.select(), state = f.slab();
+    const backing = state.getUint32(84, true), length = state.getUint32(88, true) * 4096;
+    const slot = new DataView(f.engine.memory.buffer).getUint32(state.getUint32(76, true) + (writable >>> 12) * 4, true) - 1;
+    const ram = new Uint8Array(f.engine.memory.buffer, backing, length).slice();
+    new DataView(ram.buffer).setUint32(slot * 4096 + (writable & 4095), 0x3f800002, true);
+    const run = f.cache.execute(selected);
+    assert.deepEqual([run.coreReason, run.reason, run.retired, run.work, run.pc], [6, 6, 2, 2, 0x100b]);
+    assert.deepEqual(new Uint8Array(f.engine.memory.buffer, f.engine.base, 56), scalar);
+    assert.deepEqual(processBanks(f), banks);
+    assert.deepEqual(new Uint8Array(f.engine.memory.buffer, backing, length), ram);
+    assert.equal(f.slab().getUint32(48, true), 0);
+    f.cache.import(); assert.equal(f.cache.table.get(old.slot), null);
+    serviceCounts(f, 0);
+  } finally {f.close();}
+});

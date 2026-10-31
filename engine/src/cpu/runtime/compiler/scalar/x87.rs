@@ -663,15 +663,77 @@ pub(super) fn emit(out: &mut Output, operation: Operation) -> bool {
             pop: popping,
             ..
         } => {
-            read_raw_f32(out, 0, VALUE);
+            let inexact = 41;
+            let incremented = 42;
+            let result = 53;
+            read_raw_f64(out, 0, VALUE);
+            // this ordinary range excludes ieee underflow and overflow, even
+            // when a value just outside it would round to a normal endpoint.
+            out.c()
+                .local_get(VALUE)
+                .f64_abs()
+                .f64_const(f64::from(f32::MIN_POSITIVE).into())
+                .f64_lt()
+                .local_get(VALUE)
+                .f64_const(0.0.into())
+                .f64_ne()
+                .i32_and()
+                .local_get(VALUE)
+                .f64_abs()
+                .f64_const(f64::from(f32::MAX).into())
+                .f64_gt()
+                .i32_or();
+            miss_if(out);
             out.c()
                 .local_get(VALUE)
                 .f32_demote_f64()
+                .local_tee(F32_VALUE)
+                .f64_promote_f32()
+                .local_tee(result)
+                .local_get(VALUE)
+                .f64_ne()
+                .local_set(inexact)
+                .local_get(inexact)
+                .if_(BlockType::Empty)
+                .local_get(STATE)
+                .i32_load16_u(mem(CONTROL))
+                .i32_const(0x0c3f)
+                .i32_and()
+                .i32_const(0x003f)
+                .i32_ne();
+            // exact transport keeps its old control word independence. only the new
+            // inexact arm requires nearest rounding and masked exceptions.
+            miss_if(out);
+            out.c()
+                .end()
+                .local_get(result)
+                .f64_abs()
+                .local_get(VALUE)
+                .f64_abs()
+                .f64_gt()
+                .local_set(incremented)
+                .local_get(F32_VALUE)
                 .i32_reinterpret_f32()
                 .local_set(R);
             out.address(address.expect("decoded memory store"));
             out.write(4, R);
-            clear_c1(out);
+            // the checked store precedes every fp effect. preserve the source
+            // payload and sticky status; c1 records a magnitude increment.
+            out.c()
+                .local_get(STATE)
+                .local_get(STATE)
+                .i32_load16_u(mem(STATUS))
+                .i32_const(!0x200)
+                .i32_and()
+                .local_get(inexact)
+                .i32_const(5)
+                .i32_shl()
+                .i32_or()
+                .local_get(incremented)
+                .i32_const(9)
+                .i32_shl()
+                .i32_or()
+                .i32_store16(mem(STATUS));
             if popping {
                 pop(out);
             }
