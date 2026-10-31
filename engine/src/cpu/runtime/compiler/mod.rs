@@ -1,4 +1,5 @@
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
+use wasm_encoder::{NameMap, NameSection, Section};
 
 use crate::{
     cpu::x86::{
@@ -250,8 +251,17 @@ pub(crate) fn compile_with_gates_until(
     let entries = points.iter().map(|entry| entry.pc).collect();
     services.sort_unstable_by_key(|site| site.pc);
     services.dedup_by_key(|site| site.pc);
+    let mut wasm = scalar::emit(&blocks, &points);
+    let mut functions = NameMap::new();
+    functions.append(2, &format!("ring3_unit_{:08x}", pc.0));
+    let mut names = NameSection::new();
+    names.functions(&functions);
+    let mut section = Vec::new();
+    names.append_to(&mut section);
+    wasm.reserve_exact(section.len());
+    wasm.extend_from_slice(&section);
     Ok(CompiledUnit {
-        wasm: scalar::emit(&blocks, &points),
+        wasm,
         sources,
         entries,
         instruction_count: count,
@@ -295,3 +305,109 @@ mod x87_divide_tests;
 mod x87_multiply_tests;
 #[cfg(test)]
 mod x87_tests;
+
+#[cfg(test)]
+mod unit_name_tests {
+    use super::*;
+    use crate::memory::{PageRange, Permissions};
+
+    fn take<'a>(bytes: &mut &'a [u8], length: usize) -> &'a [u8] {
+        let (value, rest) = bytes.split_at(length);
+        *bytes = rest;
+        value
+    }
+
+    fn unsigned(bytes: &mut &[u8]) -> u32 {
+        let mut value = 0;
+        for shift in (0..35).step_by(7) {
+            let byte = take(bytes, 1)[0];
+            assert!(shift < 28 || byte < 16);
+            value |= u32::from(byte & 127) << shift;
+            if byte < 128 {
+                return value;
+            }
+        }
+        panic!("invalid unsigned LEB128");
+    }
+
+    fn name(bytes: &mut &[u8]) -> String {
+        let length = unsigned(bytes) as usize;
+        std::str::from_utf8(take(bytes, length)).unwrap().into()
+    }
+
+    #[test]
+    fn generated_run_name_identifies_requested_entry_without_changing_export_index() {
+        for (pc, expected_name) in [
+            (0x0040_1040u32, "ring3_unit_00401040"),
+            (0xffff_f000, "ring3_unit_fffff000"),
+        ] {
+            let mut memory = AddressSpace::new(1).unwrap();
+            let base = pc & !4095;
+            memory
+                .map_zeroed(
+                    PageRange::new(GuestAddress(base), 1).unwrap(),
+                    Permissions::ALL,
+                )
+                .unwrap();
+            memory
+                .write(GuestAddress(base), &[0x90, 0xeb, 0xfd])
+                .unwrap();
+            if pc != base {
+                memory.write(GuestAddress(pc), &[0xeb, 0xbe]).unwrap();
+            }
+            let unit = compile(&memory, GuestAddress(pc), 3).unwrap();
+            assert_eq!(unit.entries[0], base);
+            assert_eq!(&unit.wasm[..8], b"\0asm\x01\0\0\0");
+            let mut bytes = &unit.wasm[8..];
+            let mut imports = false;
+            let mut run = None;
+            let mut run_name = None;
+            while !bytes.is_empty() {
+                let id = take(&mut bytes, 1)[0];
+                let length = unsigned(&mut bytes) as usize;
+                let mut section = take(&mut bytes, length);
+                match id {
+                    2 => {
+                        assert!(!imports);
+                        imports = true;
+                        assert_eq!(unsigned(&mut section), 3);
+                        assert_eq!(name(&mut section), "env");
+                        assert_eq!(name(&mut section), "memory");
+                        assert_eq!(take(&mut section, 1), [2]);
+                        assert_eq!(unsigned(&mut section), 0);
+                        assert_eq!(unsigned(&mut section), 1);
+                        for (function, index) in [("read", 0), ("write", 1)] {
+                            assert_eq!(name(&mut section), "cpu");
+                            assert_eq!(name(&mut section), function);
+                            assert_eq!(take(&mut section, 1), [0]);
+                            assert_eq!(unsigned(&mut section), index);
+                        }
+                        assert!(section.is_empty());
+                    }
+                    0 if name(&mut section) == "name" => {
+                        assert!(run_name.is_none());
+                        assert_eq!(take(&mut section, 1), [1]);
+                        let length = unsigned(&mut section) as usize;
+                        let mut functions = take(&mut section, length);
+                        assert_eq!(unsigned(&mut functions), 1);
+                        let index = unsigned(&mut functions);
+                        run_name = Some((index, name(&mut functions)));
+                        assert!(functions.is_empty() && section.is_empty());
+                    }
+                    7 => {
+                        assert!(run.is_none());
+                        assert_eq!(unsigned(&mut section), 1);
+                        assert_eq!(name(&mut section), "run");
+                        assert_eq!(take(&mut section, 1), [0]);
+                        run = Some(unsigned(&mut section));
+                        assert!(section.is_empty());
+                    }
+                    _ => {}
+                }
+            }
+            assert!(imports);
+            assert_eq!(run, Some(2));
+            assert_eq!(run_name, Some((2, expected_name.into())));
+        }
+    }
+}
