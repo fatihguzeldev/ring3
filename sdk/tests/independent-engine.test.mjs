@@ -2462,3 +2462,85 @@ test('actual pure FP services preserve page proofs while publishing dirty bytes'
     }
   }
 });
+
+test('actual ordinary store proofs expire when pure FP publication reaches version exhaustion', {skip}, () => {
+  const registers = [0x11223344, 0x22334455, 0x33445566, 0x44556677, 0x2f00, 0x55667788, 0x66778899, 0x778899aa];
+  const f = fixture([0xa3, 0, 0x20, 0, 0, 0xdb, 0xe3, 0xa3, 4, 0x20, 0, 0], {
+    independent: false, registers, fpControl: 0x027f,
+    data: [[0x2000, 0xde], [0x2001, 0xad], [0x2002, 0xbe], [0x2003, 0xef],
+      [0x2004, 0xaa], [0x2005, 0xbb], [0x2006, 0xcc], [0x2007, 0xdd]],
+  });
+  let active = false, versionPointer = 0, savedVersion;
+  try {
+    const api = f.engine.api;
+    f.engine.ok('cpu_begin', ...KEY); active = true;
+    const context = api.cpu_context_ptr() >>> 0;
+    f.slab().setUint32(48, 4, true);
+    const prepare = (pc, maximum) => {
+      f.slab().setUint32(40, pc, true);
+      f.engine.ok('cpu_prepare', ...KEY, pc, maximum);
+      const bytes = new Uint8Array(f.engine.memory.buffer, api.cpu_code_ptr() >>> 0, api.cpu_code_len() >>> 0);
+      return new WebAssembly.Instance(new WebAssembly.Module(bytes), {env: {memory: f.engine.memory},
+        cpu: {read: api.cpu_runtime_read, write: api.cpu_runtime_write}}).exports.run;
+    };
+    // both units exist before the first store. no prepare may revoke the proof
+    // between the preserving fp service and the second same-page store.
+    const suffix = prepare(0x1007, 1), prefix = prepare(0x1000, 2);
+    let all = new DataView(f.engine.memory.buffer), state = f.slab();
+    versionPointer = state.getUint32(156, true);
+    assert(versionPointer > 0 && versionPointer % 8 === 0);
+    savedVersion = all.getBigUint64(versionPointer, true);
+    const backing = state.getUint32(84, true), length = state.getUint32(88, true) * 4096;
+    const slot = all.getUint32(state.getUint32(76, true) + 2 * 4, true) - 1;
+    const capacity = state.getUint32(112, true), bits = state.getUint32(100, true), slots = state.getUint32(104, true);
+    const expectedRam = new Uint8Array(f.engine.memory.buffer, backing, length).slice();
+    expectedRam.set([0x44, 0x33, 0x22, 0x11], slot * 4096);
+    all.setBigUint64(versionPointer, 0xfffffffffffffffen, true);
+
+    assert.equal(prefix(context), 7);
+    all = new DataView(f.engine.memory.buffer); state = f.slab();
+    assert.deepEqual([state.getUint32(40, true), state.getUint32(48, true), state.getUint32(56, true), state.getUint32(108, true)],
+      [0x1005, 3, 1, 1], 'the first ordinary store commits and retires exactly once');
+    assert.equal(all.getBigUint64(versionPointer, true), 0xfffffffffffffffen, 'generated ordinary stores still defer version publication');
+    assert.deepEqual(new Uint8Array(f.engine.memory.buffer, backing, length), expectedRam);
+    assert.equal(all.getUint8(bits + slot), 1);
+    assert.equal(all.getUint32(slots, true), slot);
+    const header = state.getUint32(72, true), rows = all.getUint32(header + 16, true), epoch = all.getUint32(header, true);
+    const row = all.getBigUint64(rows + 2 * 8, true);
+    assert.equal(Number(row >> 32n), epoch);
+    assert.equal(Number(row & 7n), 7, 'the actual native-bound store installed its ordinary-store proof');
+
+    assert.equal(api.cpu_runtime_instruction(context), 0);
+    all = new DataView(f.engine.memory.buffer); state = f.slab();
+    assert.equal(all.getBigUint64(versionPointer, true), 0xffffffffffffffffn, 'actual FNINIT service publishes the dirty batch to MAX');
+    assert.deepEqual([state.getUint32(40, true), state.getUint32(48, true), state.getUint32(56, true), state.getUint32(108, true)],
+      [0x1007, 2, 2, 0]);
+    assert.equal(all.getUint8(bits + slot), 0, 'published dirty bits are cleared');
+    const numeric = state.getUint32(124, true), fp = all.getUint32(numeric + 8, true);
+    assert.equal(all.getUint16(fp, true), 0x037f, 'the real FNINIT operation completed');
+    assert.notEqual(all.getUint32(header, true), epoch,
+      'reaching MAX during preserving FP publication must revoke every cached ordinary-store proof before continuation');
+    assert.deepEqual(new Uint8Array(f.engine.memory.buffer, backing, length), expectedRam);
+
+    const expectedState = new Uint8Array(f.engine.memory.buffer, context, 160).slice();
+    new DataView(expectedState.buffer).setUint32(52, 8, true);
+    const cleanBits = new Uint8Array(f.engine.memory.buffer, bits, capacity).slice();
+    const cleanSlots = new Uint8Array(f.engine.memory.buffer, slots, capacity * 4).slice();
+    // use the retained suffix directly; cpu_prepare here would mask the owner bug.
+    assert.equal(suffix(context), 8);
+    all = new DataView(f.engine.memory.buffer); state = f.slab();
+    assert.deepEqual(new Uint8Array(f.engine.memory.buffer, context, 160), expectedState,
+      'the exhausted second store changes only its failure status, with no work, retirement or dirty append');
+    assert.deepEqual(new Uint8Array(f.engine.memory.buffer, backing, length), expectedRam,
+      'the first store remains committed and the later same-page destination remains untouched');
+    assert.deepEqual(new Uint8Array(f.engine.memory.buffer, bits, capacity), cleanBits);
+    assert.deepEqual(new Uint8Array(f.engine.memory.buffer, slots, capacity * 4), cleanSlots);
+    assert.equal(all.getBigUint64(versionPointer, true), 0xffffffffffffffffn);
+    assert.deepEqual(registers.map((_, index) => state.getUint32(8 + index * 4, true)), registers);
+  } finally {
+    if (versionPointer && savedVersion !== undefined)
+      new DataView(f.engine.memory.buffer).setBigUint64(versionPointer, savedVersion, true);
+    if (active) f.engine.ok('cpu_end', ...KEY);
+    f.close();
+  }
+});

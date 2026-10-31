@@ -97,6 +97,9 @@ impl IndependentSession {
             self.memory_cache.invalidate();
             return Err(HostError::Memory(error));
         }
+        if memory.transaction_version() == u64::MAX {
+            self.memory_cache.invalidate();
+        }
         self.state.dirty_len = 0;
         Ok(())
     }
