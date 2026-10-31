@@ -2,6 +2,119 @@ use super::*;
 use crate::memory::{PageRange, Permissions};
 
 #[test]
+fn generated_structured_self_interior_and_forward_gate_preserve_exact_prefixes() {
+    use std::{
+        fs,
+        process::Command,
+        time::{SystemTime, UNIX_EPOCH},
+    };
+    let scratch = std::env::temp_dir().join(format!(
+        "ring3-runtime-structured-prefixes-{}-{}",
+        std::process::id(),
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    fs::create_dir(&scratch).unwrap();
+    let mut memory = AddressSpace::new(1).unwrap();
+    memory
+        .map_zeroed(
+            PageRange::new(GuestAddress(0x1000), 1).unwrap(),
+            Permissions::ALL,
+        )
+        .unwrap();
+    memory
+        .write(
+            GuestAddress(0x1000),
+            &[0x90, 0x40, 0x8b, 0x16, 0xe2, 0xfb, 0x0f, 0x0b],
+        )
+        .unwrap();
+    let unit = compile_with_gates(
+        &memory,
+        GuestAddress(0x1000),
+        8,
+        &[(GuestAddress(0x1006), 23)],
+    )
+    .unwrap();
+    assert_eq!(unit.entries, [0x1000, 0x1001, 0x1002, 0x1004, 0x1006]);
+    fs::write(scratch.join("loop.wasm"), unit.wasm).unwrap();
+    memory
+        .write(
+            GuestAddress(0x1000),
+            &[0x40, 0x43, 0x49, 0x75, 0xfc, 0x0f, 0x0b],
+        )
+        .unwrap();
+    let unit = compile_with_gates(
+        &memory,
+        GuestAddress(0x1000),
+        8,
+        &[(GuestAddress(0x1005), 23)],
+    )
+    .unwrap();
+    assert_eq!(unit.entries, [0x1000, 0x1001, 0x1002, 0x1003, 0x1005]);
+    fs::write(scratch.join("jcc.wasm"), unit.wasm).unwrap();
+    let result = Command::new("node").arg("--input-type=module").arg("-e").arg(r#"
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+const memory=new WebAssembly.Memory({initial:2}),ram=new Uint8Array(memory.buffer),d=new DataView(memory.buffer),ctx=0x8000;
+const word=(at,v)=>d.setUint32(ctx+at,v>>>0,true);
+let mode='',reads=[];
+const imports={env:{memory},cpu:{
+ read(p,a,w){assert.equal(p,ctx);assert.equal(a,0x6000);assert.equal(w,4);reads.push(ram.slice());
+  if(reads.length===2&&mode==='throw')throw Error('authored-second-read-trap');
+  if(reads.length===2&&mode==='fault'){word(52,3);word(60,a);word(64,0x10104);word(68,4);}else word(52,0);
+  return 0x12345678;
+ },write(){throw Error('this loop has no writes');}
+}};
+const run=(await WebAssembly.instantiate(fs.readFileSync(`${process.argv[1]}/loop.wasm`),imports)).instance.exports.run;
+const runJcc=(await WebAssembly.instantiate(fs.readFileSync(`${process.argv[1]}/jcc.wasm`),imports)).instance.exports.run;
+function init(pc,quota){
+  for(let i=0;i<ram.length;i++)ram[i]=(i*13+29)&255;ram.fill(0,ctx,ctx+160);
+  word(0,1);word(4,160);[5,2,7,8,0x4800,10,0x6000,12].forEach((v,i)=>word(8+4*i,v));
+  word(40,pc);word(44,0x203);word(48,quota);word(56,0xfffffffc);word(152,63);reads=[];
+}
+function check(input,expect){
+  init(input.pc??0x1000,input.quota);mode=input.mode??'';
+  const before=ram.slice(),expected=before.slice(),view=new DataView(expected.buffer),set=(at,v)=>view.setUint32(ctx+at,v>>>0,true);
+  for(const[at,v]of[[8,expect.eax],[12,expect.ecx],[16,expect.edx],[40,expect.pc],[44,expect.flags],[48,input.quota-expect.steps],[52,expect.status],[56,(0xfffffffc+expect.steps)>>>0],...(expect.fields??[])])set(at,v);
+  assert.equal(run(ctx),expect.status);assert.deepEqual(ram,expected,'full state across structured self-interior and forward exit');
+  assert.equal(reads.length,expect.reads);for(const observed of reads)assert.deepEqual(observed,before,'no intermediate scalar publication on a linked hop');
+}
+for(const[quota,pc,eax,ecx,edx,flags,count]of[
+ [0,0x1000,5,2,7,0x203,0],[1,0x1001,5,2,7,0x203,0],
+ [2,0x1002,6,2,7,0x207,0],[3,0x1004,6,2,0x12345678,0x207,1],
+ [4,0x1001,6,1,0x12345678,0x207,1],[5,0x1002,7,1,0x12345678,0x203,1],
+ [6,0x1004,7,1,0x12345678,0x203,2],[7,0x1006,7,0,0x12345678,0x203,2],
+ [8,0x1006,7,0,0x12345678,0x203,2],
+])check({quota},{pc,eax,ecx,edx,flags,reads:count,steps:Math.min(quota,7),status:quota===8?5:2,fields:quota===8?[[68,23]]:[]});
+for(const quota of[6,7])check({pc:0x1001,quota},{pc:0x1006,eax:7,ecx:0,edx:0x12345678,flags:0x203,reads:2,steps:6,status:quota===7?5:2,fields:quota===7?[[68,23]]:[]});
+for(const quota of[6,8])check({quota,mode:'fault'},{pc:0x1002,eax:7,ecx:1,edx:0x12345678,flags:0x203,reads:2,steps:5,status:3,fields:[[60,0x6000],[64,0x10104],[68,4]]});
+init(0x1000,8);mode='throw';{const before=ram.slice();assert.throws(()=>run(ctx),/authored-second-read-trap/);assert.deepEqual(ram,before);assert.equal(reads.length,2);}
+for(const[quota,pc,eax,ebx,ecx,flags]of[
+ [0,0x1000,5,8,3,0x203],[1,0x1001,6,8,3,0x207],[2,0x1002,6,9,3,0x207],
+ [3,0x1003,6,9,2,0x203],[4,0x1001,6,9,2,0x203],[5,0x1002,6,10,2,0x207],
+ [6,0x1003,6,10,1,0x203],[7,0x1001,6,10,1,0x203],[8,0x1002,6,11,1,0x203],
+ [9,0x1003,6,11,0,0x247],[10,0x1005,6,11,0,0x247],[11,0x1005,6,11,0,0x247],
+]){
+ init(0x1000,quota);word(12,3);mode='';const expected=ram.slice(),view=new DataView(expected.buffer),set=(at,v)=>view.setUint32(ctx+at,v>>>0,true),steps=Math.min(quota,10),status=quota===11?5:2;
+ for(const[at,v]of[[8,eax],[12,ecx],[20,ebx],[40,pc],[44,flags],[48,quota-steps],[52,status],[56,(0xfffffffc+steps)>>>0]])set(at,v);
+ if(status===5)set(68,23);assert.equal(runJcc(ctx),status);assert.deepEqual(ram,expected,'root instruction executes once before canonical interior Jcc loop');assert.deepEqual(reads,[]);
+}
+console.log('canonical self-interior ownership, forward gate, every quota prefix, later fault and import trap retain full state and helper observations');
+"#).arg(&scratch).output().unwrap();
+    assert!(
+        result.status.success(),
+        "fixture {} failed:\n{}\n{}",
+        scratch.display(),
+        String::from_utf8_lossy(&result.stdout),
+        String::from_utf8_lossy(&result.stderr)
+    );
+    fs::remove_dir_all(scratch).unwrap();
+}
+
+
+#[test]
 fn generated_pending_flag_consumers_preserve_narrow_carry_overflow_and_partial_updates() {
     use std::{
         fs,

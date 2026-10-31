@@ -12,6 +12,71 @@ fn landing(entries: &[EntryPoint], pc: u32) -> i32 {
         })
 }
 
+fn static_targets(block: &Block) -> [Option<u32>; 2] {
+    let Some(last) = block.instructions.last() else {
+        return [None, None];
+    };
+    match *last.operation() {
+        Operation::Call {
+            target: BranchTarget::Direct(target),
+        }
+        | Operation::Jump {
+            target: BranchTarget::Direct(target),
+        } => [Some(target.0), None],
+        Operation::ConditionalJump { target, .. } | Operation::CountBranch { target, .. } => {
+            [Some(target.0), Some(last.next_pc().0)]
+        }
+        Operation::Return { .. } | Operation::Call { .. } | Operation::Jump { .. } => [None, None],
+        _ => [Some(last.next_pc().0), None],
+    }
+}
+
+pub(super) fn self_loop(blocks: &[Block], entries: &[EntryPoint], index: usize) -> bool {
+    blocks[index].gate.is_none()
+        && static_targets(&blocks[index])
+            .into_iter()
+            .flatten()
+            .any(|pc| {
+                let encoded = landing(entries, pc);
+                encoded >= 0 && (encoded as usize >> 6) == index
+            })
+}
+
+pub(super) fn branch_known(
+    out: &mut Output,
+    blocks: &[Block],
+    entries: &[EntryPoint],
+    index: usize,
+    self_loop: bool,
+) {
+    let targets = static_targets(&blocks[index]);
+    for pc in targets.into_iter().flatten() {
+        let encoded = landing(entries, pc);
+        if encoded < 0 {
+            continue;
+        }
+        let target_block = encoded as usize >> 6;
+        let depth = if target_block == index && self_loop {
+            0
+        } else if target_block > index {
+            (target_block - index - 1) as u32 + u32::from(self_loop)
+        } else {
+            continue;
+        };
+        if targets[1].is_some() {
+            out.c()
+                .local_get(A)
+                .i32_const(encoded)
+                .i32_eq()
+                .if_(BlockType::Empty)
+                .br(depth + 1)
+                .end();
+        } else {
+            out.c().br(depth);
+        }
+    }
+}
+
 pub(super) fn next(
     out: &mut Output,
     blocks: &[Block],

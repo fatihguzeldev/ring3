@@ -223,15 +223,19 @@ pub(super) fn emit(blocks: &[Block], entries: &[EntryPoint]) -> Vec<u8> {
     for (block_index, block) in blocks.iter().enumerate() {
         out.c().end();
         let remaining_blocks = block_count - block_index as u32;
+        let self_loop = routing::self_loop(blocks, entries, block_index);
+        let local_loop = u32::from(self_loop);
+        if self_loop {
+            out.c().loop_(BlockType::Empty);
+        }
         let landing_count = (block.instructions.len() + usize::from(block.gate.is_some())) as u32;
         for _ in 0..landing_count {
             out.c().block(BlockType::Empty);
         }
-        out.c()
-            .local_get(A)
-            .i32_const(63)
-            .i32_and()
-            .br_table(0..landing_count, landing_count + remaining_blocks - 1);
+        out.c().local_get(A).i32_const(63).i32_and().br_table(
+            0..landing_count,
+            landing_count + remaining_blocks - 1 + local_loop,
+        );
         for instruction in &block.instructions {
             out.c().end();
             out.c().local_get(REMAIN).i32_eqz().if_(BlockType::Empty);
@@ -278,10 +282,14 @@ pub(super) fn emit(blocks: &[Block], entries: &[EntryPoint]) -> Vec<u8> {
                 .i32_const(-2)
                 .i32_eq()
                 .if_(BlockType::Empty)
-                .br(remaining_blocks + 2)
+                .br(remaining_blocks + 2 + local_loop)
                 .end();
         }
-        out.c().br(remaining_blocks);
+        routing::branch_known(&mut out, blocks, entries, block_index, self_loop);
+        out.c().br(remaining_blocks + local_loop);
+        if self_loop {
+            out.c().end();
+        }
     }
     out.c().end();
     out.exit(0);
