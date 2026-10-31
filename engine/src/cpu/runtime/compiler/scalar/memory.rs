@@ -164,9 +164,11 @@ fn translate(out: &mut Output, width: u32, required: u32) {
         .local_get(ADDRESS)
         .i32_const(12)
         .i32_shr_u()
-        .local_set(PAGE)
-        .local_get(CACHE)
-        .if_(BlockType::Empty)
+        .local_set(PAGE);
+    if !out.native_memory_bound {
+        out.c().local_get(CACHE).if_(BlockType::Empty);
+    }
+    out.c()
         .local_get(ADDRESS)
         .i32_const(4095)
         .i32_and()
@@ -220,8 +222,11 @@ fn translate(out: &mut Output, width: u32, required: u32) {
         .i32_const(1)
         .local_set(READY)
         .end()
-        .end()
-        .end()
+        .end();
+    if !out.native_memory_bound {
+        out.c().end();
+    }
+    out.c()
         .local_get(READY)
         .i32_eqz()
         .if_(BlockType::Empty)
@@ -233,11 +238,11 @@ fn translate(out: &mut Output, width: u32, required: u32) {
         .i32_const(3)
         .i32_and()
         .local_set(CACHE_FLAGS)
-        .local_get(READY)
-        .local_get(CACHE)
-        .i32_eqz()
-        .i32_eqz()
-        .i32_and()
+        .local_get(READY);
+    if !out.native_memory_bound {
+        out.c().local_get(CACHE).i32_eqz().i32_eqz().i32_and();
+    }
+    out.c()
         .local_get(SLOT)
         .i32_const(0x000f_ffff)
         .i32_le_u()
@@ -319,12 +324,11 @@ pub(super) fn read(out: &mut Output, width: u32, destination: u32) {
 }
 
 fn admit_store(out: &mut Output) {
+    out.c().local_get(READY);
+    if !out.native_memory_bound {
+        out.c().local_get(CACHE).i32_eqz().i32_eqz().i32_and();
+    }
     out.c()
-        .local_get(READY)
-        .local_get(CACHE)
-        .i32_eqz()
-        .i32_eqz()
-        .i32_and()
         .local_get(CACHE_FLAGS)
         .i32_const(4)
         .i32_and()
@@ -361,12 +365,11 @@ fn admit_store(out: &mut Output) {
     }
     out.c().else_();
     admit_store_uncached(out);
+    out.c().local_get(READY);
+    if !out.native_memory_bound {
+        out.c().local_get(CACHE).i32_eqz().i32_eqz().i32_and();
+    }
     out.c()
-        .local_get(READY)
-        .local_get(CACHE)
-        .i32_eqz()
-        .i32_eqz()
-        .i32_and()
         .local_get(SLOT)
         .i32_const(0x000f_ffff)
         .i32_le_u()
