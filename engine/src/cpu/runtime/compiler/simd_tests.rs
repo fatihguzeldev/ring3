@@ -35,6 +35,13 @@ fn generated_simd_exact_add_and_transport_preserve_banks_and_atomic_memory() {
         ("add-register", vec![0x0f, 0x58, 0xc1], 1),
         ("add-self", vec![0x0f, 0x58, 0xc0], 1),
         (
+            "integer-prefix",
+            vec![0xb8, 0x78, 0x56, 0x34, 0x12, 0x0f, 0x28, 0xc1],
+            2,
+        ),
+        ("x87-then-simd", vec![0xd9, 0xe8, 0x0f, 0x28, 0xc1], 2),
+        ("simd-then-x87", vec![0x0f, 0x28, 0xc1, 0xd9, 0xe8], 2),
+        (
             "kernel",
             vec![
                 0x0f, 0x28, 0x03, 0x0f, 0x58, 0x43, 0x10, 0x0f, 0x29, 0x43, 0x20,
@@ -55,7 +62,7 @@ const word=(at,value)=>data.setUint32(state+at,value>>>0,true),put=(at,value)=>d
 let reads=0,writes=0;
 const imports={env:{memory},cpu:{read(){reads++;throw Error('SIMD must use one complete wide proof or return to its service');},write(){writes++;throw Error('SIMD must never split a wide store into scalar helpers');}}};
 const functions=new Map();
-for(const name of['load','store','copy','self-copy','unaligned-load','unaligned-store','add-memory','add-register','add-self','kernel'])functions.set(name,(await WebAssembly.instantiate(fs.readFileSync(`${root}/${name}.wasm`),imports)).instance.exports.run);
+for(const name of['load','store','copy','self-copy','unaligned-load','unaligned-store','add-memory','add-register','add-self','integer-prefix','x87-then-simd','simd-then-x87','kernel'])functions.set(name,(await WebAssembly.instantiate(fs.readFileSync(`${root}/${name}.wasm`),imports)).instance.exports.run);
 const host=address=>{const slot=data.getUint32(map+(address>>>12)*4,true);assert(slot);return backing+(slot-1)*4096+(address&4095);};
 function setMemory(address,words){words.forEach((v,i)=>put(host(address+i*4),v));}
 function setXmm(index,words){words.forEach((v,i)=>put(simd+4+index*16+i*4,v));}
@@ -74,11 +81,12 @@ function init(address=0x3000,quota=1,mxcsr=0x1fbf){
   for(let i=0;i<4*4096;i++)ram[backing+i]=(i*13+19)&255;
   put(simd,mxcsr);setXmm(0,a);setXmm(1,b);setMemory(0x3000,b);setMemory(0x3010,b);reads=writes=0;
 }
-function expected(before,{status=0,next=0x1003,remaining=0,retired=1,xmm,memory:stored,dirty=false,vector}={}){
+function expected(before,{status=0,next=0x1003,remaining=0,retired=1,xmm,xmmAt=simd+4,x87Bank,memory:stored,dirty=false,vector}={}){
   const out=before.slice(),d=new DataView(out.buffer),set=(at,v)=>d.setUint32(at,v>>>0,true);
   for(const[at,v]of[[40,next],[48,remaining],[52,status],[56,retired]])set(state+at,v);
   if(vector!==undefined){set(state+60,0);set(state+64,0);set(state+68,vector);}
-  if(xmm)xmm.forEach((v,i)=>set(simd+4+i*4,v));
+  if(xmm)xmm.forEach((v,i)=>set(xmmAt+i*4,v));
+  if(x87Bank)out.set(x87Bank,x87);
   if(stored)stored[1].forEach((v,i)=>set(host(stored[0]+i*4),v));
   if(dirty){set(state+108,1);set(slots,0);out[bits]=1;}
   return out;
@@ -105,6 +113,45 @@ for(const[left,right,result]of[
   [[0,0x80000000,0x00800000,0xbf800000],[0x80000000,0x80000000,0x80800000,0x3f800000],[0,0x80000000,0,0]],
   [[0x7f7fffff,0x00800000,0x71800000,0x3f800000],[0xff7fffff,0x00800000,0x71800000,0x34000000],[0,0x01000000,0x72000000,0x3f800001]],
 ]){init();setXmm(0,left);setXmm(1,right);run('add-register',{xmm:result});}
+// An independent integer oracle uses exact units of 2^-149. It does not use
+// floating addition, TwoSum, or the emitter's exponent-gap admission shortcut.
+function exactAdd(a,b){
+  function units(bits){
+    bits>>>=0;const exponent=(bits>>>23)&255,fraction=bits&0x7fffff;
+    if(exponent===255||exponent===0&&fraction!==0)return null;
+    const magnitude=exponent===0?0n:BigInt(0x800000|fraction)<<BigInt(exponent-1);
+    return bits>>>31?-magnitude:magnitude;
+  }
+  const left=units(a),right=units(b);if(left===null||right===null)return null;
+  let sum=left+right;
+  if(sum===0n)return a===0x80000000&&b===0x80000000?0x80000000:0;
+  const negative=sum<0n;if(negative)sum=-sum;
+  const top=sum.toString(2).length-1;if(top<23||top>276)return null;
+  const shift=BigInt(top-23);if((sum&((1n<<shift)-1n))!==0n)return null;
+  return (((negative?0x80000000:0)|((top-22)<<23))|Number((sum>>shift)&0x7fffffn))>>>0;
+}
+assert.equal(exactAdd(0x3f800000,0xb3800000),0x3f7fffff);
+assert.equal(exactAdd(0x00800001,0x80800000),null);
+assert.equal(exactAdd(0x80000000,0x80000000),0x80000000);
+assert.equal(exactAdd(0x3f800000,0x21800000),null);
+const gapPairs=[0,1,23,24,27,28,29,30,52,53,54,60,126].flatMap(gap=>{
+  const small=(127-gap)<<23;
+  return gap===0?[[0x3f800000,small]]:[[0x3f800000,small],[small,0x3f800000]];
+});
+const boundaryPairs=[
+  ...gapPairs,[0x3f800001,0xbf800000],[0x00800001,0x80800000],
+  [0x00800000,0x80800000],[0x00800000,0x00800000],
+  [0,0x7f7fffff],[0x80000000,0],[0x80000000,0x80000000],
+  [0x7f7fffff,0xff7fffff],[0x7f7fffff,0x7f7fffff],
+];
+for(const[p,q]of boundaryPairs)for(let signs=0;signs<4;signs++)for(let lane=0;lane<4;lane++){
+  const left=[...a],right=[...b];left[lane]=(p^((signs&1)?0x80000000:0))>>>0;right[lane]=(q^((signs&2)?0x80000000:0))>>>0;
+  const result=left.map((v,i)=>exactAdd(v,right[i]));
+  for(const name of['add-register','add-memory'])for(const sticky of[0,63]){
+    init(0x3000,1,0x1f80|sticky);setXmm(0,left);setXmm(1,right);setMemory(0x3000,right);
+    if(result.includes(null))miss(name);else run(name,{xmm:result});
+  }
+}
 // Each budget boundary observes exactly the completed prefix of the existing kernel.
 for(const quota of[1,2,3]){
   init(0x3000,quota);setMemory(0x3000,a);setMemory(0x3010,b);
@@ -129,6 +176,36 @@ for(const change of[
   ()=>word(124,0),()=>word(124,0xfffffff0),()=>word(124,view+1),()=>put(view,2),()=>put(view+4,36),
   ()=>put(view+36,0),()=>put(view+36,0xfffffffc),()=>put(view+36,simd+1),()=>put(view+36,0x3ff80),
 ]){init();change();miss('copy');}
+for(const change of[
+  ()=>word(124,0),()=>word(124,0xfffffff0),()=>word(124,view+1),()=>put(view,2),()=>put(view+4,36),
+  ()=>put(view+36,0),()=>put(view+36,simd+1),()=>put(view+36,0x3ff80),
+])for(const quota of[0,1,2]){
+  init(0x3000,quota);change();const want=expected(ram.slice(),{status:quota===2?7:2,next:quota?0x1005:0x1000,remaining:quota-(quota?1:0),retired:quota?1:0});
+  if(quota)new DataView(want.buffer).setUint32(state+8,0x12345678,true);
+  assert.equal(functions.get('integer-prefix')(state),quota===2?7:2);
+  assert.deepEqual(ram,want,'first reached SIMD validates after the exact integer prefix');
+  assert.deepEqual([reads,writes],[0,0]);
+}
+function firstOneBank(){
+  const bank=ram.slice(x87,x87+100),d=new DataView(bank.buffer);
+  for(const[at,value]of[[2,0x7d00],[4,0x3fff],[6,0x1e8],[16,0x1b]])d.setUint16(at,value,true);
+  d.setUint32(8,0x1000,true);bank.set([0,0,0,0,0,0,0,0x80,0xff,0x3f],90);return bank;
+}
+// A valid x87 prefix proves only the 36-byte view, not the SIMD extension.
+for(const change of[()=>put(view+4,36),()=>put(view+36,0)]){
+  init(0x3000,2);data.setUint16(x87,0x037f,true);data.setUint16(x87+2,0x4700,true);data.setUint16(x87+4,0xffff,true);change();
+  run('x87-then-simd',{status:7,next:0x1002,remaining:1,retired:1,x87Bank:firstOneBank()});
+}
+init(0x3000,2);data.setUint16(x87,0x037f,true);data.setUint16(x87+2,0x4700,true);data.setUint16(x87+4,0xffff,true);
+run('x87-then-simd',{next:0x1005,retired:2,xmm:b,x87Bank:firstOneBank()});
+// A successful SIMD proof does not validate the separate x87 bank pointer.
+init(0x3000,2);put(view+8,0);run('simd-then-x87',{status:7,next:0x1003,remaining:1,retired:1,xmm:b});
+// Reusing the exported function must validate a newly selected bank each time.
+init();const originalSIMD=ram.slice(simd,simd+132);run('copy',{xmm:b});
+const otherView=0x9100,otherSIMD=0xa400;
+ram.set(ram.slice(view,view+40),otherView);put(otherView+36,otherSIMD);ram.set(originalSIMD,otherSIMD);payload.forEach((v,i)=>put(otherSIMD+20+i*4,v));
+word(124,otherView);word(40,0x1000);word(48,1);word(52,0);word(56,0);run('copy',{xmm:payload,xmmAt:otherSIMD+4});
+put(otherView+36,0);word(40,0x1000);word(48,1);word(52,0);word(56,0);miss('copy');
 // Complete16-byte proof failures must defer without partial scalar reads/stores.
 for(const name of['load','store','add-memory'])for(const change of[
   ()=>put(map+3*4,0),()=>data.setUint8(permissions+3,8),()=>word(76,0),

@@ -46,6 +46,23 @@ fn generated_x87_transport_preserves_raw80_stack_metadata_and_fault_boundaries()
         fs::write(scratch.join(format!("{name}.wasm")), unit.wasm).unwrap();
         names.push(name.to_string());
     }
+    for (name, bytes, limit) in [
+        (
+            "integer-prefix",
+            vec![0xb8, 0x78, 0x56, 0x34, 0x12, 0xd9, 0xe8],
+            2,
+        ),
+        (
+            "control-prefix",
+            vec![0xd9, 0xe8, 0xd9, 0x2d, 0x0a, 0x30, 0, 0, 0xd9, 0xe8],
+            3,
+        ),
+    ] {
+        memory.write(GuestAddress(0x1000), &bytes).unwrap();
+        let unit = compile(&memory, GuestAddress(0x1000), limit).unwrap();
+        fs::write(scratch.join(format!("{name}.wasm")), unit.wasm).unwrap();
+        names.push(name.to_string());
+    }
     for index in 0..8_u8 {
         for (prefix, opcode) in [
             ("exchange", [0xd9, 0xc8 + index]),
@@ -94,6 +111,28 @@ init();u16(4,0);miss('one');
 init();setSlot(0,ONE);miss('exchange-1');
 init(0,0x37e,1);readFault=true;miss('load');assert.equal(reads,0);
 for(const mutate of[()=>word(124,0),()=>word(124,0xfffffff0),()=>word(124,view+1),()=>put(view,2),()=>put(view+4,32),()=>put(view+8,0),()=>put(view+8,0xffd0),()=>put(view+8,fp+1)]){init();mutate();miss('one');assert.equal(reads+writes,0);}
+// Invalid numerical pointers belong to the first reached numeric instruction,
+// after the completed integer prefix and its exact budget boundary.
+for(const mutate of[()=>word(124,0),()=>word(124,0xfffffff0),()=>word(124,view+1),()=>put(view,2),()=>put(view+4,32),()=>put(view+8,0),()=>put(view+8,0xffd0),()=>put(view+8,fp+1)])for(const quota of[0,1,2]){
+  init();word(48,quota);mutate();const want=new Uint8Array(memory.buffer).slice(),d=new DataView(want.buffer),completed=quota===0?0:1;
+  for(const[at,value]of[[8,completed?0x12345678:get(8)],[40,0x1000+completed*5],[48,quota-completed],[52,quota===2?7:2],[56,completed]])d.setUint32(state+at,value,true);
+  assert.equal(run.get('integer-prefix')(state),quota===2?7:2);
+  assert.deepEqual(new Uint8Array(memory.buffer),want,'integer prefix and unreached malformed view preserve exact full-memory state');
+  assert.equal(reads+writes,0);
+}
+// A control load inside one invocation must affect the next pending-MF check.
+init(0,0x037f,1);word(48,3);data.setUint16(0x300a,0x037e,true);before=bytes(fp);
+assert.equal(run.get('control-prefix')(state),7);
+assert.deepEqual([get(40),get(48),get(56)],[0x1008,1,2]);
+assertFP(expected(before,{control:0x037e,status:0xb881,tag:0x3fff,opcode:0x1e8,fip:0x1000,cs:0x1b,slots:[[ONE,7]]}));
+assert.deepEqual([reads,writes],[1,0]);
+// The same exported function starts with fresh pointer proofs on every call.
+init();const original=bytes(fp);finish('one',0x1002);const firstBank=bytes(fp),otherView=0x9900,otherFP=0xa100;
+new Uint8Array(memory.buffer,otherView,36).set(new Uint8Array(memory.buffer,view,36));put(otherView+8,otherFP);new Uint8Array(memory.buffer,otherFP,100).set(original);
+word(124,otherView);word(40,0x1000);word(48,1);word(52,0);word(56,0);finish('one',0x1002);
+assertFP(firstBank,'a subsequent invocation must not reuse the previous bank pointer');
+assert.deepEqual(bytes(otherFP),expected(original,{status:0x7d00,tag:0x3fff,opcode:0x1e8,fip:0x1000,cs:0x1b,slots:[[ONE,7]]}));
+const secondBank=bytes(otherFP);word(124,0);word(40,0x1000);word(48,1);word(52,0);word(56,0);miss('one');assert.deepEqual(bytes(otherFP),secondBank);
 for(const name of['load','pop-store','control-load']){init();setSlot(0,ONE);const before=bytes(fp);readFault=name!=='pop-store';writeFault=name==='pop-store';assert.equal(run.get(name)(state),3);assert.equal(get(40),0x1000);assert.equal(get(48),1);assert.equal(get(56),0);assertFP(before);}
 init(7);setSlot(7,ONE);before=bytes(fp);smc=true;finish('pop-store',0x1006,6);assert.equal(writes,1);assert.equal(data.getUint32(0x3004,true),0x3f800000);assertFP(expected(before,{status:get16(2),tag:0xffff,opcode:0x11d,fip:0x1000,cs:0x1b,fdp:0x3004,ds:0x23}));assert.equal(get16(2),0x4500);
 console.log('inline x87 raw80 normal/zero transport, allTOP/index stack ghost/tag/C1, metadata/selectors/control/status, failclosed view/special/pending/fault andcompletedSMC passed');

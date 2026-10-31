@@ -168,6 +168,7 @@ pub(super) fn emit(blocks: &[Block], entries: &[EntryPoint]) -> Vec<u8> {
             (9, ValType::F64),
             (5, ValType::I32),
             (6, ValType::I64),
+            (3, ValType::I32),
         ]),
     };
     out.c()

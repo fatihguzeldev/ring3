@@ -10,6 +10,8 @@ pub(super) const TMP: u32 = 38;
 pub(super) const RAW: u32 = 44;
 pub(super) const F32_VALUE: u32 = 46;
 pub(super) const VALUE: u32 = 49;
+const CHECKED_STATE: u32 = 69;
+pub(super) const CHECKED_VIEW: u32 = 71;
 
 const CONTROL: u64 = offset_of!(X87State, control) as u64;
 const STATUS: u64 = offset_of!(X87State, status) as u64;
@@ -97,6 +99,12 @@ fn pointer(out: &mut Output, local: u32, length: i64) {
 
 /// numeric view v1 is independent of NumericState's layout.
 pub(super) fn enter(out: &mut Output, waiting: bool) {
+    // these proofs live only in this function invocation. the owned boxes do
+    // not move across trusted memory helpers; mutable x87 state is read below.
+    out.c()
+        .local_get(CHECKED_STATE)
+        .i32_eqz()
+        .if_(BlockType::Empty);
     out.c().local_get(0).i32_load(mem(124)).local_set(TMP);
     pointer(out, TMP, 36);
     out.c()
@@ -112,6 +120,14 @@ pub(super) fn enter(out: &mut Output, waiting: bool) {
     miss_if(out);
     out.c().local_get(TMP).i32_load(mem(8)).local_set(STATE);
     pointer(out, STATE, size_of::<X87State>() as i64);
+    out.c()
+        .local_get(STATE)
+        .local_set(CHECKED_STATE)
+        .local_get(TMP)
+        .local_set(CHECKED_VIEW)
+        .end()
+        .local_get(CHECKED_STATE)
+        .local_set(STATE);
     if waiting {
         out.c()
             .local_get(STATE)
@@ -519,8 +535,7 @@ pub(super) fn metadata(out: &mut Output, opcode: u16, memory: bool) {
         .i32_const(i32::from(opcode))
         .i32_store16(mem(OPCODE))
         .local_get(STATE)
-        .local_get(0)
-        .i32_load(mem(124))
+        .local_get(CHECKED_VIEW)
         .i32_load(mem(12 + SegmentRegister::Cs.index() as u64 * 4))
         .i32_store16(mem(CS));
     if memory {
@@ -529,8 +544,7 @@ pub(super) fn metadata(out: &mut Output, opcode: u16, memory: bool) {
             .local_get(OFFSET)
             .i32_store(mem(FDP))
             .local_get(STATE)
-            .local_get(0)
-            .i32_load(mem(124))
+            .local_get(CHECKED_VIEW)
             .local_get(SEGMENT)
             .i32_const(2)
             .i32_shl()

@@ -6,6 +6,7 @@ use std::mem::{offset_of, size_of};
 
 const STATE: u32 = 58;
 const WORDS: [u32; 4] = [59, 60, 61, 62];
+const CHECKED_STATE: u32 = 70;
 // each instruction owns these floating scratch locals until it returns. no
 // x87 instruction or canonical service runs during a speculative SIMD lane.
 const NARROW: u32 = 47;
@@ -13,8 +14,6 @@ const LEFT: u32 = 50;
 const RIGHT: u32 = 51;
 const WIDE: u32 = 52;
 const RESULT: u32 = 53;
-const VIRTUAL_RIGHT: u32 = 54;
-const ERROR: u32 = 55;
 
 const MXCSR: u64 = offset_of!(SimdState, mxcsr) as u64;
 const XMM: u64 = offset_of!(SimdState, xmm) as u64;
@@ -87,6 +86,12 @@ fn pointer(out: &mut Output, local: u32, length: i64) {
 }
 
 fn enter(out: &mut Output) {
+    // an x87 proof covers only the 36-byte prefix. validate this bank's
+    // 40-byte view independently, once in each function invocation.
+    out.c()
+        .local_get(CHECKED_STATE)
+        .i32_eqz()
+        .if_(BlockType::Empty);
     out.c().local_get(0).i32_load(mem(124)).local_set(A);
     pointer(out, A, 40);
     out.c()
@@ -102,6 +107,14 @@ fn enter(out: &mut Output) {
     miss_if(out);
     out.c().local_get(A).i32_load(mem(36)).local_set(STATE);
     pointer(out, STATE, size_of::<SimdState>() as i64);
+    out.c()
+        .local_get(STATE)
+        .local_set(CHECKED_STATE)
+        .local_get(A)
+        .local_set(x87::CHECKED_VIEW)
+        .end()
+        .local_get(CHECKED_STATE)
+        .local_set(STATE);
     // SSE has no pending-x87 exception check and does not alias its stack.
     out.c()
         .local_get(STATE)
@@ -189,26 +202,22 @@ fn add_lane(out: &mut Output, destination: u8, lane: usize, bits: u32) {
         .local_get(RIGHT)
         .f64_add()
         .local_set(WIDE);
-    // TwoSum rejects exact addends lost even by f64, such as 1 + 2^-60.
-    // all binary32 operands and these intermediates are in f64's normal range.
+    // an inexact f64 sum of binary32 inputs requires a wide exponent gap.
+    // subtracting the larger operand is then exact by Sterbenz and exposes
+    // the lost addend. check both orders to avoid selecting that operand.
+    // the 2^-149 input grid keeps every nonzero exact difference normal in f64.
     out.c()
         .local_get(WIDE)
         .local_get(LEFT)
         .f64_sub()
-        .local_set(VIRTUAL_RIGHT)
-        .local_get(LEFT)
-        .local_get(WIDE)
-        .local_get(VIRTUAL_RIGHT)
-        .f64_sub()
-        .f64_sub()
         .local_get(RIGHT)
-        .local_get(VIRTUAL_RIGHT)
+        .f64_ne()
+        .local_get(WIDE)
+        .local_get(RIGHT)
         .f64_sub()
-        .f64_add()
-        .local_set(ERROR)
-        .local_get(ERROR)
-        .f64_const(0.0.into())
-        .f64_ne();
+        .local_get(LEFT)
+        .f64_ne()
+        .i32_or();
     miss_if(out);
     out.c()
         .local_get(WIDE)
