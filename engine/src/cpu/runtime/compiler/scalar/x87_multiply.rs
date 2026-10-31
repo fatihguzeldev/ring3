@@ -8,10 +8,10 @@ const SIGN: u32 = 41;
 const INEXACT: u32 = 42;
 const INCREMENTED: u32 = 43;
 const TEMPORARY: u32 = 45;
-const X: u32 = 63;
-const Y: u32 = 64;
-const LOW: u32 = 65;
-const HIGH: u32 = 66;
+pub(super) const X: u32 = 63;
+pub(super) const Y: u32 = 64;
+pub(super) const LOW: u32 = 65;
+pub(super) const HIGH: u32 = 66;
 const CROSS_X: u32 = 67;
 const CROSS_Y: u32 = 68;
 
@@ -128,7 +128,7 @@ fn memory_operand(out: &mut Output, address: EffectiveAddress, width: u32) {
     }
 }
 
-fn product(out: &mut Output) {
+pub(super) fn product(out: &mut Output) {
     // four unsigned 32-bit products fit exactly in their 64-bit destinations.
     out.c()
         .local_get(X)

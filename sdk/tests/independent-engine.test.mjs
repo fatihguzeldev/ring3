@@ -863,6 +863,32 @@ test('actual inexact PC24 division publishes PE and C1 before a later store can 
   } finally {f.close();}
 });
 
+for (const c of [
+  {name: 'one third', left: [0, 0, 0, 0, 0, 0, 0, 0x80, 0xff, 0x3f],
+    right: [0, 0, 0, 0, 0, 0, 0, 0xc0, 0, 0x40], raw: [0, 0xa8, 0xaa, 0xaa, 0xaa, 0xaa, 0xaa, 0xaa, 0xfd, 0x3f], status: 0x4020, services: 0},
+  {name: 'one tenth', left: [0, 0, 0, 0, 0, 0, 0, 0x80, 0xff, 0x3f],
+    right: [0, 0, 0, 0, 0, 0, 0, 0xa0, 2, 0x40], raw: [0, 0xd0, 0xcc, 0xcc, 0xcc, 0xcc, 0xcc, 0xcc, 0xfb, 0x3f], status: 0x4220, services: 0},
+  {name: 'lower binary64 range tie', left: [0, 0xf8, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 1, 0x3c],
+    right: [0, 0, 0, 0, 0, 0, 0, 0x80, 0, 0x40], raw: [0, 0xf8, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0, 0x3c], status: 0x4000, services: 1},
+]) test(`actual PC53 division ${c.name} preserves the strict raw result and immediate PE C1`, {skip}, () => {
+  const f = fixture([0xd8, 0xf1], {fpControl: 0x023f, fpStatus: 0x4200, execution: {budget: 1}});
+  try {
+    const bank = f.engine.base + 4236, arena = new DataView(f.engine.memory.buffer);
+    arena.setUint16(bank + 20, 0xfff0, true);
+    new Uint8Array(f.engine.memory.buffer, bank + 40, 20).set([...c.left, ...c.right]);
+    const scalar = new Uint8Array(f.engine.memory.buffer, f.engine.base, 56).slice(), banks = processBanks(f), fp = view(banks[0]);
+    view(scalar).setUint32(48, 0x1002, true); fp.setUint16(18, c.status, true);
+    fp.setUint16(22, 0xf1, true); fp.setUint32(24, 0x1000, true); fp.setUint16(32, 0x1b, true); banks[0].set(c.raw, 40);
+    const selected = f.cache.select(), state = f.slab(), backing = state.getUint32(84, true), length = state.getUint32(88, true) * 4096;
+    const ram = new Uint8Array(f.engine.memory.buffer, backing, length).slice(), run = f.cache.execute(selected);
+    assert.deepEqual([run.reason, run.retired, run.work, run.pc], [1, 1, 1, 0x1002]);
+    assert.deepEqual(new Uint8Array(f.engine.memory.buffer, f.engine.base, 56), scalar);
+    assert.deepEqual(processBanks(f), banks);
+    assert.deepEqual(new Uint8Array(f.engine.memory.buffer, backing, length), ram);
+    serviceCounts(f, c.services);
+  } finally {f.close();}
+});
+
 for (const control of [0x003f, 0x023f]) for (const negative of [false, true]) for (const shift of [0, 2000])
 test(`actual raw80 MUL preserves PC${control === 0x003f ? 24 : 53} sign ${negative} extended exponent ${shift} and immediate PE C1`, {skip}, () => {
   const f = fixture([0xd8, 0xc9], {fpControl: control, fpStatus: 0x4200, execution: {budget: 1}});

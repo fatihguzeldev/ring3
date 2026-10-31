@@ -17,6 +17,7 @@ mod simd;
 mod string;
 mod x87;
 mod x87_arithmetic;
+mod x87_divide;
 mod x87_multiply;
 
 const FLAGS: u32 = 9;

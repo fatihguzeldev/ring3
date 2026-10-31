@@ -66,7 +66,7 @@ fn lower(operation: Operation) -> Option<Arithmetic> {
     ) {
         return None;
     }
-    if memory_width == 8 && kind != X87Binary::Add {
+    if memory_width == 8 && !matches!(kind, X87Binary::Add | X87Binary::Divide) {
         return None;
     }
     Some(Arithmetic {
@@ -450,6 +450,10 @@ pub(super) fn emit(out: &mut Output, operation: Operation) -> bool {
         .if_(BlockType::Empty);
     if kind == X87Binary::Add {
         emit_pc53_add(out, destination, source, address, memory_width);
+    } else if kind == X87Binary::Divide {
+        if !x87_divide::emit_pc53(out, operation) {
+            out.exit(7);
+        }
     } else {
         out.exit(7);
     }
