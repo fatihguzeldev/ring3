@@ -9,22 +9,31 @@ const BIT: u32 = 31;
 const CACHE: u32 = 79;
 const CACHE_ENTRY: u32 = 80;
 const CACHE_FLAGS: u32 = 81;
-const CACHE_GENERATION: u32 = 82;
+const OWNER: u32 = 82;
 const CACHE_RECORD: u32 = 83;
 const CACHE_ROWS: u32 = 84;
-const BACKING: u32 = 85;
 
 pub(super) fn initialize_bound(out: &mut Output, binding: NativeMemoryBinding) {
     out.c()
         .i32_const(binding.header() as i32)
-        .local_tee(CACHE)
-        .i32_load(mem(0))
-        .local_set(CACHE_GENERATION)
+        .local_set(CACHE)
         .i32_const(binding.rows() as i32)
-        .local_set(CACHE_ROWS)
+        .local_set(CACHE_ROWS);
+    pack_owner(out);
+}
+
+fn pack_owner(out: &mut Output) {
+    out.c()
+        .local_get(CACHE)
+        .i32_load(mem(0))
+        .i64_extend_i32_u()
+        .i64_const(32)
+        .i64_shl()
         .local_get(0)
         .i32_load(mem(84))
-        .local_set(BACKING);
+        .i64_extend_i32_u()
+        .i64_or()
+        .local_set(OWNER);
 }
 
 pub(super) fn initialize(out: &mut Output) {
@@ -66,8 +75,11 @@ pub(super) fn initialize(out: &mut Output) {
         .i32_and()
         .local_get(CACHE)
         .i32_load(mem(0))
-        .local_tee(CACHE_GENERATION)
-        .i32_eqz()
+        .i64_extend_i32_u()
+        .i64_const(32)
+        .i64_shl()
+        .local_tee(OWNER)
+        .i64_eqz()
         .i32_eqz()
         .i32_and()
         .local_get(CACHE)
@@ -113,22 +125,18 @@ pub(super) fn initialize(out: &mut Output) {
         .i32_const(0)
         .local_set(CACHE)
         .end()
+        .local_get(OWNER)
         .local_get(0)
         .i32_load(mem(84))
-        .local_set(BACKING);
+        .i64_extend_i32_u()
+        .i64_or()
+        .local_set(OWNER);
 }
 
 fn reload(out: &mut Output) {
-    out.c()
-        .local_get(CACHE)
-        .if_(BlockType::Empty)
-        .local_get(CACHE)
-        .i32_load(mem(0))
-        .local_set(CACHE_GENERATION)
-        .local_get(0)
-        .i32_load(mem(84))
-        .local_set(BACKING)
-        .end();
+    out.c().local_get(CACHE).if_(BlockType::Empty);
+    pack_owner(out);
+    out.c().end();
 }
 
 fn access(width: u32) -> MemArg {
@@ -173,11 +181,11 @@ fn translate(out: &mut Output, width: u32, required: u32) {
             memory_index: 0,
         })
         .local_tee(CACHE_RECORD)
+        .local_get(OWNER)
+        .i64_xor()
         .i64_const(32)
         .i64_shr_u()
-        .i32_wrap_i64()
-        .local_get(CACHE_GENERATION)
-        .i32_eq()
+        .i64_eqz()
         .local_get(CACHE_RECORD)
         .i32_wrap_i64()
         .local_tee(CACHE_FLAGS)
@@ -193,7 +201,8 @@ fn translate(out: &mut Output, width: u32, required: u32) {
         .local_tee(SLOT)
         .i32_const(12)
         .i32_shl()
-        .local_get(BACKING)
+        .local_get(OWNER)
+        .i32_wrap_i64()
         .i32_add()
         .local_get(ADDRESS)
         .i32_const(4095)
@@ -237,10 +246,9 @@ fn translate(out: &mut Output, width: u32, required: u32) {
 fn cache_store(out: &mut Output) {
     out.c()
         .local_get(CACHE_ENTRY)
-        .local_get(CACHE_GENERATION)
-        .i64_extend_i32_u()
-        .i64_const(32)
-        .i64_shl()
+        .local_get(OWNER)
+        .i64_const(-0x1_0000_0000)
+        .i64_and()
         .local_get(SLOT)
         .i32_const(12)
         .i32_shl()
