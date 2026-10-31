@@ -510,52 +510,23 @@ pub(super) fn recipe_for_flags(
     kind: BinaryKind,
     width: u32,
 ) -> Option<Recipe> {
-    if width != 32 {
+    if width != 32 || !matches!(kind, BinaryKind::Cmp | BinaryKind::Test) {
         return None;
     }
-    match operation {
-        Operation::Binary {
-            destination: Location32::Register(result),
-            source,
-            ..
-        } => {
-            if matches!(kind, BinaryKind::And | BinaryKind::Or | BinaryKind::Xor) {
-                return Some(Recipe::Logical { result });
-            }
-            let right = match source {
-                Value32::Immediate(value) => Operand::Immediate(value),
-                Value32::Register(register) => Operand::Register(register),
-                _ => return None,
-            };
-            if matches!(kind, BinaryKind::Cmp | BinaryKind::Test) {
-                return Some(Recipe::Predicate {
-                    kind,
-                    left: result,
-                    right,
-                });
-            }
-            if matches!(right, Operand::Register(register) if register == result) {
-                return None;
-            }
-            Some(Recipe::Arithmetic {
-                kind,
-                result,
-                right,
-            })
-        }
-        Operation::Unary {
-            kind: UnaryKind::Neg,
-            destination: Location32::Register(result),
-        } => Some(Recipe::Negate { result }),
-        Operation::Unary {
-            kind: UnaryKind::Inc | UnaryKind::Dec,
-            destination: Location32::Register(result),
-        } => Some(Recipe::Increment {
-            result,
-            decrement: kind == BinaryKind::Sub,
-        }),
-        _ => None,
-    }
+    let Operation::Binary {
+        destination: Location32::Register(left),
+        source,
+        ..
+    } = operation
+    else {
+        return None;
+    };
+    let right = match source {
+        Value32::Immediate(value) => Operand::Immediate(value),
+        Value32::Register(register) => Operand::Register(register),
+        _ => return None,
+    };
+    Some(Recipe::Predicate { kind, left, right })
 }
 
 impl Output {
@@ -627,33 +598,117 @@ impl Output {
     }
     pub(super) fn flags(&mut self, kind: BinaryKind, width: u32, preserve: bool) {
         if let Some(recipe) = recipe_for_flags(self.operation, kind, width) {
-            self.c().local_get(FLAGS).i64_const(0xffff_ffff).i64_and();
-            if recipe.carry_input() {
-                self.c()
-                    .local_get(CARRY)
-                    .i64_extend_i32_u()
-                    .i64_const(33)
-                    .i64_shl()
-                    .i64_const(1_i64 << 32)
-                    .i64_or();
-            } else {
-                self.c().i64_const(1_i64 << 32);
-            }
-            self.c().i64_or().local_set(FLAGS);
+            self.c()
+                .local_get(FLAGS)
+                .i64_const(0xffff_ffff)
+                .i64_and()
+                .i64_const(1_i64 << 32)
+                .i64_or()
+                .local_set(FLAGS);
             self.recipe = Some(recipe);
         } else {
-            self.c().local_get(FLAGS).i32_wrap_i64();
-            for local in [A, B, R, CARRY] {
-                self.c().local_get(local);
-            }
-            self.c()
-                .i32_const(descriptor(kind, width, preserve))
-                .call(3)
-                .i64_extend_i32_u()
-                .local_set(FLAGS);
+            self.eager_flags(kind, width, preserve);
             self.recipe = None;
         }
     }
+    fn eager_flags(&mut self, kind: BinaryKind, width: u32, preserve_carry: bool) {
+        let logical = matches!(
+            kind,
+            BinaryKind::And | BinaryKind::Or | BinaryKind::Xor | BinaryKind::Test
+        );
+        let subtract = matches!(kind, BinaryKind::Sub | BinaryKind::Sbb | BinaryKind::Cmp);
+        self.c()
+            .local_get(FLAGS)
+            .i32_wrap_i64()
+            .i32_const(if preserve_carry { !0x8d4 } else { !0x8d5 })
+            .i32_and();
+        self.c()
+            .local_get(R)
+            .i32_eqz()
+            .i32_const(6)
+            .i32_shl()
+            .i32_or();
+        self.c()
+            .local_get(R)
+            .i32_const((width - 1) as i32)
+            .i32_shr_u()
+            .i32_const(7)
+            .i32_shl()
+            .i32_or();
+        self.c()
+            .local_get(R)
+            .i32_const(255)
+            .i32_and()
+            .i32_popcnt()
+            .i32_const(1)
+            .i32_and()
+            .i32_eqz()
+            .i32_const(2)
+            .i32_shl()
+            .i32_or();
+        if !logical {
+            self.c()
+                .local_get(A)
+                .local_get(B)
+                .i32_xor()
+                .local_get(R)
+                .i32_xor()
+                .i32_const(16)
+                .i32_and()
+                .i32_or();
+            if subtract {
+                self.c()
+                    .local_get(A)
+                    .local_get(B)
+                    .i32_xor()
+                    .local_get(A)
+                    .local_get(R)
+                    .i32_xor()
+                    .i32_and();
+            } else {
+                self.c()
+                    .local_get(A)
+                    .local_get(R)
+                    .i32_xor()
+                    .local_get(B)
+                    .local_get(R)
+                    .i32_xor()
+                    .i32_and();
+            }
+            self.c()
+                .i32_const((width - 1) as i32)
+                .i32_shr_u()
+                .i32_const(11)
+                .i32_shl()
+                .i32_or();
+            if !preserve_carry {
+                self.c()
+                    .local_get(A)
+                    .i64_extend_i32_u()
+                    .local_get(B)
+                    .i64_extend_i32_u();
+                if matches!(kind, BinaryKind::Adc | BinaryKind::Sbb) {
+                    self.c().local_get(CARRY).i64_extend_i32_u().i64_add();
+                }
+                if subtract {
+                    self.c().i64_lt_u();
+                } else {
+                    self.c()
+                        .i64_add()
+                        .i64_const(width as i64)
+                        .i64_shr_u()
+                        .i32_wrap_i64();
+                }
+                self.c().i32_or();
+            }
+        }
+        self.c()
+            .i32_const(2)
+            .i32_or()
+            .i64_extend_i32_u()
+            .local_set(FLAGS);
+    }
+
     pub(super) fn deferred_bit(&mut self, bit: u32) {
         if let Some(recipe) = self.recipe.filter(|_| matches!(bit, 0 | 2 | 6 | 7 | 11)) {
             self.flags_pending();
