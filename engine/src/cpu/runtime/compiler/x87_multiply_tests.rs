@@ -374,6 +374,7 @@ fn generated_raw80_multiply_matches_strict_product_rounding_and_neutral_boundari
         (value(u64::MAX, 0x7ffe), one),              // rounding carry overflows the exponent
     ];
     pairs.extend(bounded_pairs());
+    pairs.extend(memory32_product_boundary_pairs());
     let carry = u128::from(u64::MAX) * u128::from(u64::MAX);
     assert_eq!(carry as u64, 1);
     assert_eq!((carry >> 64) as u64, 0xfffffffffffffffe);
@@ -538,6 +539,7 @@ fn generated_raw80_multiply_matches_strict_product_rounding_and_neutral_boundari
             0x023f,
             6,
         ),
+        ("m32", value(u64::MAX, 0x3fff), one, 0x037f, 7),
     ] {
         let mut before = initial(cw, 0, 0x4220);
         put(&mut before, 0, a);
@@ -564,7 +566,7 @@ fn generated_raw80_multiply_matches_strict_product_rounding_and_neutral_boundari
             ieee(b, width).unwrap()
         };
         let fault = matches!(variant, 5 | 6);
-        cases.push(format!("{{\"name\":\"{name}\",\"before\":{:?},\"after\":{:?},\"words\":{:?},\"width\":{width},\"fs\":false,\"status\":{},\"next\":4096,\"quota\":1,\"retired\":0,\"noRead\":{},\"cross\":{},\"unreadable\":{},\"fault\":{fault}}}",raw(before),raw(before),words,if fault{3}else{7},variant==2,variant==3,variant==4));
+        cases.push(format!("{{\"name\":\"{name}\",\"before\":{:?},\"after\":{:?},\"words\":{:?},\"width\":{width},\"fs\":false,\"status\":{},\"next\":4096,\"quota\":1,\"retired\":0,\"noRead\":{},\"cross\":{},\"unreadable\":{},\"fault\":{fault}}}",raw(before),raw(before),words,if fault{3}else{7},matches!(variant,2|7),variant==3,variant==4));
     }
     fs::write(scratch.join("cases.json"), format!("[{}]", cases.join(","))).unwrap();
     let result=Command::new("node").arg("--input-type=module").arg("-e").arg(r#"
@@ -583,4 +585,109 @@ console.log('raw80 MUL exact128 reference, PC24/PC53 signed ties/carries/PE/C1/a
         String::from_utf8_lossy(&result.stderr)
     );
     fs::remove_dir_all(scratch).unwrap();
+}
+
+// this checks proposal algebra against independent u128 and literal limbs.
+// it does not by itself establish that emitted Wasm uses that algebra.
+#[test]
+fn memory32_two_product_identity_matches_u128_and_literal_cross_carries() {
+    let check = |x: u64, y: u64| {
+        assert_eq!(y & ((1_u64 << 40) - 1), 0);
+        let b = y >> 40;
+        assert!((0x80_0000..=0xff_ffff).contains(&b));
+        let lo = (x & 0xffff_ffff) * b;
+        let hi = (x >> 32) * b;
+        assert!(lo < 1_u64 << 56 && hi < 1_u64 << 56);
+        let high_exact = (u128::from(hi) << 8) + u128::from(lo >> 24);
+        assert!(high_exact <= u128::from(u64::MAX));
+        let actual = [lo << 40, (hi << 8) + (lo >> 24)];
+        let exact = u128::from(x) * u128::from(y);
+        assert_eq!(
+            actual,
+            [exact as u64, (exact >> 64) as u64],
+            "x={x:016x} y={y:016x}"
+        );
+        actual
+    };
+    for (x, y, high, low) in [
+        (
+            0x8000_0000_0000_0000,
+            0x8000_0000_0000_0000,
+            0x4000_0000_0000_0000,
+            0,
+        ),
+        (
+            u64::MAX,
+            0x8000_0000_0000_0000,
+            0x7fff_ffff_ffff_ffff,
+            0x8000_0000_0000_0000,
+        ),
+        (
+            u64::MAX,
+            0xffff_ff00_0000_0000,
+            0xffff_feff_ffff_ffff,
+            0x0000_0100_0000_0000,
+        ),
+        (
+            0x8000_0000_ffff_ffff,
+            0x8000_0100_0000_0000,
+            0x4000_0080_8000_00ff,
+            0x7fff_ff00_0000_0000,
+        ),
+        (
+            0x8000_0001_0000_0000,
+            0xffff_ff00_0000_0000,
+            0x7fff_ff80_ffff_ff00,
+            0,
+        ),
+    ] {
+        assert_eq!(check(x, y), [low, high]);
+    }
+    for high in [0x8000_0000_u64, 0x8000_0001, 0xffff_fffe, 0xffff_ffff] {
+        for low in [0_u64, 1, 0x7fff_ffff, 0x8000_0000, 0xffff_fffe, 0xffff_ffff] {
+            for b in [0x80_0000_u64, 0x80_0001, 0xff_fffe, 0xff_ffff] {
+                check((high << 32) | low, b << 40);
+            }
+        }
+    }
+    let mut seed = 0x1234_5678_9abc_def0_u64;
+    for _ in 0..4096 {
+        seed = seed.wrapping_mul(6364136223846793005).wrapping_add(1);
+        let x = seed | (1_u64 << 63);
+        seed = seed.wrapping_mul(6364136223846793005).wrapping_add(1);
+        let b = (seed & 0x7f_ffff) | 0x80_0000;
+        check(x, b << 40);
+    }
+}
+
+// the existing generated strict-owner/full-bank/RAM matrix exercises these
+// full raw cells, both precisions and the unchanged result/service frontiers.
+fn memory32_product_boundary_pairs() -> Vec<(Value, Value)> {
+    let mut pairs = Vec::new();
+    for x in [
+        0x8000_0000_0000_0000,
+        0x8000_0000_ffff_ffff,
+        0x8000_0001_0000_0000,
+        0xffff_ffff_0000_0000,
+        u64::MAX,
+    ] {
+        for b in [0x80_0000_u64, 0x80_0001, 0xff_fffe, 0xff_ffff] {
+            let a = value(x, 0x3fff);
+            let b = value(b << 40, 0x3fff);
+            pairs.push((a, b));
+        }
+        pairs.push((neg(value(x, 0x3fff)), value(0xffff_ff00_0000_0000, 0x3fff)));
+    }
+    for x in [0x8000_0000_0000_0001, u64::MAX] {
+        for exponent in [1, 0x7ffe] {
+            for memory_exponent in [0x3ffe, 0x4000] {
+                for b in [0x80_0000_u64, 0xff_ffff] {
+                    let a = value(x, exponent);
+                    let b = value(b << 40, memory_exponent);
+                    pairs.push((if exponent == 1 { a } else { neg(a) }, b));
+                }
+            }
+        }
+    }
+    pairs
 }
