@@ -155,3 +155,137 @@ console.log('all instruction/gate landings, budget restart without prefix replay
     );
     fs::remove_dir_all(scratch).unwrap();
 }
+
+#[test]
+fn generated_routing_edges_preserve_call_smc_fault_and_zero_quota_priority() {
+    use std::{
+        fs,
+        process::Command,
+        time::{SystemTime, UNIX_EPOCH},
+    };
+    let scratch = std::env::temp_dir().join(format!(
+        "ring3-runtime-route-boundaries-{}-{}",
+        std::process::id(),
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    fs::create_dir(&scratch).unwrap();
+    let mut memory = AddressSpace::new(1).unwrap();
+    memory
+        .map_zeroed(
+            PageRange::new(GuestAddress(0x1000), 1).unwrap(),
+            Permissions::ALL,
+        )
+        .unwrap();
+    let mut call = [0x90; 32];
+    call[..5].copy_from_slice(&[0xe8, 0x0b, 0, 0, 0]);
+    call[16..18].copy_from_slice(&[0x43, 0xc3]);
+    let mut records = Vec::new();
+    for (name, code, limit, covered) in [
+        ("call-inside", &call[..], 3, None),
+        ("call-outside", &call[..], 1, None),
+        (
+            "jcc-outside",
+            &[0x75, 2, 0x90, 0xc3, 0xeb, 0xfe][..],
+            1,
+            None,
+        ),
+        (
+            "jcc-taken-inside",
+            &[0x75, 2, 0x90, 0xc3, 0xeb, 0xfe][..],
+            2,
+            None,
+        ),
+        (
+            "jcc-fallthrough-inside",
+            &[0x75, 2, 0x90, 0xc3, 0xeb, 0xfe][..],
+            2,
+            Some(0x1004),
+        ),
+        (
+            "jcc-both-inside",
+            &[0x75, 2, 0x90, 0xc3, 0xeb, 0xfe][..],
+            3,
+            None,
+        ),
+        ("loop-same-destination", &[0xe2, 0, 0x90, 0xc3][..], 2, None),
+    ] {
+        memory.write(GuestAddress(0x1000), code).unwrap();
+        let unit = compile_with_gates_until(&memory, GuestAddress(0x1000), limit, &[], |pc| {
+            covered == Some(pc.0)
+        })
+        .unwrap();
+        fs::write(scratch.join(format!("{name}.wasm")), &unit.wasm).unwrap();
+        records.push(format!(
+            "{{\"name\":\"{name}\",\"entries\":{:?}}}",
+            unit.entries
+        ));
+    }
+    fs::write(
+        scratch.join("entries.json"),
+        format!("[{}]", records.join(",")),
+    )
+    .unwrap();
+    let result = Command::new("node").arg("--input-type=module").arg("-e").arg(r#"
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+const root=process.argv[1],memory=new WebAssembly.Memory({initial:2}),ram=new Uint8Array(memory.buffer),data=new DataView(memory.buffer),ptr=0x8000;
+const word=(at,value)=>data.setUint32(ptr+at,value>>>0,true);
+let mode='',reads=[],writes=[];
+function fault(address,access,reason){word(52,3);word(60,address);word(64,4|(access<<8)|(reason<<16));word(68,4);}
+const imports={env:{memory},cpu:{
+  read(context,address,width){assert.equal(context,ptr);assert.equal(width,4);address>>>=0;reads.push([address,width]);if(mode==='read-fault'){fault(address,1,1);return 0;}word(52,0);return data.getUint32(address,true);},
+  write(context,address,width,value){assert.equal(context,ptr);assert.equal(width,4);address>>>=0;writes.push([address,width,value>>>0]);if(mode==='write-fault'){fault(address,2,2);return 3;}data.setUint32(address,value>>>0,true);word(52,mode==='smc'?6:0);return mode==='smc'?6:0;}
+}};
+const entries=new Map(JSON.parse(fs.readFileSync(`${root}/entries.json`)).map(item=>[item.name,item.entries])),units=new Map();
+for(const name of entries.keys())units.set(name,(await WebAssembly.instantiate(fs.readFileSync(`${root}/${name}.wasm`),imports)).instance.exports.run);
+assert.deepEqual(entries.get('call-inside'),[0x1000,0x1010,0x1011]);assert.deepEqual(entries.get('call-outside'),[0x1000]);
+assert.deepEqual(entries.get('jcc-outside'),[0x1000]);assert.deepEqual(entries.get('jcc-taken-inside'),[0x1000,0x1004]);assert.deepEqual(entries.get('jcc-fallthrough-inside'),[0x1000,0x1002]);assert.deepEqual(entries.get('jcc-both-inside'),[0x1000,0x1002,0x1004]);assert.deepEqual(entries.get('loop-same-destination'),[0x1000,0x1002]);
+function init(options){
+  for(let i=0;i<ram.length;i++)ram[i]=(i*29+7)&255;ram.fill(0,ptr,ptr+160);
+  word(0,1);word(4,160);[5,3,7,8,0x4800,10,11,12].forEach((v,i)=>word(8+4*i,v));word(40,options.pc??0x1000);word(44,options.flags??0x203);word(48,options.quota??1);word(52,0xabcdef01);word(56,11);word(60,0x11223344);word(64,0x55667788);word(68,0x12345678);word(124,0x9000);word(152,63);
+  data.setUint32(0x9000,1,true);data.setUint32(0x9004,40,true);data.setUint32(0x9008,0x9100,true);data.setUint32(0x9024,0x9200,true);
+  for(const[index,value]of Object.entries(options.registers??{}))word(8+4*Number(index),value);
+  if(options.stackTarget!==undefined)data.setUint32(0x4800,options.stackTarget,true);mode=options.mode??'';reads=[];writes=[];
+}
+function scenario(name,options,expect){
+  init(options);const expected=ram.slice(),d=new DataView(expected.buffer),set=(at,value)=>d.setUint32(ptr+at,value>>>0,true);
+  for(const[at,value]of[[40,expect.pc??options.pc??0x1000],[44,expect.flags??options.flags??0x203],[48,(options.quota??1)-(expect.work??0)],[52,expect.status],[56,11+(expect.retired??0)]])set(at,value);
+  for(const[index,value]of Object.entries(expect.registers??{}))set(8+4*Number(index),value);
+  for(const[at,value]of Object.entries(expect.fields??{}))set(Number(at),value);
+  for(const[address,value]of expect.stores??[])d.setUint32(address,value>>>0,true);
+  assert.equal(units.get(name)(ptr),expect.status,`${name}: return`);assert.deepEqual(ram,expected,`${name}: full GPR/FLAGS/numeric banks/RAM/work/retirement`);assert.deepEqual(reads,expect.reads??[],`${name}: reads`);assert.deepEqual(writes,expect.writes??[],`${name}: writes`);
+}
+for(const[name,inside]of[['call-inside',true],['call-outside',false]]){
+  scenario(name,{mode:'smc',quota:4},{status:6,pc:0x1010,work:1,retired:1,registers:{4:0x47fc},stores:[[0x47fc,0x1005]],writes:[[0x47fc,4,0x1005]]});
+  scenario(name,{}, {status:inside?2:0,pc:0x1010,work:1,retired:1,registers:{4:0x47fc},stores:[[0x47fc,0x1005]],writes:[[0x47fc,4,0x1005]]});
+  scenario(name,{mode:'write-fault',quota:4},{status:3,fields:{60:0x47fc,64:0x20204,68:4},writes:[[0x47fc,4,0x1005]]});
+  scenario(name,{quota:0,mode:'write-fault'},{status:2});
+}
+for(const[pc,status]of[[0x1000,2],[0x1010,2],[0x1011,2],[0x1005,0],[0x7777,0]])scenario('call-inside',{pc,quota:0},{status});
+
+for(const[name,takenInside,fallInside]of[['jcc-outside',false,false],['jcc-taken-inside',true,false],['jcc-fallthrough-inside',false,true],['jcc-both-inside',true,true]]){
+  for(const[taken,flags,pc]of[[true,0x203,0x1004],[false,0x243,0x1002]])scenario(name,{flags},{status:(taken?takenInside:fallInside)?2:0,pc,work:1,retired:1});
+}
+scenario('jcc-both-inside',{quota:2},{status:2,pc:0x1004,work:2,retired:2});
+scenario('jcc-both-inside',{quota:2,flags:0x243},{status:0,pc:0x1003,work:2,retired:2});
+for(const count of[0,1,2])scenario('loop-same-destination',{registers:{1:count}},{status:2,pc:0x1002,work:1,retired:1,registers:{1:(count-1)>>>0}});
+
+// the callee return resolves through guest memory, including a destination
+// outside this unit after its quota has reached zero.
+scenario('call-inside',{quota:3},{status:0,pc:0x1005,work:3,retired:3,flags:0x207,registers:{3:9},stores:[[0x47fc,0x1005]],reads:[[0x47fc,4]],writes:[[0x47fc,4,0x1005]]});
+for(const[target,status]of[[0x1010,2],[0x7777,0]])scenario('call-inside',{pc:0x1011,stackTarget:target},{status,pc:target,work:1,retired:1,registers:{4:0x4804},reads:[[0x4800,4]]});
+scenario('call-inside',{pc:0x1011,stackTarget:0x1010,mode:'read-fault'},{status:3,fields:{60:0x4800,64:0x10104,68:4},reads:[[0x4800,4]]});
+console.log('generated route boundaries: CALL inside/outside SMC and neutral fault, zero-quota PC priority, all Jcc destinations, single LOOP decrement, RET, full state/RAM/banks and helper effects passed');
+"#).arg(&scratch).output().unwrap();
+    assert!(
+        result.status.success(),
+        "fixture {} failed:\n{}\n{}",
+        scratch.display(),
+        String::from_utf8_lossy(&result.stdout),
+        String::from_utf8_lossy(&result.stderr)
+    );
+    fs::remove_dir_all(scratch).unwrap();
+}
