@@ -194,13 +194,13 @@ pub(super) fn materializer() -> Function {
     function
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum Operand {
     Immediate(u32),
     Register(Register32),
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum Recipe {
     Logical,
     Arithmetic { kind: BinaryKind, right: Operand },
@@ -446,38 +446,10 @@ impl Recipe {
     }
 }
 
-impl Output {
-    pub(super) fn materialize_flags(&mut self) {
-        if let Some(recipe) = self.recipe {
-            self.c().local_get(PENDING).if_(BlockType::Empty);
-            recipe.materialize(self);
-            self.c().i32_const(0).local_set(PENDING).end();
-        }
-    }
-
-    pub(super) fn materialize_flags_inline(&mut self) {
-        if let Some(recipe) = self.recipe {
-            self.c().local_get(PENDING).if_(BlockType::Empty);
-            recipe.materialize_inline(self);
-            self.c().i32_const(0).local_set(PENDING).end();
-        }
-    }
-
-    pub(super) fn canonicalize_flags(&mut self) {
-        self.materialize_flags_inline();
-        self.recipe = None;
-    }
-
-    pub(super) fn capture_carry(&mut self) {
-        self.c().local_get(FLAGS).i32_const(!1).i32_and();
-        self.bit(0);
-        self.c().i32_or().local_set(FLAGS);
-    }
-
-    pub(super) fn prepare_flags(&mut self, operation: Operation) {
-        self.operation = operation;
-        match operation {
-            Operation::Binary { .. }
+pub(super) fn full_producer(operation: Operation) -> bool {
+    matches!(
+        operation,
+        Operation::Binary { .. }
             | Operation::ArithmeticWord { .. }
             | Operation::ReadArithmeticWord { .. }
             | Operation::MemoryArithmeticWord { .. }
@@ -518,17 +490,142 @@ impl Output {
             | Operation::Unary {
                 kind: UnaryKind::Neg,
                 ..
-            } => return,
+            }
+    )
+}
+
+#[derive(Clone, Copy)]
+pub(super) enum Preparation {
+    Keep,
+    Canonical,
+    CarryOnly,
+    OverflowOnly,
+}
+
+pub(super) fn preparation(operation: Operation, recipe: Option<Recipe>) -> Preparation {
+    match operation {
+        _ if full_producer(operation) => Preparation::Keep,
+        Operation::Unary {
+            kind: UnaryKind::Inc | UnaryKind::Dec,
+            destination: Location32::Register(_),
+        } => Preparation::CarryOnly,
+        Operation::AhToFlags => Preparation::OverflowOnly,
+        _ if flags_flow::preserves(
+            operation,
+            recipe.and_then(Recipe::register),
+            numeric_preserves_flags(operation),
+        ) =>
+        {
+            Preparation::Keep
+        }
+        _ => Preparation::Canonical,
+    }
+}
+
+pub(super) fn recipe_for_flags(
+    operation: Operation,
+    kind: BinaryKind,
+    width: u32,
+) -> Option<Recipe> {
+    if width == 32 {
+        match operation {
+            Operation::Binary {
+                kind: BinaryKind::And | BinaryKind::Or | BinaryKind::Xor | BinaryKind::Test,
+                ..
+            } => Some(Recipe::Logical),
+            Operation::Binary {
+                destination,
+                source,
+                ..
+            } => {
+                let right = match source {
+                    Value32::Immediate(value) => Some(Operand::Immediate(value)),
+                    Value32::Register(register) => Some(Operand::Register(register)),
+                    _ => None,
+                };
+                right.filter(|right| !matches!((destination, right), (Location32::Register(left), Operand::Register(right)) if left == *right && kind != BinaryKind::Cmp))
+                        .map(|right| Recipe::Arithmetic { kind, right })
+            }
+            Operation::Unary {
+                kind: UnaryKind::Neg,
+                ..
+            } => Some(Recipe::Negate),
             Operation::Unary {
                 kind: UnaryKind::Inc | UnaryKind::Dec,
-                destination: Location32::Register(_),
-            } => {
+                ..
+            } => Some(Recipe::Increment {
+                decrement: kind == BinaryKind::Sub,
+            }),
+            _ => None,
+        }
+    } else {
+        None
+    }
+}
+
+pub(super) fn transfer(operation: Operation, incoming: Option<Recipe>) -> Option<Recipe> {
+    let prepared = match preparation(operation, incoming) {
+        Preparation::Keep => incoming,
+        _ => None,
+    };
+    match operation {
+        Operation::Binary { kind, .. } => recipe_for_flags(operation, kind, 32),
+        Operation::Unary {
+            kind: UnaryKind::Neg,
+            ..
+        } => recipe_for_flags(operation, BinaryKind::Sub, 32),
+        Operation::Unary {
+            kind: UnaryKind::Inc,
+            ..
+        } => recipe_for_flags(operation, BinaryKind::Add, 32),
+        Operation::Unary {
+            kind: UnaryKind::Dec,
+            ..
+        } => recipe_for_flags(operation, BinaryKind::Sub, 32),
+        _ if full_producer(operation) => None,
+        _ => prepared,
+    }
+}
+
+impl Output {
+    pub(super) fn materialize_flags(&mut self) {
+        if let Some(recipe) = self.recipe {
+            self.c().local_get(PENDING).if_(BlockType::Empty);
+            recipe.materialize(self);
+            self.c().i32_const(0).local_set(PENDING).end();
+        }
+    }
+
+    pub(super) fn materialize_flags_inline(&mut self) {
+        if let Some(recipe) = self.recipe {
+            self.c().local_get(PENDING).if_(BlockType::Empty);
+            recipe.materialize_inline(self);
+            self.c().i32_const(0).local_set(PENDING).end();
+        }
+    }
+
+    pub(super) fn canonicalize_flags(&mut self) {
+        self.materialize_flags_inline();
+        self.recipe = None;
+    }
+
+    pub(super) fn capture_carry(&mut self) {
+        self.c().local_get(FLAGS).i32_const(!1).i32_and();
+        self.bit(0);
+        self.c().i32_or().local_set(FLAGS);
+    }
+
+    pub(super) fn prepare_flags(&mut self, operation: Operation) {
+        self.operation = operation;
+        match preparation(operation, self.recipe) {
+            Preparation::Keep => {}
+            Preparation::Canonical => self.canonicalize_flags(),
+            Preparation::CarryOnly => {
                 self.capture_carry();
                 self.c().i32_const(0).local_set(PENDING);
                 self.recipe = None;
-                return;
             }
-            Operation::AhToFlags => {
+            Preparation::OverflowOnly => {
                 if self.recipe.is_some() {
                     self.c().local_get(FLAGS).i32_const(!0x800).i32_and();
                     self.bit(11);
@@ -541,55 +638,12 @@ impl Output {
                         .local_set(PENDING);
                     self.recipe = None;
                 }
-                return;
             }
-            _ => {}
         }
-        if flags_flow::preserves(
-            operation,
-            self.recipe.and_then(Recipe::register),
-            numeric_preserves_flags(operation),
-        ) {
-            return;
-        }
-        self.canonicalize_flags();
     }
 
     pub(super) fn flags(&mut self, kind: BinaryKind, width: u32, preserve: bool) {
-        let recipe = if width == 32 {
-            match self.operation {
-                Operation::Binary {
-                    kind: BinaryKind::And | BinaryKind::Or | BinaryKind::Xor | BinaryKind::Test,
-                    ..
-                } => Some(Recipe::Logical),
-                Operation::Binary {
-                    destination,
-                    source,
-                    ..
-                } => {
-                    let right = match source {
-                        Value32::Immediate(value) => Some(Operand::Immediate(value)),
-                        Value32::Register(register) => Some(Operand::Register(register)),
-                        _ => None,
-                    };
-                    right.filter(|right| !matches!((destination, right), (Location32::Register(left), Operand::Register(right)) if left == *right && kind != BinaryKind::Cmp))
-                        .map(|right| Recipe::Arithmetic { kind, right })
-                }
-                Operation::Unary {
-                    kind: UnaryKind::Neg,
-                    ..
-                } => Some(Recipe::Negate),
-                Operation::Unary {
-                    kind: UnaryKind::Inc | UnaryKind::Dec,
-                    ..
-                } => Some(Recipe::Increment {
-                    decrement: kind == BinaryKind::Sub,
-                }),
-                _ => None,
-            }
-        } else {
-            None
-        };
+        let recipe = recipe_for_flags(self.operation, kind, width);
         if let Some(recipe) = recipe {
             self.c().local_get(R).local_set(RESULT);
             if recipe.carry_input() {
