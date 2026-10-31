@@ -327,30 +327,35 @@ fn admit_store(out: &mut Output) {
         .i32_eqz()
         .i32_eqz()
         .i32_and()
-        .if_(BlockType::Empty)
-        .local_get(0)
-        .i32_load(mem(108))
-        .local_tee(LENGTH)
-        .local_get(0)
-        .i32_load(mem(112))
-        .i32_le_u()
-        .local_get(SLOT)
-        .local_get(0)
-        .i32_load(mem(112))
-        .i32_lt_u()
-        .i32_and()
-        .local_get(0)
-        .i32_load(mem(156))
-        .i64_load(MemArg {
-            offset: 0,
-            align: 3,
-            memory_index: 0,
-        })
-        .i64_const(-1)
-        .i64_ne()
-        .i32_and()
-        .local_set(READY)
-        .else_();
+        .if_(BlockType::Empty);
+    if out.native_memory_bound {
+        out.c().i32_const(1).local_set(READY);
+    } else {
+        out.c()
+            .local_get(0)
+            .i32_load(mem(108))
+            .local_tee(LENGTH)
+            .local_get(0)
+            .i32_load(mem(112))
+            .i32_le_u()
+            .local_get(SLOT)
+            .local_get(0)
+            .i32_load(mem(112))
+            .i32_lt_u()
+            .i32_and()
+            .local_get(0)
+            .i32_load(mem(156))
+            .i64_load(MemArg {
+                offset: 0,
+                align: 3,
+                memory_index: 0,
+            })
+            .i64_const(-1)
+            .i64_ne()
+            .i32_and()
+            .local_set(READY);
+    }
+    out.c().else_();
     admit_store_uncached(out);
     out.c()
         .local_get(READY)
@@ -379,7 +384,11 @@ fn admit_store(out: &mut Output) {
         .i32_load8_u(access(1))
         .local_tee(BIT)
         .i32_eqz()
-        .if_(BlockType::Empty)
+        .if_(BlockType::Empty);
+    if out.native_memory_bound {
+        out.c().local_get(0).i32_load(mem(108)).local_set(LENGTH);
+    }
+    out.c()
         .local_get(LENGTH)
         .local_get(0)
         .i32_load(mem(112))

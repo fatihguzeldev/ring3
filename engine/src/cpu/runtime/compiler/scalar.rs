@@ -178,6 +178,7 @@ pub(super) fn emit(
     exports.export("run", ExportKind::Func, 2);
     module.section(&exports);
     let mut out = Output {
+        native_memory_bound: binding.is_some(),
         function: Function::new([
             (8, ValType::I32),
             (1, ValType::I64),
@@ -351,6 +352,7 @@ pub(super) fn emit(
 }
 
 struct Output {
+    native_memory_bound: bool,
     function: Function,
     emitted_guest_write: bool,
     recipe: Option<deferred::Recipe>,
