@@ -14,70 +14,40 @@ fn present(function: &mut Function, fields: &[u64]) {
     }
 }
 
-#[derive(Clone, Copy)]
-enum TranslationSource {
-    Local(u32),
-    Constant(u32),
-}
-
-impl TranslationSource {
-    fn emit(self, function: &mut Function) {
-        match self {
-            Self::Local(local) => {
-                function.instructions().local_get(local);
-            }
-            Self::Constant(value) => {
-                function.instructions().i32_const(value as i32);
-            }
-        }
-    }
-}
-
-#[derive(Clone, Copy)]
-enum TranslationExit {
-    Return,
-    Inline([u32; 3]),
-}
-
-fn translation_body(
-    function: &mut Function,
-    address: TranslationSource,
-    width: TranslationSource,
-    required: TranslationSource,
-    [page, slot, permission]: [u32; 3],
-    exit: TranslationExit,
-) {
-    address.emit(function);
+pub(super) fn translation() -> Function {
+    let mut function = Function::new([(3, ValType::I32)]);
+    const PAGE: u32 = 4;
+    const SLOT: u32 = 5;
+    const PERMISSION: u32 = 6;
     function
         .instructions()
+        .local_get(1)
         .i32_const(12)
         .i32_shr_u()
-        .local_set(page);
-    present(function, &[76, 80, 84]);
-    address.emit(function);
+        .local_set(PAGE);
+    present(&mut function, &[76, 80, 84]);
     function
         .instructions()
+        .local_get(1)
         .i32_const(4095)
         .i32_and()
-        .i32_const(4096);
-    width.emit(function);
-    function
-        .instructions()
+        .i32_const(4096)
+        .local_get(2)
         .i32_sub()
         .i32_le_u()
         .i32_and()
         .if_(BlockType::Empty)
         .local_get(0)
         .i32_load(mem(76))
-        .local_get(page)
+        .local_get(PAGE)
         .i32_const(2)
         .i32_shl()
         .i32_add()
         .i32_load(mem(0))
-        .local_tee(slot)
+        .local_tee(SLOT)
         .i32_eqz()
         .i32_eqz()
-        .local_get(slot)
+        .local_get(SLOT)
         .local_get(0)
         .i32_load(mem(88))
         .i32_le_u()
@@ -85,106 +55,47 @@ fn translation_body(
         .if_(BlockType::Empty)
         .local_get(0)
         .i32_load(mem(80))
-        .local_get(page)
+        .local_get(PAGE)
         .i32_add()
         .i32_load8_u(MemArg {
             offset: 0,
             align: 0,
             memory_index: 0,
         })
-        .local_tee(permission);
-    required.emit(function);
-    function.instructions().i32_const(8).i32_or().i32_and();
-    required.emit(function);
-    function
-        .instructions()
+        .local_tee(PERMISSION)
+        .local_get(3)
+        .i32_const(8)
+        .i32_or()
+        .i32_and()
+        .local_get(3)
         .i32_eq()
         .if_(BlockType::Empty)
-        .local_get(slot)
+        .local_get(SLOT)
         .i32_const(1)
         .i32_sub()
-        .local_tee(slot)
+        .local_tee(SLOT)
         .i32_const(12)
         .i32_shl()
         .local_get(0)
         .i32_load(mem(84))
-        .i32_add();
-    address.emit(function);
-    function
-        .instructions()
+        .i32_add()
+        .local_get(1)
         .i32_const(4095)
         .i32_and()
         .i32_add()
-        .local_get(slot)
-        .local_get(permission)
+        .local_get(SLOT)
+        .local_get(PERMISSION)
         .i32_const(3)
-        .i32_and();
-    match exit {
-        TranslationExit::Return => {
-            function.instructions().return_();
-        }
-        TranslationExit::Inline([host, slot, flags]) => {
-            // all three tuple values are ready before scratch destinations change.
-            // three translation checks are open; leave the inline wrapper.
-            function
-                .instructions()
-                .local_set(flags)
-                .local_set(slot)
-                .local_set(host)
-                .br(3);
-        }
-    }
-    function
-        .instructions()
+        .i32_and()
+        .return_()
         .end()
         .end()
         .end()
         .i32_const(0)
         .i32_const(0)
-        .i32_const(0);
-}
-
-pub(super) fn translation() -> Function {
-    let mut function = Function::new([(3, ValType::I32)]);
-    translation_body(
-        &mut function,
-        TranslationSource::Local(1),
-        TranslationSource::Local(2),
-        TranslationSource::Local(3),
-        [4, 5, 6],
-        TranslationExit::Return,
-    );
-    function.instructions().end();
+        .i32_const(0)
+        .end();
     function
-}
-
-pub(super) fn inline_translation(
-    function: &mut Function,
-    address: u32,
-    width: u32,
-    required: u32,
-    scratch: [u32; 3],
-    result: [u32; 3],
-) {
-    for local in scratch {
-        function.instructions().i32_const(0).local_set(local);
-    }
-    function.instructions().block(BlockType::Empty);
-    translation_body(
-        function,
-        TranslationSource::Local(address),
-        TranslationSource::Constant(width),
-        TranslationSource::Constant(required),
-        scratch,
-        TranslationExit::Inline(result),
-    );
-    for local in result.into_iter().rev() {
-        function.instructions().local_set(local);
-    }
-    function.instructions().end();
-    for local in result {
-        function.instructions().local_get(local);
-    }
 }
 
 pub(super) fn admission() -> Function {
