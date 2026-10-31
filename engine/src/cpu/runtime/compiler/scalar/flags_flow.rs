@@ -7,7 +7,7 @@ fn byte_bit(register: ByteRegister) -> u8 {
     1 << (byte_register(register).0 - 1)
 }
 
-pub(super) fn preserves(operation: Operation, right: Option<Register32>, numeric: bool) -> bool {
+pub(super) fn preserves(operation: Operation, dependencies: u8, numeric: bool) -> bool {
     let writes = match operation {
         Operation::Nop | Operation::Direction { .. } | Operation::ConditionalJump { .. } => 0,
         Operation::Move {
@@ -105,7 +105,7 @@ pub(super) fn preserves(operation: Operation, right: Option<Register32>, numeric
         _ if numeric => 0,
         _ => return false,
     };
-    right.is_none_or(|register| writes & register_bit(register) == 0)
+    writes & dependencies == 0
 }
 
 pub(super) fn edge(out: &mut Output, expected: Option<deferred::Recipe>) {

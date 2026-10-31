@@ -141,6 +141,7 @@ impl Output {
             .end()
             .local_set(CARRY)
             .local_get(FLAGS)
+            .i32_wrap_i64()
             .i32_const(!0x8d5)
             .i32_and()
             .local_get(CARRY)
@@ -166,12 +167,14 @@ impl Output {
             .i32_const(2)
             .i32_shl()
             .i32_or()
+            .i64_extend_i32_u()
             .local_set(FLAGS)
             .local_get(B)
             .i32_const(1)
             .i32_eq()
             .if_(BlockType::Empty)
-            .local_get(FLAGS);
+            .local_get(FLAGS)
+            .i32_wrap_i64();
         match kind {
             ShiftKind::Shl => {
                 self.c()
@@ -195,6 +198,7 @@ impl Output {
             .i32_const(11)
             .i32_shl()
             .i32_or()
+            .i64_extend_i32_u()
             .local_set(FLAGS)
             .end();
     }

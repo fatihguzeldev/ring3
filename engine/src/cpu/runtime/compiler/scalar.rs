@@ -179,7 +179,9 @@ pub(super) fn emit(
     module.section(&exports);
     let mut out = Output {
         function: Function::new([
-            (24, ValType::I32),
+            (8, ValType::I32),
+            (1, ValType::I64),
+            (15, ValType::I32),
             (1, ValType::I64),
             (18, ValType::I32),
             (2, ValType::I64),
@@ -229,7 +231,11 @@ pub(super) fn emit(
             .zip(1..9)
             .chain([(40, PC), (44, FLAGS), (48, REMAIN), (56, RETIRED)])
     {
-        out.c().local_get(0).i32_load(mem(offset)).local_set(local);
+        out.c().local_get(0).i32_load(mem(offset));
+        if local == FLAGS {
+            out.c().i64_extend_i32_u();
+        }
+        out.c().local_set(local);
     }
     if let Some(binding) = binding {
         memory::initialize_bound(&mut out, binding);
@@ -364,10 +370,11 @@ impl Output {
                 .zip(1..9)
                 .chain([(40, PC), (44, FLAGS), (48, REMAIN), (56, RETIRED)])
         {
-            self.c()
-                .local_get(0)
-                .local_get(local)
-                .i32_store(mem(offset));
+            self.c().local_get(0).local_get(local);
+            if local == FLAGS {
+                self.c().i32_wrap_i64();
+            }
+            self.c().i32_store(mem(offset));
         }
     }
     fn exit(&mut self, status: i32) {
@@ -910,6 +917,7 @@ impl Output {
             Operation::PushFlags => {
                 self.c()
                     .local_get(FLAGS)
+                    .i32_wrap_i64()
                     .i32_const(!0x30000)
                     .i32_and()
                     .local_set(R);
@@ -1015,7 +1023,7 @@ impl Output {
                 dynamic = true;
             }
             Operation::Carry { kind } => {
-                self.c().local_get(FLAGS);
+                self.c().local_get(FLAGS).i32_wrap_i64();
                 match kind {
                     CarryKind::Clear => {
                         self.c().i32_const(!1).i32_and();
@@ -1027,16 +1035,16 @@ impl Output {
                         self.c().i32_const(1).i32_xor();
                     }
                 }
-                self.c().local_set(FLAGS);
+                self.c().i64_extend_i32_u().local_set(FLAGS);
             }
             Operation::Direction { set } => {
                 self.c()
                     .local_get(FLAGS)
-                    .i32_const(if set { 0x400 } else { !0x400 });
+                    .i64_const(if set { 0x400 } else { !0x400_i64 });
                 if set {
-                    self.c().i32_or();
+                    self.c().i64_or();
                 } else {
-                    self.c().i32_and();
+                    self.c().i64_and();
                 }
                 self.c().local_set(FLAGS);
             }
@@ -1122,6 +1130,7 @@ impl Output {
             .i32_and()
             .local_set(CARRY)
             .local_get(FLAGS)
+            .i32_wrap_i64()
             .i32_const(!0x8d5)
             .i32_and()
             .local_get(CARRY)
@@ -1147,12 +1156,14 @@ impl Output {
             .i32_const(2)
             .i32_shl()
             .i32_or()
+            .i64_extend_i32_u()
             .local_set(FLAGS)
             .local_get(B)
             .i32_const(1)
             .i32_eq()
             .if_(BlockType::Empty)
             .local_get(FLAGS)
+            .i32_wrap_i64()
             .i32_const(!0x800)
             .i32_and();
         match kind {
@@ -1175,6 +1186,7 @@ impl Output {
             .i32_const(11)
             .i32_shl()
             .i32_or()
+            .i64_extend_i32_u()
             .local_set(FLAGS)
             .end();
     }

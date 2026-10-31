@@ -12,6 +12,7 @@ pub(super) fn emit(out: &mut Output, operation: Operation) -> bool {
         Operation::FlagsToAh => {
             out.c()
                 .local_get(FLAGS)
+                .i32_wrap_i64()
                 .i32_const(0xd5)
                 .i32_and()
                 .i32_const(2)
@@ -22,6 +23,7 @@ pub(super) fn emit(out: &mut Output, operation: Operation) -> bool {
         Operation::AhToFlags => {
             out.c()
                 .local_get(FLAGS)
+                .i32_wrap_i64()
                 .i32_const(!0xd5)
                 .i32_and()
                 .local_get(reg(Register32::Eax))
@@ -32,12 +34,14 @@ pub(super) fn emit(out: &mut Output, operation: Operation) -> bool {
                 .i32_or()
                 .i32_const(2)
                 .i32_or()
+                .i64_extend_i32_u()
                 .local_set(FLAGS);
         }
         Operation::SetAlFromCarry => {
             out.c()
                 .i32_const(0)
                 .local_get(FLAGS)
+                .i32_wrap_i64()
                 .i32_const(1)
                 .i32_and()
                 .i32_sub()

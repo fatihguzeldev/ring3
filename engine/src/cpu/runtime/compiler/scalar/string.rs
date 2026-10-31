@@ -46,6 +46,7 @@ pub(super) fn emit(out: &mut Output, operation: Operation) -> bool {
     };
     out.c()
         .local_get(FLAGS)
+        .i32_wrap_i64()
         .i32_const(0x400)
         .i32_and()
         .if_(BlockType::Result(ValType::I32))

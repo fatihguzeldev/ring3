@@ -164,10 +164,12 @@ pub(super) fn emit(out: &mut Output, operation: Operation) -> bool {
     }
     out.c()
         .local_get(FLAGS)
+        .i32_wrap_i64()
         .i32_const(!1)
         .i32_and()
         .local_get(CARRY)
         .i32_or()
+        .i64_extend_i32_u()
         .local_set(FLAGS);
     true
 }
