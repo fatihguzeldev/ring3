@@ -46,14 +46,22 @@ fn generated_modify_write_preserves_fast_and_canonical_memory_contracts() {
             fs::write(scratch.join(format!("{name}-{form}.wasm")), unit.wasm).unwrap();
         }
     }
-    for (name, code) in [
-        ("twice", &[0x83, 0x03, 1, 0x83, 0x03, 1][..]),
+    for (name, code, limit) in [
+        ("twice", &[0x83, 0x03, 1, 0x83, 0x03, 1][..], 2),
         (
             "fast-then-cross",
             &[0x83, 0x03, 1, 0x83, 0x83, 0xfe, 0x0f, 0, 0, 1][..],
+            2,
+        ),
+        ("view-read", &[0x8b, 0x03][..], 1),
+        ("view-next-word", &[0x8b, 0x03, 0x8b, 0x4b, 4][..], 2),
+        (
+            "view-next-page",
+            &[0x8b, 0x03, 0x8b, 0x8b, 0, 0x10, 0, 0][..],
+            2,
         ),
     ] {
-        let unit = compile_memory_case(code, 2);
+        let unit = compile_memory_case(code, limit);
         fs::write(scratch.join(format!("{name}.wasm")), unit.wasm).unwrap();
     }
     let result = Command::new("node").arg("--input-type=module").arg("-e").arg(r#"
@@ -129,7 +137,72 @@ init(7);data.setUint32(executable,1,true);forcedWriteFault=true;assert.equal(add
 init(7);data.setBigUint64(version,0xffffffffffffffffn,true);assert.equal(add(ptr),8);assert.equal(loadGuest(0x3000),7);assert.equal(get(108),0);assert.deepEqual(reads,[]);assert.equal(writes.length,1);complete(0x1000,1,0,0xcd7);
 init(7,1,0xcd7,0x3000,2);assert.equal((await load('twice'))(ptr),0);assert.equal(loadGuest(0x3000),9);assert.equal(get(108),1);assert.deepEqual([reads,writes],[[],[]]);complete(0x1006,0,2,model('add',8,1,0xcd7)[1]);
 init(7,1,0xcd7,0x3000,2);seedGuest(0x3ffe,0xffffffff);assert.equal((await load('fast-then-cross'))(ptr),0);assert.equal(loadGuest(0x3000),8);assert.equal(loadGuest(0x3ffe),0);assert.deepEqual(reads,[[0x3ffe,0x104]]);assert.deepEqual(writes,[[0x3ffe,4,0]]);complete(0x100a,0,2,model('add',0xffffffff,1,0xcd7)[1]);
-console.log('paired RMW fast/slow translation, exact arithmetic FLAGS, dirty deduplication, permission/guard/unmapped/cross-page faults, COW, SMC and version exhaustion passed');
+
+// these private-view protocol negatives use a separate table from the trusted
+// helper's canonical mappings. declining a malformed view must preserve that
+// helper authority rather than inventing a guest mapping or fault.
+const shadow=0x9000,slotValues=[0x10203040,0x50607080,0x90a0b0c0,0xd0e0f000];
+function viewInit(slot,capacity,quota=1){
+  init(7,1,0x602,0x3000,quota);word(76,shadow);word(88,capacity);data.setUint32(shadow+3*4,slot,true);data.setUint32(shadow+4*4,2,true);
+  slotValues.forEach((value,index)=>data.setUint32(backing+index*4096,value,true));
+}
+function readExpected(value,next=0x1002,status=0,remaining=0){
+  const expected=ram.slice(),d=new DataView(expected.buffer);
+  for(const[at,v]of[[8,value],[40,next],[48,remaining],[52,status],[56,1]])d.setUint32(ptr+at,v>>>0,true);
+  return expected;
+}
+const readView=await load('view-read');
+for(const[slot,capacity,fast]of[
+  [0,0,false],[0,4,false],[0,0xffffffff,false],
+  [1,0,false],[1,1,true],[1,4,true],[1,0xffffffff,true],
+  [4,3,false],[4,4,true],[5,4,false],[0xffffffff,4,false],[0xffffffff,0xfffffffe,false],
+]){
+  viewInit(slot,capacity);if(fast)data.setUint32(map+3*4,slot,true);const expected=readExpected(fast?slotValues[slot-1]:slotValues[0]);
+  assert.equal(readView(ptr),0,`private slot ${slot} capacity ${capacity}`);assert.deepEqual(ram,expected);
+  assert.deepEqual(reads,fast?[]:[[0x3000,4]]);assert.deepEqual(writes,[]);
+}
+
+// invalid slots must decline before dereferencing even a non-null permission
+// pointer outside memory. valid slots still retain that permission load's trap.
+for(const slot of[0,5,0xffffffff]){
+  viewInit(slot,4);word(80,ram.length+1);const expected=readExpected(slotValues[0]);
+  assert.equal(readView(ptr),0);assert.deepEqual(ram,expected);assert.deepEqual(reads,[[0x3000,4]]);assert.deepEqual(writes,[]);
+}
+viewInit(1,1);word(80,ram.length+1);{
+  const expected=ram.slice();assert.throws(()=>readView(ptr),WebAssembly.RuntimeError);assert.deepEqual(ram,expected);assert.deepEqual([reads,writes],[[],[]]);
+}
+
+// MAX/MAX satisfies the slot range guard; the resulting malformed host view
+// must still encounter the raw load's width bounds check after 32-bit wrapping.
+viewInit(0xffffffff,0xffffffff);word(84,ram.length+8192);{
+  const expected=ram.slice();assert.throws(()=>readView(ptr),WebAssembly.RuntimeError);assert.deepEqual(ram,expected);assert.deepEqual([reads,writes],[[],[]]);
+}
+
+// the last valid physical slot uses exactly one one-based-to-zero-based
+// conversion, including the paired RMW store and dirty-slot identity.
+viewInit(4,4);data.setUint32(map+3*4,4,true);{
+  const expected=ram.slice(),d=new DataView(expected.buffer);
+  d.setUint32(backing+3*4096,0xd0e0f001,true);d.setUint8(bits+3,1);d.setUint32(slots,3,true);
+  for(const[at,value]of[[40,0x1003],[44,0x682],[48,0],[56,1],[108,1]])d.setUint32(ptr+at,value,true);
+  assert.equal(add(ptr),0);assert.deepEqual(ram,expected);assert.deepEqual([reads,writes],[[],[]]);
+}
+
+// each first access fits, while the second access crosses a private mapping,
+// permission, or host-backing boundary. no earlier local read may be published
+// when the later raw Wasm access traps.
+for(const kind of['mapping','permission','backing']){
+  const run=await load(kind==='backing'?'view-next-word':'view-next-page');
+  for(const quota of[1,2]){
+    viewInit(1,1,quota);let first=slotValues[0];
+    if(kind==='mapping'){word(76,ram.length-16);data.setUint32(ram.length-4,1,true);}
+    if(kind==='permission'){word(88,4);word(80,ram.length-4);data.setUint8(ram.length-1,3);}
+    if(kind==='backing'){word(84,ram.length-4);first=0xabcdef01;data.setUint32(ram.length-4,first,true);}
+    const expected=quota===1?readExpected(first,0x1002,2):ram.slice();
+    if(quota===1)assert.equal(run(ptr),2);else assert.throws(()=>run(ptr),WebAssembly.RuntimeError);
+    assert.deepEqual(ram,expected,`${kind} boundary quota ${quota}`);assert.deepEqual([reads,writes],[[],[]]);
+  }
+}
+console.log('paired RMW, exact FLAGS, dirty tracking, COW/SMC/exhaustion and private slot/permission/table/late host bounds passed');
 "#).arg(&scratch).output().unwrap();
     assert!(
         result.status.success(),

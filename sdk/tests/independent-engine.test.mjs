@@ -138,6 +138,40 @@ function replaceCode(f, code) {
   f.engine.ok('protect', 0x1000, 1, 5);
 }
 
+for (const c of [
+  {name: 'faulting RMW', code: [0x83, 0xc0, 1, 0x41, 0x83, 0x05, ...dword(0x9000), 1],
+    count: 3, retired: 2, reason: 5, pc: 0x1004, flags: 0x897, services: 0},
+  {name: 'numeric service', code: [0x83, 0xc0, 1, 0xdb, 0xe2, 0x41],
+    count: 3, retired: 3, reason: 1, pc: 0x1006, flags: 0x897, services: 1},
+  {name: 'completed SMC', code: [0x83, 0xc0, 1, 0x80, 0x05, ...dword(0x1000), 1],
+    count: 2, retired: 2, reason: 6, pc: 0x100a, flags: 0x86, services: 0, smc: true},
+]) test(`actual arithmetic flags survive ${c.name} with full architectural publication`, {skip}, () => {
+  const registers = [0xffffffff, 0x7fffffff, 0xa1b2c3d4, 0x55667788, 0x2f00, 0x13579bdf, 0x2468ace0, 0x0f1e2d3c];
+  const f = fixture(c.code, {registers, execution: {budget: c.count}});
+  try {
+    if (c.smc) f.engine.ok('protect', 0x1000, 1, 7);
+    const scalar = new Uint8Array(f.engine.memory.buffer, f.engine.base, 56).slice(), banks = processBanks(f);
+    f.cache.import(); let selected = f.cache.select(); const backing = f.slab().getUint32(84, true);
+    const ram = new Uint8Array(f.engine.memory.buffer, backing, 65536).slice();
+    view(scalar).setUint32(16, 0, true);
+    if (!c.smc) view(scalar).setUint32(20, 0x80000000, true);
+    view(scalar).setUint32(48, c.pc, true); view(scalar).setUint32(52, c.flags, true);
+    if (c.smc) ram[0]++;
+    let run, retired = 0, work = 0;
+    for (let count = 0; count < 3; count++) {
+      run = f.cache.execute(selected); retired += run.retired; work += run.work;
+      if (run.coreReason !== 1) break;
+      selected = f.cache.select();
+    }
+    assert.deepEqual([run.reason, retired, work, run.pc], [c.reason, c.retired, c.retired, c.pc]);
+    assert.deepEqual(new Uint8Array(f.engine.memory.buffer, f.engine.base, 56), scalar);
+    assert.deepEqual(processBanks(f), banks);
+    assert.deepEqual(new Uint8Array(f.engine.memory.buffer, backing, 65536), ram);
+    serviceCounts(f, c.services);
+    if (c.reason === 5) event(f.engine, 0xffffffff, c.pc, c.retired);
+  } finally {f.close();}
+});
+
 test('actual COW view uses the native split and refreshes the canonical mapping before later loads', {skip}, () => {
   const f = fixture(undefined, {windowsMappings: true, physicalPages: 1024, execution: {budget: 4}});
   try {

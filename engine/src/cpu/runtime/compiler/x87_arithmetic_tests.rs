@@ -54,6 +54,243 @@ fn operand64(state: &mut X87State, index: u8, bits: u64) {
 }
 
 #[test]
+fn generated_x87_control_changes_preserve_precision_and_fault_priority() {
+    use std::{
+        fs,
+        process::Command,
+        time::{SystemTime, UNIX_EPOCH},
+    };
+    let scratch = std::env::temp_dir().join(format!(
+        "ring3-runtime-x87-control-{}-{}",
+        std::process::id(),
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    fs::create_dir(&scratch).unwrap();
+    let mut memory = AddressSpace::new(2).unwrap();
+    for address in [0x1000, 0x3000] {
+        memory
+            .map_zeroed(
+                PageRange::new(GuestAddress(address), 1).unwrap(),
+                Permissions::ALL,
+            )
+            .unwrap();
+    }
+    let programs: &[(&str, &[u8], u32)] = &[
+        (
+            "register",
+            &[0xd8, 0xc1, 0xd9, 0x2d, 0x10, 0x30, 0, 0, 0xd8, 0xc1],
+            3,
+        ),
+        (
+            "memory",
+            &[0xd8, 0xc1, 0xd9, 0x2d, 0x10, 0x30, 0, 0, 0xd8, 0x03],
+            3,
+        ),
+        ("load-first", &[0xd9, 0x2d, 0x10, 0x30, 0, 0, 0xd8, 0x03], 2),
+    ];
+    for &(name, code, limit) in programs {
+        memory.write(GuestAddress(0x1000), code).unwrap();
+        fs::write(
+            scratch.join(format!("{name}.wasm")),
+            compile(&memory, GuestAddress(0x1000), limit as usize)
+                .unwrap()
+                .wasm,
+        )
+        .unwrap();
+    }
+    let mut cases = Vec::new();
+    for (label, name, old_control, new_control, initial_status, retired, status, fault, blocked) in [
+        (
+            "pc24-to-pc53",
+            "register",
+            0x003f,
+            0x023f,
+            0x4020,
+            3,
+            0,
+            0,
+            0,
+        ),
+        (
+            "reserved-bit-six",
+            "register",
+            0x007f,
+            0x027f,
+            0x4020,
+            3,
+            0,
+            0,
+            0,
+        ),
+        (
+            "pc53-to-pc24",
+            "register",
+            0x023f,
+            0x003f,
+            0x4020,
+            2,
+            7,
+            0,
+            0,
+        ),
+        (
+            "rounding-change",
+            "register",
+            0x023f,
+            0x063f,
+            0x4020,
+            2,
+            7,
+            0,
+            0,
+        ),
+        (
+            "precision-change",
+            "memory",
+            0x003f,
+            0x037f,
+            0x4020,
+            2,
+            7,
+            0,
+            0x3020,
+        ),
+        (
+            "reserved-high-bit",
+            "register",
+            0x003f,
+            0x123f,
+            0x4020,
+            2,
+            7,
+            0,
+            0,
+        ),
+        (
+            "unmask-sticky",
+            "memory",
+            0x003f,
+            0x021f,
+            0x4020,
+            2,
+            7,
+            0,
+            0x3020,
+        ),
+        (
+            "old-pending-before-load",
+            "load-first",
+            0x023e,
+            0x023f,
+            0x4001,
+            0,
+            7,
+            0x3010,
+            0x3010,
+        ),
+        (
+            "faulting-control-load",
+            "register",
+            0x003f,
+            0x023f,
+            0x4020,
+            1,
+            3,
+            0x3010,
+            0,
+        ),
+    ] {
+        let &(_, code, limit) = programs
+            .iter()
+            .find(|(program, _, _)| *program == name)
+            .unwrap();
+        memory.write(GuestAddress(0x1000), code).unwrap();
+        memory
+            .write(GuestAddress(0x3010), &u16::to_le_bytes(new_control))
+            .unwrap();
+        memory
+            .write(GuestAddress(0x3020), &0x3080_0000_u32.to_le_bytes())
+            .unwrap();
+        let mut before = state(old_control, 0);
+        before.status = initial_status;
+        operand64(&mut before, 0, 1_f64.to_bits());
+        operand64(&mut before, 1, (2_f64.powi(-30)).to_bits());
+        let mut numeric = NumericState::default();
+        numeric.x87 = before;
+        let mut segments = SegmentContext::default();
+        segments.state.selectors = [0x23, 0x1b, 0x23, 0x23, 0x3b, 0x43];
+        let mut scalar = State32 {
+            registers: [0x11223344, 2, 3, 0x3020, 0x4800, 6, 7, 8],
+            eip: 0x1000,
+            eflags: 0xcd7,
+        };
+        for _ in 0..retired {
+            let decoded = decode_one(&memory, GuestAddress(scalar.eip)).unwrap();
+            numeric
+                .execute(
+                    &mut memory,
+                    &mut scalar,
+                    &segments,
+                    decoded.operation(),
+                    decoded.next_pc().0,
+                )
+                .unwrap();
+            scalar.eip = decoded.next_pc().0;
+        }
+        if label == "pc24-to-pc53" {
+            assert_eq!(numeric.x87.control, 0x023f);
+            assert_eq!(numeric.x87.status, 0x4020);
+            assert_eq!(
+                numeric.x87.registers[0],
+                [0, 0, 0, 0, 2, 0, 0, 0x80, 0xff, 0x3f]
+            );
+        } else if label == "pc53-to-pc24" {
+            assert_eq!(numeric.x87.control, 0x003f);
+            assert_eq!(
+                numeric.x87.registers[0],
+                [0, 0, 0, 0, 2, 0, 0, 0x80, 0xff, 0x3f]
+            );
+        } else if label == "unmask-sticky" {
+            assert_eq!(numeric.x87.status, 0xc0a0);
+        }
+        let reads: &[u32] = if retired == 0 { &[] } else { &[0x3010] };
+        cases.push(format!(
+            "{{\"label\":\"{label}\",\"name\":\"{name}\",\"before\":{:?},\"after\":{:?},\"control\":{new_control},\"limit\":{limit},\"retired\":{retired},\"status\":{status},\"next\":{},\"fault\":{fault},\"blocked\":{blocked},\"reads\":{reads:?}}}",
+            raw(before), raw(numeric.x87), scalar.eip,
+        ));
+    }
+    fs::write(scratch.join("cases.json"), format!("[{}]", cases.join(","))).unwrap();
+    let result = Command::new("node").arg("--input-type=module").arg("-e").arg(r#"
+import assert from 'node:assert/strict';import fs from 'node:fs';
+const root=process.argv[1],memory=new WebAssembly.Memory({initial:1}),ram=new Uint8Array(memory.buffer),data=new DataView(memory.buffer),ptr=0x8000,view=0xa000,fp=0xb000;
+const word=(at,value)=>data.setUint32(ptr+at,value>>>0,true);let item,reads=[];
+const imports={env:{memory},cpu:{read(p,address,width){assert.equal(p,ptr);address>>>=0;assert.notEqual(address,item.blocked,'pending exception/profile miss precedes operand read');reads.push(address);if(address===item.fault){word(52,3);word(60,address);word(64,width|0x10100);word(68,width);return 0;}word(52,0);return width===2?data.getUint16(address,true):data.getUint32(address,true);},write(){throw new Error('no numerical guest stores');}}};
+const functions=new Map();
+for(item of JSON.parse(fs.readFileSync(`${root}/cases.json`))){
+  for(let i=0;i<ram.length;i++)ram[i]=(i*29+7)&255;ram.fill(0,ptr,ptr+160);ram.fill(0,view,view+40);
+  word(0,1);word(4,160);[0x11223344,2,3,0x3020,0x4800,6,7,8].forEach((v,i)=>word(8+4*i,v));word(40,0x1000);word(44,0xcd7);word(48,item.limit);word(124,view);word(152,0x1f);
+  data.setUint32(view,1,true);data.setUint32(view+4,36,true);data.setUint32(view+8,fp,true);[0x23,0x1b,0x23,0x23,0x3b,0x43].forEach((v,i)=>data.setUint32(view+12+4*i,v,true));ram.set(item.before,fp);data.setUint16(0x3010,item.control,true);data.setUint32(0x3020,0x30800000,true);
+  const expected=ram.slice(),dv=new DataView(expected.buffer);expected.set(item.after,fp);for(const[at,value]of[[40,item.next],[48,item.limit-item.retired],[52,item.status],[56,item.retired]])dv.setUint32(ptr+at,value,true);
+  if(item.status===3)for(const[at,value]of[[60,item.fault],[64,0x10102],[68,2]])dv.setUint32(ptr+at,value,true);
+  reads=[];if(!functions.has(item.name))functions.set(item.name,(await WebAssembly.instantiate(fs.readFileSync(`${root}/${item.name}.wasm`),imports)).instance.exports.run);
+  assert.equal(functions.get(item.name)(ptr),item.status,item.label);assert.deepEqual(ram,expected,`${item.label}: full RAM, bank, ghost, CW/status, scalar and exact quota`);assert.deepEqual(reads,item.reads,`${item.label}: ordered operand reads`);
+}
+console.log('within-invocation x87 control changes: PC24/53 precision, RC/unsupported fallback, old/new pending priority and faulting FLDCW full-state baseline passed');
+"#).arg(&scratch).output().unwrap();
+    assert!(
+        result.status.success(),
+        "fixture {} failed:\n{}\n{}",
+        scratch.display(),
+        String::from_utf8_lossy(&result.stdout),
+        String::from_utf8_lossy(&result.stderr)
+    );
+    fs::remove_dir_all(scratch).unwrap();
+}
+
+#[test]
 fn generated_exact_x87_arithmetic_matches_strict_state_and_falls_back_before_effects() {
     use std::{
         fs,
