@@ -179,6 +179,7 @@ pub(super) fn emit(
     module.section(&exports);
     let mut out = Output {
         native_memory_bound: binding.is_some(),
+        native_memory_binding: binding,
         return_prediction_possible: routing::return_prediction_possible(blocks, entries),
         function: Function::new([
             (8, ValType::I32),
@@ -239,9 +240,7 @@ pub(super) fn emit(
         }
         out.c().local_set(local);
     }
-    if let Some(binding) = binding {
-        memory::initialize_bound(&mut out, binding);
-    } else {
+    if binding.is_none() {
         memory::initialize(&mut out);
     }
     out.c().loop_(BlockType::Empty);
@@ -354,6 +353,7 @@ pub(super) fn emit(
 
 struct Output {
     native_memory_bound: bool,
+    native_memory_binding: Option<NativeMemoryBinding>,
     return_prediction_possible: bool,
     function: Function,
     emitted_guest_write: bool,
