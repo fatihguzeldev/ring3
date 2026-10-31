@@ -86,6 +86,20 @@ function memoryCalls(f) {
   return calls;
 }
 
+function serviceCounts(f, expected) {
+  const api = f.engine.api;
+  const dispatcher = new WebAssembly.Module(new Uint8Array(f.engine.memory.buffer,
+    api.cpu_dispatch_code_ptr() >>> 0, api.cpu_dispatch_code_len() >>> 0));
+  const direct = WebAssembly.Module.imports(dispatcher).some(item => item.module === 'cpu' && item.name === 'instruction');
+  const stats = f.cache.stats();
+  assert.deepEqual([stats.instructionCalls, stats.jsInstructionCalls, stats.directInstructionCalls,
+    stats.instructionCountersAvailable], [expected, direct ? 0 : expected, direct ? expected : 0, true]);
+}
+
+function rejectJsService(f) {
+  if (f.cache.directService) f.engine.api.cpu_instruction = () => {throw new Error('the actual direct dispatcher must not call the JS instruction boundary');};
+}
+
 function sharedViews(f, protection, accesses) {
   const {engine, cache} = f, gates = new Map();
   cache.import(); cache.publish();
@@ -469,14 +483,140 @@ test('actual compiled late-page store fault preserves its completed prefix and u
 
 test('actual strict numeric fault publishes its event before touching an unmapped operand', {skip}, () => {
   const f = fixture([0xd9, 0x05, 0x00, 0x40, 0x00, 0x00], {fpControl: 0x037e, fpStatus: 1});
+  rejectJsService(f);
   try {
     f.cache.import();
     const run = f.cache.execute(f.cache.select());
     assert.deepEqual([run.reason, run.retired, run.work, run.pc], [12, 0, 0, 0x1000]);
     assert.equal(f.engine.get(80), 0x8081);
     assert.equal(new DataView(f.engine.memory.buffer).getUint16(f.engine.base + 4236 + 18, true), 0x8081);
+    serviceCounts(f, 1);
     event(f.engine, 16, 0x1000, 0);
   } finally {f.close();}
+});
+
+test('actual numeric service reaches an exact budget boundary without executing the following integer instruction', {skip}, () => {
+  const registers = [0x12345678, 0x89abcdef, 0xd5e6789a, 0x23456789, 0x2f00, 0x55443322, 0x66554433, 0x77665544];
+  const f = fixture([0xd9, 0xe8, 0x43], {registers, execution: {budget: 1}});
+  rejectJsService(f);
+  try {
+    const scalar = new Uint8Array(f.engine.memory.buffer, f.engine.base, 56).slice(), banks = processBanks(f);
+    view(scalar).setUint32(48, 0x1002, true);
+    const fp = view(banks[0]);
+    fp.setUint16(18, 0x3800, true); fp.setUint16(20, 0x3fff, true); fp.setUint16(22, 0x1e8, true);
+    fp.setUint32(24, 0x1000, true); fp.setUint16(32, 0x1b, true);
+    banks[0].set([0, 0, 0, 0, 0, 0, 0, 0x80, 0xff, 0x3f], 110);
+    const selected = f.cache.select(), state = f.slab(), backing = state.getUint32(84, true), length = state.getUint32(88, true) * 4096;
+    const ram = new Uint8Array(f.engine.memory.buffer, backing, length).slice(), run = f.cache.execute(selected);
+    assert.deepEqual([run.reason, run.retired, run.work, run.pc], [1, 1, 1, 0x1002]);
+    assert.deepEqual(new Uint8Array(f.engine.memory.buffer, f.engine.base, 56), scalar);
+    assert.deepEqual(processBanks(f), banks);
+    assert.deepEqual(new Uint8Array(f.engine.memory.buffer, backing, length), ram);
+    assert.equal(f.slab().getUint32(48, true), 0);
+    serviceCounts(f, 1);
+  } finally {f.close();}
+});
+
+test('actual numeric services resume across compiled selections and publish the literal floating store', {skip}, () => {
+  const registers = [0x12345678, 0x89abcdef, 0xd5e6789a, 0x23456789, 0x2f00, 0x55443322, 0x66554433, 0x77665544];
+  const f = fixture([0xd9, 0xe8, 0xd9, 0x1d, 0, 0x20, 0, 0, 0x43], {registers, execution: {budget: 2}});
+  rejectJsService(f);
+  try {
+    const scalar = new Uint8Array(f.engine.memory.buffer, f.engine.base, 56).slice(), banks = processBanks(f);
+    view(scalar).setUint32(48, 0x1008, true);
+    const fp = view(banks[0]);
+    fp.setUint16(22, 0x11d, true); fp.setUint32(24, 0x1002, true); fp.setUint32(28, 0x2000, true);
+    fp.setUint16(32, 0x1b, true); fp.setUint16(34, 0x23, true);
+    banks[0].set([0, 0, 0, 0, 0, 0, 0, 0x80, 0xff, 0x3f], 110);
+    let selected = f.cache.select(); const state = f.slab(), backing = state.getUint32(84, true), length = state.getUint32(88, true) * 4096;
+    const ram = new Uint8Array(f.engine.memory.buffer, backing, length).slice();
+    const slot = new DataView(f.engine.memory.buffer).getUint32(state.getUint32(76, true) + 2 * 4, true) - 1;
+    new DataView(ram.buffer).setUint32(slot * 4096, 0x3f800000, true);
+    let retired = 0, work = 0, run;
+    for (let count = 0; count < 3; count++) {
+      run = f.cache.execute(selected); retired += run.retired; work += run.work;
+      if (run.coreReason !== 1) break;
+      selected = f.cache.select();
+    }
+    assert.deepEqual([run.reason, retired, work, run.pc], [1, 2, 2, 0x1008]);
+    assert.deepEqual(new Uint8Array(f.engine.memory.buffer, f.engine.base, 56), scalar);
+    assert.deepEqual(processBanks(f), banks);
+    assert.deepEqual(new Uint8Array(f.engine.memory.buffer, backing, length), ram);
+    serviceCounts(f, 2);
+  } finally {f.close();}
+});
+
+test('actual service trap publishes its completed instruction once and retains the pre-trap event site', {skip}, () => {
+  const registers = [0x12345678, 0x89abcdef, 0xd5e6789a, 0x23456789, 0x2f00, 0x55443322, 0x66554433, 0x77665544];
+  const f = fixture([0xcc, 0x43], {registers, execution: {budget: 2}});
+  rejectJsService(f);
+  try {
+    const scalar = new Uint8Array(f.engine.memory.buffer, f.engine.base, 56).slice(), banks = processBanks(f);
+    view(scalar).setUint32(48, 0x1001, true);
+    const selected = f.cache.select(), state = f.slab(), backing = state.getUint32(84, true), length = state.getUint32(88, true) * 4096;
+    const ram = new Uint8Array(f.engine.memory.buffer, backing, length).slice(), run = f.cache.execute(selected);
+    assert.deepEqual([run.reason, run.retired, run.work, run.pc], [17, 1, 1, 0x1001]);
+    assert.deepEqual(new Uint8Array(f.engine.memory.buffer, f.engine.base, 56), scalar);
+    assert.deepEqual(processBanks(f), banks);
+    assert.deepEqual(new Uint8Array(f.engine.memory.buffer, backing, length), ram);
+    serviceCounts(f, 1);
+    f.engine.ok('take_cpu_event'); const packet = f.engine.resultView(48);
+    assert.deepEqual([packet.getUint32(16, true), packet.getUint32(20, true), packet.getUint32(24, true),
+      packet.getUint32(28, true), packet.getUint32(44, true)], [3, 0x1000, 0x1001, 0, 1]);
+  } finally {f.close();}
+});
+
+test('actual numeric service commits an executable alias store before its completed SMC exit', {skip}, () => {
+  const f = fixture(undefined, {windowsMappings: true, physicalPages: 1024, execution: {budget: 2}});
+  rejectJsService(f);
+  try {
+    const [writable, executable] = sharedViews(f, 0x40, [2, 0x24]);
+    f.engine.request(Uint8Array.from([0xb8, 1, 0, 0, 0, 0xeb, 0xf9])); f.engine.ok('upload', writable, 7);
+    new DataView(f.engine.memory.buffer).setUint32(f.engine.base + 48, executable, true);
+    const old = f.cache.select(); assert.equal(f.cache.execute(old).reason, 1);
+    replaceCode(f, [0xd9, 0x1d, ...dword(writable), 0x43]);
+    const arena = new DataView(f.engine.memory.buffer), bank = f.engine.base + 4236;
+    arena.setUint32(f.engine.base + 28, 0x33445566, true); arena.setUint32(f.engine.base + 48, 0x1000, true);
+    arena.setUint16(bank + 20, 0xfffc, true);
+    new Uint8Array(f.engine.memory.buffer, bank + 40, 10).set([0, 0, 0, 0, 0, 0, 0, 0x80, 0xff, 0x3f]);
+    const scalar = new Uint8Array(f.engine.memory.buffer, f.engine.base, 56).slice(), banks = processBanks(f);
+    view(scalar).setUint32(48, 0x1006, true);
+    const fp = view(banks[0]); fp.setUint16(18, 0x800, true); fp.setUint16(20, 0xffff, true);
+    fp.setUint16(22, 0x11d, true); fp.setUint32(24, 0x1000, true); fp.setUint32(28, writable, true);
+    fp.setUint16(32, 0x1b, true); fp.setUint16(34, 0x23, true);
+    const writer = f.cache.select(), state = f.slab(), backing = state.getUint32(84, true), length = state.getUint32(88, true) * 4096;
+    const slot = new DataView(f.engine.memory.buffer).getUint32(state.getUint32(76, true) + (writable >>> 12) * 4, true) - 1;
+    const ram = new Uint8Array(f.engine.memory.buffer, backing, length).slice(); new DataView(ram.buffer).setUint32(slot * 4096, 0x3f800000, true);
+    const run = f.cache.execute(writer);
+    assert.deepEqual([run.coreReason, run.reason, run.retired, run.work, run.pc], [6, 6, 1, 1, 0x1006]);
+    assert.deepEqual(new Uint8Array(f.engine.memory.buffer, f.engine.base, 56), scalar);
+    assert.deepEqual(processBanks(f), banks);
+    assert.deepEqual(new Uint8Array(f.engine.memory.buffer, backing, length), ram);
+    serviceCounts(f, 1);
+    f.cache.import(); assert.equal(f.cache.table.get(old.slot), null);
+  } finally {f.close();}
+});
+
+const directServiceSkip = skip || (!WebAssembly.Module.exports(artifact.module)
+  .some(item => item.name === 'ring3_abi_v1_cpu_runtime_instruction') && 'artifact lacks the direct instruction service');
+
+for (const foreign of [false, true]) test(`actual direct service rejects ${foreign ? 'foreign context without counting it' : 'zero-quota continuation before effects'}`, {skip: directServiceSkip}, () => {
+  const f = fixture([0xd9, 0xe8]);
+  try {
+    f.engine.ok('cpu_begin', ...KEY);
+    const state = f.slab(), pointer = f.engine.api.cpu_context_ptr() >>> 0;
+    state.setUint32(48, foreign ? 1 : 0, true); state.setUint32(52, 7, true);
+    const expected = new Uint8Array(f.engine.memory.buffer, pointer, 160).slice(); view(expected).setUint32(52, 8, true);
+    const scalar = new Uint8Array(f.engine.memory.buffer, f.engine.base, 56).slice(), banks = processBanks(f);
+    const backing = state.getUint32(84, true), length = state.getUint32(88, true) * 4096, ram = new Uint8Array(f.engine.memory.buffer, backing, length).slice();
+    assert.equal(f.engine.api.cpu_runtime_instruction(pointer + (foreign ? 8 : 0)), 8);
+    assert.deepEqual(new Uint8Array(f.engine.memory.buffer, pointer, 160), expected);
+    assert.deepEqual(new Uint8Array(f.engine.memory.buffer, f.engine.base, 56), scalar);
+    assert.deepEqual(processBanks(f), banks);
+    assert.deepEqual(new Uint8Array(f.engine.memory.buffer, backing, length), ram);
+    assert.deepEqual([f.engine.api.cpu_runtime_instruction_count_low() >>> 0,
+      f.engine.api.cpu_runtime_instruction_count_high() >>> 0], [foreign ? 0 : 1, 0]);
+  } finally {f.engine.ok('cpu_end', ...KEY); f.close();}
 });
 
 test('actual prepare fetch fault reaches the guest fault boundary without installing a unit', {skip}, () => {

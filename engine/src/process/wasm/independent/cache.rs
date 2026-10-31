@@ -1,5 +1,5 @@
 use crate::{
-    cpu::runtime::{CompiledUnit, emit_dispatch},
+    cpu::runtime::{CompiledUnit, emit_dispatch_with_service as emit_dispatch},
     memory::{AddressSpace, CodeSnapshot, PageVersion},
     process::HostError,
 };

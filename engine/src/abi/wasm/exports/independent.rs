@@ -12,6 +12,9 @@ export_process_calls! {
     cpu_dispatch_code_len();
     cpu_runtime_read(context: u32, address: u32, width: u32);
     cpu_runtime_write(context: u32, address: u32, width: u32, value: u32);
+    cpu_runtime_instruction(context: u32);
+    cpu_runtime_instruction_count_low();
+    cpu_runtime_instruction_count_high();
     cpu_instruction(low: u32, high: u32);
     cpu_publish(low: u32, high: u32);
     cpu_end(low: u32, high: u32);

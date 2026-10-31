@@ -39,16 +39,40 @@ export class IndependentCodeCache {
     this.retainedModuleBytes = 0;
     this.evictions = 0;
     this.instructionCalls = 0;
+    this.jsInstructionCalls = 0;
+    this.directInstructionCalls = 0;
+    this.instructionCountersAvailable = true;
     const bytes = this.bytes(this.api.cpu_dispatch_code_ptr(), this.api.cpu_dispatch_code_len());
     const module = new WebAssembly.Module(bytes);
-    for (const item of WebAssembly.Module.imports(module))
+    const imports = WebAssembly.Module.imports(module);
+    this.directService = imports.some(item => item.module === 'cpu' && item.name === 'instruction' && item.kind === 'function');
+    for (const item of imports)
       if (!(item.module === 'env' &&
-          (item.name === 'memory' && item.kind === 'memory' || item.name === 'functions' && item.kind === 'table')))
+          (item.name === 'memory' && item.kind === 'memory' || item.name === 'functions' && item.kind === 'table')) &&
+          !(item.module === 'cpu' && item.name === 'instruction' && item.kind === 'function'))
         throw new Error(`invalid independent CPU dispatcher import ${item.module}.${item.name}`);
-    const instance = new WebAssembly.Instance(module, {env: {memory: this.memory, functions: this.table}});
+    if (this.directService) {
+      for (const name of ['cpu_runtime_instruction', 'cpu_runtime_instruction_count_low', 'cpu_runtime_instruction_count_high'])
+        if (typeof this.api[name] !== 'function') throw new Error(`missing independent CPU export ${name}`);
+      this.directInstructionBase = this.readDirectInstructions();
+    }
+    const instance = new WebAssembly.Instance(module, {env: {memory: this.memory, functions: this.table},
+      ...(this.directService ? {cpu: {instruction: this.api.cpu_runtime_instruction}} : {})});
     if (typeof instance.exports.run !== 'function' || instance.exports.run.length !== 1)
       throw new Error('invalid independent CPU dispatcher entry');
     this.dispatch = instance.exports.run;
+  }
+  readDirectInstructions() {
+    return BigInt(this.api.cpu_runtime_instruction_count_low() >>> 0) |
+      BigInt(this.api.cpu_runtime_instruction_count_high() >>> 0) << 32n;
+  }
+  sampleDirectInstructions() {
+    if (!this.directService) return;
+    const count = this.readDirectInstructions() - this.directInstructionBase;
+    if (count < 0 || count > BigInt(Number.MAX_SAFE_INTEGER - this.jsInstructionCalls))
+      throw new Error('invalid independent CPU direct instruction counter');
+    this.directInstructionCalls = Number(count);
+    this.instructionCalls = this.jsInstructionCalls + this.directInstructionCalls;
   }
   ready(checkSignal = true) {
     if (this.failure) throw this.failure;
@@ -173,9 +197,11 @@ export class IndependentCodeCache {
       if (!terminal) do {
         stop = this.dispatch(this.context) >>> 0;
         if (stop !== STATUS.instruction) break;
+        if (this.directService) throw new Error('direct independent CPU dispatcher yielded Instruction');
         const instructionRemaining = this.state().getUint32(48, true);
-        const status = this.api.cpu_instruction(...KEY);
+        this.jsInstructionCalls++;
         this.instructionCalls++;
+        const status = this.api.cpu_instruction(...KEY);
         if (status !== 0) throw new Error(`cpu_instruction returned ${status}`);
         state = this.state();
         stop = state.getUint32(52, true);
@@ -203,7 +229,15 @@ export class IndependentCodeCache {
         detail: stop === STATUS.needCode ? null : this.engine.get(80), retired, work,
         kind: terminal ? 'boundary' : 'compiled', id: terminal ? null : unit.slot};
     } catch (error) {throw this.fail(error);}
-    finally {this.open = false;}
+    finally {
+      this.open = false;
+      try {this.sampleDirectInstructions();}
+      catch (error) {
+        this.instructionCountersAvailable = false;
+        if (this.failure) this.failure.counterFailure = error.message;
+        else throw this.fail(error);
+      }
+    }
   }
   publish() {
     this.ready(false);
@@ -221,7 +255,10 @@ export class IndependentCodeCache {
     return {backend: 'independent', fpuMode: 'strict', runs: this.runs, retired: this.retired, work: this.work,
       installedUnits: this.units.size, generatedModuleBytes: this.generatedModuleBytes,
       retainedModuleBytes: this.retainedModuleBytes, evictions: this.evictions,
-      instructionCalls: this.instructionCalls};
+      instructionCalls: this.instructionCountersAvailable ? this.instructionCalls : null,
+      jsInstructionCalls: this.jsInstructionCalls,
+      directInstructionCalls: this.instructionCountersAvailable ? this.directInstructionCalls : null,
+      instructionCountersAvailable: this.instructionCountersAvailable};
   }
   close() {
     if (this.closed) return;

@@ -27,6 +27,7 @@ pub(super) struct IndependentSession {
     memory_id: u64,
     thread: u32,
     quota: Option<u32>,
+    direct_instruction_calls: u64,
 }
 
 impl IndependentSession {
@@ -44,6 +45,7 @@ impl IndependentSession {
             memory_id: memory.identity(),
             thread: instance.threads.current_id(),
             quota: None,
+            direct_instruction_calls: 0,
         })
     }
 
@@ -464,6 +466,30 @@ pub(crate) fn cpu_runtime_write(context: u32, address: u32, width: u32, value: u
 
 pub(crate) fn cpu_instruction(low: u32, high: u32) -> u32 {
     access(low, high, instruction::execute)
+}
+
+pub(crate) fn cpu_runtime_instruction(context: u32) -> u32 {
+    helper(context, |instance, session| {
+        let Some(attempts) = session.direct_instruction_calls.checked_add(1) else {
+            session.state.status = Status::Infrastructure as u32;
+            session.failed = true;
+            return Status::Infrastructure as u32;
+        };
+        session.direct_instruction_calls = attempts;
+        if instruction::execute(instance, session).is_err() {
+            session.state.status = Status::Infrastructure as u32;
+            session.failed = true;
+        }
+        session.state.status
+    })
+}
+
+pub(crate) fn cpu_runtime_instruction_count_low() -> u32 {
+    inspect_session(|session| session.direct_instruction_calls as u32)
+}
+
+pub(crate) fn cpu_runtime_instruction_count_high() -> u32 {
+    inspect_session(|session| (session.direct_instruction_calls >> 32) as u32)
 }
 
 pub(crate) fn cpu_publish(low: u32, high: u32) -> u32 {

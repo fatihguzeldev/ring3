@@ -10,36 +10,40 @@ const uleb = value => {
 };
 const text = value => [...uleb(value.length), ...new TextEncoder().encode(value)];
 const section = (id, bytes) => [id, ...uleb(bytes.length), ...bytes];
-function moduleBytes(dispatcher, body) {
+function moduleBytes(dispatcher, body, service) {
   const imports = dispatcher
-    ? [2, ...text('env'), ...text('memory'), 2, 0, 1,
-      ...text('env'), ...text('functions'), 1, 0x70, 0, 1]
+    ? [service ? 3 : 2, ...text('env'), ...text('memory'), 2, 0, 1,
+      ...text('env'), ...text('functions'), 1, 0x70, 0, 1,
+      ...(service ? [...text('cpu'), ...text(service), 0, 0] : [])]
     : [1, ...text('env'), ...text('memory'), 2, 0, 1];
   const code = [0, ...body, 0x0b];
   return new Uint8Array([0, 97, 115, 109, 1, 0, 0, 0,
     ...section(1, [1, 0x60, 1, 0x7f, 1, 0x7f]),
     ...section(2, imports), ...section(3, [1, 0]),
-    ...section(7, [1, ...text('run'), 0, 0]),
+    ...section(7, [1, ...text('run'), 0, service ? 1 : 0]),
     ...section(10, [1, ...uleb(code.length), ...code])]);
 }
 const dispatcher = moduleBytes(true, [0x20, 0, 0x41, 1, 0x11, 0, 0]);
-const gateUnit = moduleBytes(false, [
+const gateBody = [
   0x20, 0, 0x41, 5, 0x36, 2, 52,
   0x20, 0, 0x41, 1, 0x36, 2, 56,
   0x20, 0, 0x41, 4, 0x36, 2, 48,
   0x41, 5,
-]);
+];
+const gateUnit = moduleBytes(false, gateBody);
+const instructionUnit = moduleBytes(false, [0x20, 0, 0x41, 7, 0x36, 2, 52, 0x41, 7]);
+const directDispatcher = moduleBytes(true, [0x20, 0, 0x41, 1, 0x11, 0, 0, 0x1a, 0x20, 0, 0x10, 0], 'instruction');
 
-function fixture({version = 1, unit = gateUnit, publishStatus = 0} = {}) {
+function fixture({version = 1, unit = gateUnit, publishStatus = 0, dispatch = dispatcher} = {}) {
   const memory = new WebAssembly.Memory({initial: 1}), pointer = 1024, base = 4096;
-  new Uint8Array(memory.buffer, base).set(dispatcher);
+  new Uint8Array(memory.buffer, base).set(dispatch);
   new Uint8Array(memory.buffer, base + 512).set(unit);
   let active = false, begins = 0, publishes = 0, ends = 0, prepared = 0;
   const view = () => new DataView(memory.buffer);
   const engine = {memory, get: offset => offset === 48 ? 0x1000 : offset === 72 ? 8 : 0x10001,
     api: {
       cpu_abi: () => version, cpu_context_ptr: () => pointer,
-      cpu_dispatch_code_ptr: () => base, cpu_dispatch_code_len: () => dispatcher.length,
+      cpu_dispatch_code_ptr: () => base, cpu_dispatch_code_len: () => dispatch.length,
       cpu_begin: (...key) => {
         assert.deepEqual(key, KEY); assert.equal(active, false); active = true; begins++;
         const d = view();
@@ -55,6 +59,17 @@ function fixture({version = 1, unit = gateUnit, publishStatus = 0} = {}) {
     },
   };
   return {engine, pointer, view, counters: () => ({active, begins, publishes, ends, prepared})};
+}
+
+function directFixture(body = gateBody) {
+  const f = fixture({dispatch: directDispatcher, unit: instructionUnit});
+  const increment = [0x20, 0, 0x20, 0, 0x28, 2, ...uleb(200), 0x41, 1, 0x6a, 0x36, 2, ...uleb(200)];
+  const helper = new WebAssembly.Instance(new WebAssembly.Module(moduleBytes(false, [...increment, ...body])), {env: {memory: f.engine.memory}});
+  f.engine.api.cpu_runtime_instruction = helper.exports.run;
+  f.engine.api.cpu_runtime_instruction_count_low = () => f.view().getUint32(f.pointer + 200, true);
+  f.engine.api.cpu_runtime_instruction_count_high = () => 0;
+  f.engine.api.cpu_instruction = () => {throw new Error('direct dispatcher must not cross the JavaScript instruction boundary');};
+  return f;
 }
 
 test('independent backend rejects incompatible capability before creating an execution owner', () => {
@@ -130,6 +145,59 @@ test('an instruction continuation must consume work before compiled execution re
   const cache = new IndependentCodeCache(f.engine);
   cache.import();
   assert.throws(() => cache.execute(cache.select()), /made no bounded progress/);
+  assert.equal(f.counters().ends, 1);
+  assert.deepEqual([cache.stats().instructionCalls, cache.stats().jsInstructionCalls, cache.stats().directInstructionCalls], [1, 1, 0]);
+});
+
+test('direct Wasm instruction binding keeps per-cache native attempt counts separate from JS calls', () => {
+  const f = directFixture();
+  for (let index = 0; index < 2; index++) {
+    const cache = new IndependentCodeCache(f.engine, {budget: 5});
+    assert.deepEqual([cache.stats().instructionCalls, cache.stats().jsInstructionCalls, cache.stats().directInstructionCalls], [0, 0, 0]);
+    const run = cache.execute(cache.select());
+    assert.deepEqual([run.reason, run.retired, run.work], [8, 1, 1]);
+    assert.deepEqual([cache.stats().instructionCalls, cache.stats().jsInstructionCalls, cache.stats().directInstructionCalls], [1, 0, 1]);
+    cache.close();
+  }
+  assert.equal(f.engine.api.cpu_runtime_instruction_count_low(), 2);
+});
+
+test('direct dispatcher requires its exact instruction export and counter bindings', () => {
+  for (const missing of ['cpu_runtime_instruction', 'cpu_runtime_instruction_count_low', 'cpu_runtime_instruction_count_high']) {
+    const f = directFixture(); delete f.engine.api[missing];
+    assert.throws(() => new IndependentCodeCache(f.engine), new RegExp(`missing independent CPU export ${missing}`));
+    assert.equal(f.counters().begins, 0);
+  }
+  const f = fixture({dispatch: moduleBytes(true, [0x41, 5], 'read')});
+  assert.throws(() => new IndependentCodeCache(f.engine), /invalid independent CPU dispatcher import cpu.read/);
+});
+
+test('direct service traps retain attempt accounting and never publish or replay', () => {
+  const f = directFixture([0x00]), cache = new IndependentCodeCache(f.engine);
+  assert.throws(() => cache.execute(cache.select()), WebAssembly.RuntimeError);
+  assert.deepEqual([cache.stats().instructionCalls, cache.stats().jsInstructionCalls, cache.stats().directInstructionCalls], [1, 0, 1]);
+  assert.equal(f.counters().ends, 1); assert.equal(f.counters().publishes, 0);
+  assert.throws(() => cache.select(), WebAssembly.RuntimeError);
+  assert.equal(f.engine.api.cpu_runtime_instruction_count_low(), 1);
+});
+
+test('unavailable direct attempt counts do not replace a service trap or report zero work', () => {
+  const f = directFixture([0x00]), count = f.engine.api.cpu_runtime_instruction_count_low;
+  let reads = 0;
+  f.engine.api.cpu_runtime_instruction_count_low = () => {if (reads++) throw new Error('counter unavailable'); return count();};
+  const cache = new IndependentCodeCache(f.engine);
+  assert.throws(() => cache.execute(cache.select()), WebAssembly.RuntimeError);
+  assert.equal(cache.failure.counterFailure, 'counter unavailable');
+  assert.deepEqual([cache.stats().instructionCalls, cache.stats().directInstructionCalls,
+    cache.stats().instructionCountersAvailable], [null, null, false]);
+  assert.equal(f.counters().ends, 1);
+});
+
+test('a direct dispatcher cannot fall back to a JS service when Instruction escapes', () => {
+  const f = directFixture([0x41, 7]), cache = new IndependentCodeCache(f.engine);
+  assert.throws(() => cache.execute(cache.select()), /direct independent CPU dispatcher yielded Instruction/);
+  assert.equal(cache.stats().jsInstructionCalls, 0);
+  assert.equal(cache.stats().directInstructionCalls, 1);
   assert.equal(f.counters().ends, 1);
 });
 

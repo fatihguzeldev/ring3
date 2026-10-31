@@ -46,6 +46,7 @@ pub(crate) use independent::{
     cpu_capture_windows_call, cpu_code_len, cpu_code_ptr, cpu_complete_windows_call,
     cpu_context_ptr, cpu_dispatch_code_len, cpu_dispatch_code_ptr, cpu_dispatch_exception, cpu_end,
     cpu_finish_exception, cpu_finish_windows_callback, cpu_instruction, cpu_prepare, cpu_publish,
+    cpu_runtime_instruction, cpu_runtime_instruction_count_high, cpu_runtime_instruction_count_low,
     cpu_runtime_read, cpu_runtime_write, cpu_unit_slot,
 };
 
