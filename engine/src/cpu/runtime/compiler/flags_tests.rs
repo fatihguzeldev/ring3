@@ -458,3 +458,142 @@ console.log('SAHF preserves only old OF; narrow carry aliases, incoming landings
     );
     fs::remove_dir_all(scratch).unwrap();
 }
+
+#[test]
+fn generated_flag_recipe_joins_preserve_values_cold_entries_and_loop_frontiers() {
+    use std::{
+        fs,
+        process::Command,
+        time::{SystemTime, UNIX_EPOCH},
+    };
+    let scratch = std::env::temp_dir().join(format!(
+        "ring3-runtime-flag-joins-{}-{}",
+        std::process::id(),
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    fs::create_dir(&scratch).unwrap();
+    let mut memory = AddressSpace::new(1).unwrap();
+    memory
+        .map_zeroed(
+            PageRange::new(GuestAddress(0x1000), 1).unwrap(),
+            Permissions::ALL,
+        )
+        .unwrap();
+    for (name, opcode) in [("same", 0xc0), ("conflict", 0xe8)] {
+        let mut code = [0x90; 42];
+        code[..7].copy_from_slice(&[0x74, 0x0e, 0x83, 0xc0, 1, 0xeb, 0x19]);
+        code[16..21].copy_from_slice(&[0x83, opcode, 1, 0xeb, 0x0b]);
+        code[32..42].copy_from_slice(&[0x8b, 0x16, 0x0f, 0x92, 0xc3, 0x0f, 0x90, 0xc7, 0x0f, 0x0b]);
+        memory.write(GuestAddress(0x1000), &code).unwrap();
+        let unit = compile_with_gates(
+            &memory,
+            GuestAddress(0x1000),
+            9,
+            &[(GuestAddress(0x1028), 23)],
+        )
+        .unwrap();
+        assert_eq!(
+            unit.entries,
+            [
+                0x1000, 0x1002, 0x1005, 0x1010, 0x1013, 0x1020, 0x1022, 0x1025, 0x1028
+            ]
+        );
+        fs::write(scratch.join(format!("{name}.wasm")), unit.wasm).unwrap();
+    }
+    let mut code = [0x90; 25];
+    code[..2].copy_from_slice(&[0xeb, 0x0e]);
+    code[16..25].copy_from_slice(&[0x83, 0xc0, 1, 0x8b, 0x16, 0xe2, 0xf9, 0x0f, 0x0b]);
+    memory.write(GuestAddress(0x1000), &code).unwrap();
+    let unit = compile_with_gates(
+        &memory,
+        GuestAddress(0x1000),
+        5,
+        &[(GuestAddress(0x1017), 23)],
+    )
+    .unwrap();
+    assert_eq!(unit.entries, [0x1000, 0x1010, 0x1013, 0x1015, 0x1017]);
+    fs::write(scratch.join("loop.wasm"), unit.wasm).unwrap();
+    let mut code = [0x90; 29];
+    code[..7].copy_from_slice(&[0x74, 0x0e, 0x83, 0xe8, 2, 0xeb, 0x0c]);
+    code[16..29].copy_from_slice(&[
+        0x83, 0xc0, 1, 0x8b, 0x16, 0x0f, 0x92, 0xc3, 0x0f, 0x90, 0xc7, 0x0f, 0x0b,
+    ]);
+    memory.write(GuestAddress(0x1000), &code).unwrap();
+    let unit = compile_with_gates(
+        &memory,
+        GuestAddress(0x1000),
+        8,
+        &[(GuestAddress(0x101b), 23)],
+    )
+    .unwrap();
+    assert_eq!(
+        unit.entries,
+        [
+            0x1000, 0x1002, 0x1005, 0x1010, 0x1013, 0x1015, 0x1018, 0x101b
+        ]
+    );
+    fs::write(scratch.join("interior-conflict.wasm"), unit.wasm).unwrap();
+    let result = Command::new("node").arg("--input-type=module").arg("-e").arg(r#"
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+const memory=new WebAssembly.Memory({initial:2}),ram=new Uint8Array(memory.buffer),d=new DataView(memory.buffer),ctx=0x8000;
+const word=(at,v)=>d.setUint32(ctx+at,v>>>0,true);
+let reads=[],faultAt=0,throwAt=0;
+const imports={env:{memory},cpu:{read(p,a,w){
+ assert.deepEqual([p,a>>>0,w],[ctx,0x6000,4]);reads.push(ram.slice());
+ if(reads.length===throwAt)throw Error('authored-join-import-trap');
+ if(reads.length===faultAt){word(52,3);word(60,a);word(64,0x10104);word(68,4);return 0;}
+ word(52,0);return 0x76543210;
+},write(){throw Error('the join fixtures never write guest memory');}}};
+const runs={};for(const name of['same','conflict','loop','interior-conflict'])runs[name]=(await WebAssembly.instantiate(fs.readFileSync(`${process.argv[1]}/${name}.wasm`),imports)).instance.exports.run;
+function scenario(name,input,expect){
+ for(let i=0;i<ram.length;i++)ram[i]=(i*59+23)&255;ram.fill(0,ctx,ctx+160);
+ word(0,1);word(4,160);[0x7fffffff,2,0xdeadbeef,0xa5a5ff7e,0x4800,10,0x6000,12].forEach((v,i)=>word(8+4*i,v));
+ for(const[index,v]of Object.entries(input.regs??{}))word(8+4*Number(index),v);
+ word(40,input.pc??0x1000);word(44,input.flags??0x200603);word(48,input.quota);word(56,0xfffffffe);word(60,0x11223344);word(64,0x55667788);word(68,0x12345678);word(152,63);
+ const before=ram.slice();reads=[];faultAt=input.faultAt??0;throwAt=input.throwAt??0;
+ if(throwAt){assert.throws(()=>runs[name](ctx),/authored-join-import-trap/);assert.deepEqual(ram,before);assert.equal(reads.length,throwAt);return;}
+ const expected=before.slice(),view=new DataView(expected.buffer),set=(at,v)=>view.setUint32(ctx+at,v>>>0,true);
+ for(const[at,v]of[[40,expect.pc],[44,expect.flags],[48,input.quota-expect.steps],[52,expect.status],[56,(0xfffffffe+expect.steps)>>>0],...(expect.fields??[])])set(at,v);
+ for(const[index,v]of Object.entries(expect.regs??{}))set(8+4*Number(index),v);
+ assert.equal(runs[name](ctx),expect.status);assert.deepEqual(ram,expected,`${name}/entry${(input.pc??0x1000).toString(16)}/quota${input.quota}: full state`);assert.equal(reads.length,expect.reads??0);
+ for(const observed of reads)assert.deepEqual(observed,before,'a recipe edge does not publish scalar state before a read helper');
+}
+scenario('same',{quota:7,flags:0x200643,regs:{0:0xffffffff}},{pc:0x1028,steps:6,status:5,flags:0x200657,regs:{0:0,2:0x76543210,3:0xa5a50001},reads:1,fields:[[68,23]]});
+scenario('same',{quota:7},{pc:0x1028,steps:6,status:5,flags:0x200e96,regs:{0:0x80000000,2:0x76543210,3:0xa5a50100},reads:1,fields:[[68,23]]});
+scenario('same',{quota:3,flags:0x200643,regs:{0:0xffffffff}},{pc:0x1020,steps:3,status:2,flags:0x200657,regs:{0:0}});
+scenario('same',{quota:3},{pc:0x1020,steps:3,status:2,flags:0x200e96,regs:{0:0x80000000}});
+scenario('same',{quota:4},{pc:0x1022,steps:4,status:2,flags:0x200e96,regs:{0:0x80000000,2:0x76543210},reads:1});
+scenario('same',{quota:4,faultAt:1},{pc:0x1020,steps:3,status:3,flags:0x200e96,regs:{0:0x80000000},reads:1,fields:[[60,0x6000],[64,0x10104],[68,4]]});
+scenario('same',{quota:7,throwAt:1});
+scenario('same',{pc:0x1020,quota:4,flags:0x200e03,regs:{0:0x11223344}},{pc:0x1028,steps:3,status:5,flags:0x200e03,regs:{2:0x76543210,3:0xa5a50101},reads:1,fields:[[68,23]]});
+scenario('same',{pc:0x1020,quota:0,flags:0x200e03,regs:{0:0x11223344}},{pc:0x1020,steps:0,status:2,flags:0x200e03});
+scenario('conflict',{quota:7,flags:0x200643,regs:{0:0}},{pc:0x1028,steps:6,status:5,flags:0x200697,regs:{0:0xffffffff,2:0x76543210,3:0xa5a50001},reads:1,fields:[[68,23]]});
+scenario('conflict',{quota:7},{pc:0x1028,steps:6,status:5,flags:0x200e96,regs:{0:0x80000000,2:0x76543210,3:0xa5a50100},reads:1,fields:[[68,23]]});
+scenario('conflict',{quota:3,flags:0x200643,regs:{0:0}},{pc:0x1020,steps:3,status:2,flags:0x200697,regs:{0:0xffffffff}});
+scenario('loop',{quota:1,regs:{0:0xfffffffe}},{pc:0x1010,steps:1,status:2,flags:0x200603});
+scenario('loop',{quota:4,regs:{0:0xfffffffe}},{pc:0x1010,steps:4,status:2,flags:0x200686,regs:{0:0xffffffff,1:1,2:0x76543210},reads:1});
+scenario('loop',{quota:5,regs:{0:0xfffffffe}},{pc:0x1013,steps:5,status:2,flags:0x200657,regs:{0:0,1:1,2:0x76543210},reads:1});
+scenario('loop',{quota:8,regs:{0:0xfffffffe}},{pc:0x1017,steps:7,status:5,flags:0x200657,regs:{0:0,1:0,2:0x76543210},reads:2,fields:[[68,23]]});
+scenario('loop',{quota:6,faultAt:2,regs:{0:0xfffffffe}},{pc:0x1013,steps:5,status:3,flags:0x200657,regs:{0:0,1:1,2:0x76543210},reads:2,fields:[[60,0x6000],[64,0x10104],[68,4]]});
+scenario('interior-conflict',{quota:6,flags:0x200643},{pc:0x101b,steps:5,status:5,flags:0x200e96,regs:{0:0x80000000,2:0x76543210,3:0xa5a50100},reads:1,fields:[[68,23]]});
+scenario('interior-conflict',{quota:7,regs:{0:0}},{pc:0x101b,steps:6,status:5,flags:0x200693,regs:{0:0xfffffffe,2:0x76543210,3:0xa5a50001},reads:1,fields:[[68,23]]});
+scenario('interior-conflict',{quota:2,flags:0x200643},{pc:0x1013,steps:2,status:2,flags:0x200e96,regs:{0:0x80000000}});
+scenario('interior-conflict',{quota:3,regs:{0:0}},{pc:0x1013,steps:3,status:2,flags:0x200693,regs:{0:0xfffffffe}});
+scenario('interior-conflict',{quota:3,flags:0x200643,faultAt:1},{pc:0x1013,steps:2,status:3,flags:0x200e96,regs:{0:0x80000000},reads:1,fields:[[60,0x6000],[64,0x10104],[68,4]]});
+scenario('interior-conflict',{quota:4,faultAt:1,regs:{0:0}},{pc:0x1013,steps:3,status:3,flags:0x200693,regs:{0:0xfffffffe},reads:1,fields:[[60,0x6000],[64,0x10104],[68,4]]});
+scenario('interior-conflict',{pc:0x1013,quota:4,flags:0x200e03,regs:{0:0x11223344}},{pc:0x101b,steps:3,status:5,flags:0x200e03,regs:{2:0x76543210,3:0xa5a50101},reads:1,fields:[[68,23]]});
+console.log('equal and conflicting flag recipes, canonical cold interiors, loop fixed points, next-entry budget/fault guards and unchanged helper publication passed');
+"#).arg(&scratch).output().unwrap();
+    assert!(
+        result.status.success(),
+        "fixture {} failed:\n{}\n{}",
+        scratch.display(),
+        String::from_utf8_lossy(&result.stdout),
+        String::from_utf8_lossy(&result.stderr)
+    );
+    fs::remove_dir_all(scratch).unwrap();
+}
