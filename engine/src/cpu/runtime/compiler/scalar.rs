@@ -279,6 +279,7 @@ pub(super) fn emit(
                 out.exit(7);
             } else {
                 debug_assert_eq!(out.recipe, flag_analysis.after(instruction.pc().0));
+                memory::release_scratch(&mut out);
                 out.c()
                     .local_get(REMAIN)
                     .i32_const(1)

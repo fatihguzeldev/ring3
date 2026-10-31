@@ -139,6 +139,18 @@ fn reload(out: &mut Output) {
     out.c().end();
 }
 
+// only a completed instruction may release this scratch; paired RMW stores
+// and multiword accesses consume their translation proof before this boundary.
+pub(super) fn release_scratch(out: &mut Output) {
+    out.c()
+        .i32_const(0)
+        .local_set(CACHE_ENTRY)
+        .i32_const(0)
+        .local_set(CACHE_FLAGS)
+        .i64_const(0)
+        .local_set(CACHE_RECORD);
+}
+
 fn access(width: u32) -> MemArg {
     MemArg {
         offset: 0,
