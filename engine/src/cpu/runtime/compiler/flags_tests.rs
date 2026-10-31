@@ -2,6 +2,137 @@ use super::*;
 use crate::memory::{PageRange, Permissions};
 
 #[test]
+fn generated_static_flag_recipes_preserve_clobbers_entries_and_fault_frontiers() {
+    use std::{
+        fs,
+        process::Command,
+        time::{SystemTime, UNIX_EPOCH},
+    };
+    let scratch = std::env::temp_dir().join(format!(
+        "ring3-runtime-static-flags-{}-{}",
+        std::process::id(),
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    fs::create_dir(&scratch).unwrap();
+    let mut memory = AddressSpace::new(1).unwrap();
+    memory
+        .map_zeroed(
+            PageRange::new(GuestAddress(0x1000), 1).unwrap(),
+            Permissions::ALL,
+        )
+        .unwrap();
+    for (kind, opcode) in [("add", 0x01), ("sub", 0x29), ("adc", 0x11), ("sbb", 0x19)] {
+        for (form, operand) in [("clobber", 0xc8), ("alias", 0xc0)] {
+            let mut code = vec![opcode, operand, 0xb9, 0x44, 0x33, 0x22, 0x11];
+            code.extend_from_slice(&[0x0f, 0x90, 0xc2, 0x0f, 0x92, 0xc6, 0x9f]);
+            memory.write(GuestAddress(0x1000), &code).unwrap();
+            fs::write(
+                scratch.join(format!("{kind}-{form}.wasm")),
+                compile(&memory, GuestAddress(0x1000), 5).unwrap().wasm,
+            )
+            .unwrap();
+        }
+    }
+    for (name, code, count, gates) in [
+        (
+            "partial",
+            &[0x01, 0xc8, 0xb1, 0x44, 0x0f, 0x90, 0xc2, 0x9f][..],
+            4,
+            vec![],
+        ),
+        (
+            "cross",
+            &[
+                0x01, 0xc8, 0xeb, 4, 0x90, 0x90, 0x90, 0x90, 0x31, 0xdb, 0x83, 0xd2, 0, 0x46, 0x0f,
+                0x0b,
+            ][..],
+            6,
+            vec![(GuestAddress(0x100e), 23)],
+        ),
+        (
+            "fault",
+            &[0x01, 0xc8, 0x03, 0x1e, 0x31, 0xd2][..],
+            3,
+            vec![],
+        ),
+    ] {
+        memory.write(GuestAddress(0x1000), code).unwrap();
+        fs::write(
+            scratch.join(format!("{name}.wasm")),
+            compile_with_gates(&memory, GuestAddress(0x1000), count, &gates)
+                .unwrap()
+                .wasm,
+        )
+        .unwrap();
+    }
+    let result = Command::new("node").arg("--input-type=module").arg("-e").arg(r#"
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+const memory=new WebAssembly.Memory({initial:2}),ram=new Uint8Array(memory.buffer),d=new DataView(memory.buffer),ctx=0x8000;
+const word=(at,v)=>d.setUint32(ctx+at,v>>>0,true);
+let mode='',reads=[];
+const imports={env:{memory},cpu:{read(p,a,w){
+ assert.deepEqual([p,a>>>0,w],[ctx,0x6000,4]);reads.push(ram.slice());if(mode==='throw')throw Error('authored-flag-producer-trap');
+ word(52,3);word(60,a);word(64,0x10104);word(68,4);return 0;
+},write(){throw Error('no guest write in static flag recipe fixtures');}}};
+const runs={};for(const name of['add-clobber','sub-clobber','adc-clobber','sbb-clobber','add-alias','sub-alias','adc-alias','sbb-alias','partial','cross','fault'])runs[name]=(await WebAssembly.instantiate(fs.readFileSync(`${process.argv[1]}/${name}.wasm`),imports)).instance.exports.run;
+function scenario(name,input,expect){
+ for(let i=0;i<ram.length;i++)ram[i]=(i*47+5)&255;ram.fill(0,ctx,ctx+160);
+ word(0,1);word(4,160);[0x7fffffff,1,0x1234abcd,0x12345678,0x4800,10,0x6000,12].forEach((v,i)=>word(8+4*i,v));
+ for(const[index,v]of Object.entries(input.regs??{}))word(8+4*Number(index),v);
+ word(40,input.pc??0x1000);word(44,0x200603);word(48,input.quota);word(56,0xfffffffe);word(60,0x11223344);word(64,0x55667788);word(68,0x12345678);word(152,63);
+ const before=ram.slice();mode=input.mode??'';reads=[];
+ if(mode==='throw'){assert.throws(()=>runs[name](ctx),/authored-flag-producer-trap/);assert.deepEqual(ram,before);assert.deepEqual(reads,[before]);return;}
+ const expected=before.slice(),view=new DataView(expected.buffer),set=(at,v)=>view.setUint32(ctx+at,v>>>0,true);
+ for(const[at,v]of[[40,expect.pc],[44,expect.flags],[48,input.quota-expect.steps],[52,expect.status??0],[56,(0xfffffffe+expect.steps)>>>0],...(expect.fields??[])])set(at,v);
+ for(const[index,v]of Object.entries(expect.regs??{}))set(8+4*Number(index),v);
+ assert.equal(runs[name](ctx),expect.status??0,name);assert.deepEqual(ram,expected,`${name}/entry${(input.pc??0x1000).toString(16)}/quota${input.quota}: full state`);
+ assert.equal(reads.length,expect.reads??0);for(const observed of reads)assert.deepEqual(observed,before,'faulting consumers do not publish scalar state before the helper');
+}
+for(const[name,eax,ecx,outEax,outEdx,flags]of[
+ ['add-clobber',0x7fffffff,1,0x80009600,0x12340001,0x200e96],
+ ['sub-clobber',0x80000000,1,0x7fff16ff,0x12340001,0x200e16],
+ ['adc-clobber',0x7fffffff,0,0x80009600,0x12340001,0x200e96],
+ ['sbb-clobber',0x80000000,0,0x7fff16ff,0x12340001,0x200e16],
+ ['add-alias',0x40000000,1,0x80008600,0x12340001,0x200e86],
+ ['sub-alias',0x80000000,1,0x00004600,0x12340000,0x200646],
+ ['adc-alias',0x80000000,1,0x00000301,0x12340101,0x200e03],
+ ['sbb-alias',0x80000000,1,0xffff97ff,0x12340100,0x200697],
+])scenario(name,{quota:5,regs:{0:eax,1:ecx}},{pc:0x100e,steps:5,flags,regs:{0:outEax,1:0x11223344,2:outEdx}});
+scenario('partial',{quota:4},{pc:0x1008,steps:4,flags:0x200e96,regs:{0:0x80009600,1:0x44,2:0x1234ab01}});
+scenario('add-clobber',{pc:0x1002,quota:4,regs:{0:0x12345678,1:0xdeadbeef}},{pc:0x100e,steps:4,flags:0x200603,regs:{0:0x12340378,1:0x11223344,2:0x12340100}});
+scenario('add-clobber',{pc:0x1002,quota:0},{pc:0x1002,steps:0,flags:0x200603,status:2});
+scenario('add-clobber',{pc:0x1007,quota:1},{pc:0x100a,steps:1,flags:0x200603,status:2,regs:{2:0x1234ab00}});
+for(const[quota,pc,flags,eax,edx,ebx,esi]of[
+ [0,0x1000,0x200603,0x7fffffff,0xffffffff,0x12345678,0x7fffffff],
+ [1,0x1002,0x200e96,0x80000000,0xffffffff,0x12345678,0x7fffffff],
+ [2,0x1008,0x200e96,0x80000000,0xffffffff,0x12345678,0x7fffffff],
+ [3,0x100a,0x200646,0x80000000,0xffffffff,0,0x7fffffff],
+ [4,0x100d,0x200686,0x80000000,0xffffffff,0,0x7fffffff],
+ [5,0x100e,0x200e96,0x80000000,0xffffffff,0,0x80000000],
+ [6,0x100e,0x200e96,0x80000000,0xffffffff,0,0x80000000],
+])scenario('cross',{quota,regs:{2:0xffffffff,6:0x7fffffff}},{pc,steps:Math.min(quota,5),flags,status:quota===6?5:2,regs:{0:eax,2:edx,3:ebx,6:esi},fields:quota===6?[[68,23]]:[]});
+scenario('cross',{pc:0x1008,quota:0},{pc:0x1008,steps:0,flags:0x200603,status:2});
+scenario('cross',{pc:0x1008,quota:1},{pc:0x100a,steps:1,flags:0x200646,status:2,regs:{3:0}});
+scenario('cross',{pc:0x100a,quota:1,regs:{2:0xffffffff}},{pc:0x100d,steps:1,flags:0x200657,status:2,regs:{2:0}});
+scenario('fault',{quota:3},{pc:0x1002,steps:1,flags:0x200e96,status:3,regs:{0:0x80000000},reads:1,fields:[[60,0x6000],[64,0x10104],[68,4]]});
+scenario('fault',{quota:3,mode:'throw'});
+console.log('literal static FLAGS: stable RHS clobbers and aliases, partial writes, incoming landings, cross-block zero/one quotas, carry and PRE memory faults passed');
+"#).arg(&scratch).output().unwrap();
+    assert!(
+        result.status.success(),
+        "fixture {} failed:\n{}\n{}",
+        scratch.display(),
+        String::from_utf8_lossy(&result.stdout),
+        String::from_utf8_lossy(&result.stderr)
+    );
+    fs::remove_dir_all(scratch).unwrap();
+}
+
+#[test]
 fn generated_ah_flag_transfers_preserve_reserved_bits_and_partial_registers() {
     use std::{
         fs,
@@ -165,6 +296,11 @@ fn generated_pending_flags_survive_numeric_success_faults_and_status_observers()
         ("constant", &[0x01, 0xc8, 0xd9, 0xe8, 0x31, 0xd2][..], 3),
         ("simd", &[0x01, 0xc8, 0x0f, 0x28, 0xc1, 0x31, 0xd2][..], 3),
         ("status", &[0x01, 0xc8, 0xdf, 0xe0, 0x9e][..], 3),
+        (
+            "status-rhs",
+            &[0x01, 0xc3, 0xdf, 0xe0, 0x0f, 0x90, 0xc2][..],
+            3,
+        ),
         ("wait", &[0x01, 0xc8, 0x9b][..], 2),
         ("load", &[0x01, 0xc8, 0xd9, 0x03][..], 2),
         ("integer-compare", &[0x01, 0xc8, 0xdb, 0xf1][..], 2),
@@ -185,14 +321,15 @@ const imports={env:{memory},cpu:{
  read(p,a,w){assert.deepEqual([p,a>>>0,w],[ctx,0x3000,4]);reads++;word(52,3);word(60,0x3000);word(64,0x10104);word(68,4);return 0;},
  write(){throw Error('no guest store in these numeric consumers');}
 }};
-const units={};for(const name of['constant','simd','status','wait','load','integer-compare'])units[name]=(await WebAssembly.instantiate(fs.readFileSync(`${process.argv[1]}/${name}.wasm`),imports)).instance.exports.run;
-function scenario(name,quota,expect,{pending=false}={}){
+const units={};for(const name of['constant','simd','status','status-rhs','wait','load','integer-compare'])units[name]=(await WebAssembly.instantiate(fs.readFileSync(`${process.argv[1]}/${name}.wasm`),imports)).instance.exports.run;
+function scenario(name,quota,expect,{pending=false,rhs=false}={}){
  for(let i=0;i<ram.length;i++)ram[i]=(i*41+13)&255;ram.fill(0,ctx,ctx+160);ram.fill(0,view,view+40);
- word(0,1);word(4,160);[0x7fffffff,1,0x12345678,0x3000,0x4800,10,11,12].forEach((v,i)=>word(8+4*i,v));word(40,0x1000);word(44,0x603);word(48,quota);word(52,0xabcdef01);word(56,0xffffffff);word(60,0x11223344);word(64,0x55667788);word(68,0x12345678);word(124,view);word(152,63);
+ word(0,1);word(4,160);[0x7fffffff,1,0x12345678,rhs?1:0x3000,0x4800,10,11,12].forEach((v,i)=>word(8+4*i,v));word(40,0x1000);word(44,0x603);word(48,quota);word(52,0xabcdef01);word(56,0xffffffff);word(60,0x11223344);word(64,0x55667788);word(68,0x12345678);word(124,view);word(152,63);
  d.setUint32(view,1,true);d.setUint32(view+4,40,true);d.setUint32(view+8,fp,true);d.setUint32(view+36,simd,true);[0x23,0x1b,0x23,0x23,0x3b,0x43].forEach((v,i)=>d.setUint32(view+12+4*i,v,true));
  for(const[at,v]of[[0,pending?0x003e:0x003f],[2,pending?0x4501:0x4500],[4,0xffff],[6,0x321],[16,0x71],[18,0x72]])d.setUint16(fp+at,v,true);d.setUint32(fp+8,0x12345678,true);d.setUint32(fp+12,0x87654321,true);d.setUint32(simd,0x1f80,true);
  const initial=ram.slice(),expected=initial.slice(),out=new DataView(expected.buffer),set=(at,v)=>out.setUint32(ctx+at,v>>>0,true);reads=0;
  for(const[at,v]of[[8,expect.eax??0x80000000],[16,expect.edx??0x12345678],[40,expect.pc],[44,expect.flags??0xe96],[48,quota-expect.steps],[52,expect.status],[56,(0xffffffff+expect.steps)>>>0]])set(at,v);
+ if(expect.ebx!==undefined)set(20,expect.ebx);
  if(expect.loaded){out.setUint16(fp+2,0x7d00,true);out.setUint16(fp+4,0x3fff,true);out.setUint16(fp+6,0x1e8,true);out.setUint32(fp+8,0x1002,true);out.setUint16(fp+16,0x1b,true);out.setBigUint64(fp+90,0x8000000000000000n,true);out.setUint16(fp+98,0x3fff,true);}
  if(expect.simd)expected.set(initial.slice(simd+20,simd+36),simd+4);
  if(name==='load'){set(60,0x3000);set(64,0x10104);set(68,4);}
@@ -205,6 +342,7 @@ scenario('simd',2,{pc:0x1005,steps:2,status:2,simd:true});
 scenario('simd',3,{pc:0x1007,steps:3,status:0,flags:0x646,edx:0,simd:true});
 scenario('status',2,{pc:0x1004,steps:2,status:2,eax:0x80004500});
 scenario('status',3,{pc:0x1005,steps:3,status:0,eax:0x80004500,flags:0xe47});
+scenario('status-rhs',3,{pc:0x1007,steps:3,status:0,eax:0x7fff4500,ebx:0x80000000,edx:0x12345601},{rhs:true});
 scenario('wait',2,{pc:0x1003,steps:2,status:0});
 scenario('wait',2,{pc:0x1002,steps:1,status:7},{pending:true});
 scenario('load',2,{pc:0x1002,steps:1,status:3});
