@@ -344,6 +344,36 @@ impl Recipe {
             .local_set(FLAGS);
     }
 
+    fn materialize_inline(self, out: &mut Output) {
+        let preserve = matches!(self, Self::Increment { .. });
+        out.c()
+            .local_get(FLAGS)
+            .i32_const(if preserve { !0x8d4 } else { !0x8d5 })
+            .i32_and();
+        for bit in [6, 7, 2] {
+            self.bit(out, bit);
+            out.c().i32_const(bit as i32).i32_shl().i32_or();
+        }
+        if !matches!(self, Self::Logical) {
+            self.left(out);
+            self.right(out);
+            out.c()
+                .i32_xor()
+                .local_get(RESULT)
+                .i32_xor()
+                .i32_const(16)
+                .i32_and()
+                .i32_or();
+            self.bit(out, 11);
+            out.c().i32_const(11).i32_shl().i32_or();
+            if !preserve {
+                self.bit(out, 0);
+                out.c().i32_or();
+            }
+        }
+        out.c().i32_const(2).i32_or().local_set(FLAGS);
+    }
+
     fn bit(self, out: &mut Output, bit: u32) {
         match bit {
             0 => match self {
@@ -425,8 +455,16 @@ impl Output {
         }
     }
 
+    pub(super) fn materialize_flags_inline(&mut self) {
+        if let Some(recipe) = self.recipe {
+            self.c().local_get(PENDING).if_(BlockType::Empty);
+            recipe.materialize_inline(self);
+            self.c().i32_const(0).local_set(PENDING).end();
+        }
+    }
+
     pub(super) fn canonicalize_flags(&mut self) {
-        self.materialize_flags();
+        self.materialize_flags_inline();
         self.recipe = None;
     }
 

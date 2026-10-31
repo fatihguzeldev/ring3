@@ -167,7 +167,7 @@ fn prefix(blocks: &[Block], entries: &[EntryPoint], pc: u32) -> Option<(u32, boo
 
 fn choose(out: &mut Output, policies: &[(u32, u32, bool)]) {
     let Some(&(pc, length, carry)) = policies.first() else {
-        out.materialize_flags();
+        out.materialize_flags_inline();
         return;
     };
     out.c()
