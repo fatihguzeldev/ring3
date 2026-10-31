@@ -597,3 +597,143 @@ console.log('equal and conflicting flag recipes, canonical cold interiors, loop 
     );
     fs::remove_dir_all(scratch).unwrap();
 }
+
+#[test]
+fn generated_register_flag_dependencies_preserve_clobbers_raw_bits_and_conditions() {
+    use std::{
+        fs,
+        process::Command,
+        time::{SystemTime, UNIX_EPOCH},
+    };
+    let scratch = std::env::temp_dir().join(format!(
+        "ring3-runtime-register-flags-{}-{}",
+        std::process::id(),
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    fs::create_dir(&scratch).unwrap();
+    let mut memory = AddressSpace::new(1).unwrap();
+    memory
+        .map_zeroed(
+            PageRange::new(GuestAddress(0x1000), 1).unwrap(),
+            Permissions::ALL,
+        )
+        .unwrap();
+    for (name, code, count) in [
+        (
+            "result-full",
+            &[
+                0x01, 0xc8, 0xb8, 0x44, 0x33, 0x22, 0x11, 0x0f, 0x90, 0xc2, 0x0f, 0x92, 0xc6, 0x9f,
+            ][..],
+            5,
+        ),
+        (
+            "result-byte",
+            &[0x01, 0xc8, 0xb0, 0x44, 0x0f, 0x90, 0xc2, 0x9f][..],
+            4,
+        ),
+        (
+            "cmp-left",
+            &[
+                0x39, 0xc8, 0xb8, 0x44, 0x33, 0x22, 0x11, 0x0f, 0x9c, 0xc2, 0x0f, 0x92, 0xc6, 0x9f,
+            ][..],
+            5,
+        ),
+        (
+            "cmp-right",
+            &[
+                0x39, 0xc8, 0xb1, 0x44, 0x0f, 0x9c, 0xc2, 0x0f, 0x92, 0xc6, 0x9f,
+            ][..],
+            5,
+        ),
+        (
+            "test-left",
+            &[
+                0x85, 0xc8, 0xb8, 0x44, 0x33, 0x22, 0x11, 0x0f, 0x98, 0xc2, 0x0f, 0x94, 0xc6, 0x9f,
+            ][..],
+            5,
+        ),
+        (
+            "carry-df",
+            &[
+                0x11, 0xc8, 0xfd, 0xba, 0, 0, 0, 0, 0x0f, 0x92, 0xc2, 0x9f, 0xfc,
+            ][..],
+            6,
+        ),
+        ("opaque", &[0x90, 0xfd, 0xfc][..], 3),
+    ] {
+        memory.write(GuestAddress(0x1000), code).unwrap();
+        fs::write(
+            scratch.join(format!("{name}.wasm")),
+            compile(&memory, GuestAddress(0x1000), count).unwrap().wasm,
+        )
+        .unwrap();
+    }
+    for (name, jump) in [("unsigned", 0x72), ("signed", 0x7c)] {
+        let mut code = [0x90; 23];
+        code[..11].copy_from_slice(&[0x39, 0xc8, jump, 0x0c, 0xba, 0, 0, 0, 0, 0xeb, 0x0a]);
+        code[16..].copy_from_slice(&[0xba, 1, 0, 0, 0, 0x0f, 0x0b]);
+        memory.write(GuestAddress(0x1000), &code).unwrap();
+        fs::write(
+            scratch.join(format!("{name}.wasm")),
+            compile_with_gates(
+                &memory,
+                GuestAddress(0x1000),
+                6,
+                &[(GuestAddress(0x1015), 23)],
+            )
+            .unwrap()
+            .wasm,
+        )
+        .unwrap();
+    }
+    let result = Command::new("node").arg("--input-type=module").arg("-e").arg(r#"
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+const memory=new WebAssembly.Memory({initial:2}),ram=new Uint8Array(memory.buffer),d=new DataView(memory.buffer),ctx=0x8000;
+const word=(at,v)=>d.setUint32(ctx+at,v>>>0,true);
+const imports={env:{memory},cpu:{read(){throw Error('unexpected read in register dependency fixture');},write(){throw Error('unexpected write in register dependency fixture');}}};
+const runs={};for(const name of['result-full','result-byte','cmp-left','cmp-right','test-left','carry-df','opaque','unsigned','signed'])runs[name]=(await WebAssembly.instantiate(fs.readFileSync(`${process.argv[1]}/${name}.wasm`),imports)).instance.exports.run;
+function scenario(name,input,expect){
+ for(let i=0;i<ram.length;i++)ram[i]=(i*47+5)&255;ram.fill(0,ctx,ctx+160);
+ word(0,1);word(4,160);[0x7fffffff,1,0x1234abcd,0x12345678,0x4800,10,0x6000,12].forEach((v,i)=>word(8+i*4,v));
+ for(const[index,v]of Object.entries(input.regs??{}))word(8+4*Number(index),v);
+ word(40,input.pc??0x1000);word(44,input.flags??0x200603);word(48,input.quota);word(52,0xabcdef01);word(56,0xfffffffe);word(60,0x11223344);word(64,0x55667788);word(68,0x12345678);word(152,63);
+ const expected=ram.slice(),view=new DataView(expected.buffer),set=(at,v)=>view.setUint32(ctx+at,v>>>0,true);
+ for(const[at,v]of[[40,expect.pc],[44,expect.flags],[48,input.quota-expect.steps],[52,expect.status??0],[56,(0xfffffffe+expect.steps)>>>0],...(expect.fields??[])])set(at,v);
+ for(const[index,v]of Object.entries(expect.regs??{}))set(8+4*Number(index),v);
+ assert.equal(runs[name](ctx),expect.status??0,name);assert.deepEqual(ram,expected,`${name}/entry${(input.pc??0x1000).toString(16)}/quota${input.quota}: full state`);
+}
+scenario('result-full',{quota:5},{pc:0x100e,steps:5,flags:0x200e96,regs:{0:0x11229644,2:0x12340001}});
+scenario('result-full',{pc:0x1002,quota:0,flags:0x80000800},{pc:0x1002,steps:0,flags:0x80000800,status:2});
+scenario('result-full',{pc:0x1002,quota:1,flags:0x80000800},{pc:0x1007,steps:1,flags:0x80000800,status:2,regs:{0:0x11223344}});
+scenario('result-byte',{quota:4},{pc:0x1008,steps:4,flags:0x200e96,regs:{0:0x80009644,2:0x1234ab01}});
+scenario('cmp-left',{quota:5,regs:{0:0x80000000}},{pc:0x100e,steps:5,flags:0x200e16,regs:{0:0x11221644,2:0x12340001}});
+scenario('cmp-right',{quota:5,regs:{1:0xffffffff}},{pc:0x100b,steps:5,flags:0x200e87,regs:{0:0x7fff87ff,1:0xffffff44,2:0x12340100}});
+scenario('test-left',{quota:5,regs:{0:0x80000000,1:0xffffffff}},{pc:0x100e,steps:5,flags:0x200686,regs:{0:0x11228644,2:0x12340001}});
+scenario('carry-df',{quota:1,flags:0x200203,regs:{0:0xffffffff,1:0}},{pc:0x1002,steps:1,flags:0x200257,status:2,regs:{0:0}});
+scenario('carry-df',{quota:2,flags:0x200203,regs:{0:0xffffffff,1:0}},{pc:0x1003,steps:2,flags:0x200657,status:2,regs:{0:0}});
+scenario('carry-df',{quota:6,flags:0x200203,regs:{0:0xffffffff,1:0}},{pc:0x100d,steps:6,flags:0x200257,regs:{0:0x5700,2:1}});
+for(const[quota,pc,flags,status]of[
+ [0,0x1000,0x80000800,2],[1,0x1001,0x80000800,2],[2,0x1002,0x80000c00,2],[3,0x1003,0x80000800,0]
+])scenario('opaque',{quota,flags:0x80000800},{pc,flags,steps:quota,status});
+scenario('opaque',{pc:0x1001,quota:1,flags:0x80000800},{pc:0x1002,flags:0x80000c00,steps:1,status:2});
+for(const[name,eax,ecx,edx,steps,flags]of[
+ ['unsigned',0x80000000,1,0,4,0x200e16],['signed',0x80000000,1,1,3,0x200e16],
+ ['unsigned',0x7fffffff,0xffffffff,1,3,0x200e87],['signed',0x7fffffff,0xffffffff,0,4,0x200e87]
+])scenario(name,{quota:5,regs:{0:eax,1:ecx}},{pc:0x1015,steps,flags,status:5,regs:{2:edx},fields:[[68,23]]});
+scenario('unsigned',{pc:0x1002,quota:1,flags:0x80000801,regs:{0:0x80000000}},{pc:0x1010,steps:1,flags:0x80000801,status:2});
+scenario('signed',{pc:0x1002,quota:1,flags:0x80000000,regs:{0:0x80000000}},{pc:0x1004,steps:1,flags:0x80000000,status:2});
+console.log('literal register FLAGS: result/CMP/TEST dependencies, partial clobbers, carry through DF, opaque raw bits and signed/unsigned branch edges passed');
+"#).arg(&scratch).output().unwrap();
+    assert!(
+        result.status.success(),
+        "fixture {} failed:\n{}\n{}",
+        scratch.display(),
+        String::from_utf8_lossy(&result.stdout),
+        String::from_utf8_lossy(&result.stderr)
+    );
+    fs::remove_dir_all(scratch).unwrap();
+}
