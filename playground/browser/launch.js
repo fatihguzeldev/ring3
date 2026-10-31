@@ -4,6 +4,7 @@ export function launchOptions(game, { runtime, executable, argumentsText = "", o
   return {
     backend: runtime?.backend ?? "core",
     ...(runtime?.backend === "v86" && runtime.v86 ? { v86: { ...runtime.v86 } } : {}),
+    ...(runtime?.backend === "independent" && runtime.execution ? { execution: { ...runtime.execution } } : {}),
     executable,
     commandLine: commandLineForArguments(executable, argumentsText),
     engineUrl: game.engineUrl || "/engine.wasm",

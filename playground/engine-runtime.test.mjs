@@ -70,3 +70,42 @@ test('contradictory CPU switches fail instead of silently selecting a policy', (
   assert.throws(() => engineRuntimeOptions(['--fast-preset', '--no-fast-preset']), /conflicting.*preset/);
   assert.throws(() => engineRuntime(external, engineRuntimeOptions(['--strict-fpu', '--fast-preset'])), /requires.*relaxed/);
 });
+
+test('explicit CPU instruction limits reach only the independent launch configuration', () => {
+  for (const instructions of [1, 32, 64, 128, 4096]) {
+    const options = engineRuntimeOptions(['--cpu-instructions', String(instructions)]);
+    assert.deepEqual(options, {cpuInstructions: instructions});
+    assert.deepEqual(engineRuntime(independent, options), {
+      backend: 'independent', execution: {budget: 50000, instructions},
+    });
+  }
+});
+
+test('omitted instruction limits preserve every backend default without execution overrides', () => {
+  for (const module of [core, independent, external]) {
+    const runtime = engineRuntime(module, engineRuntimeOptions([]));
+    assert.equal(Object.hasOwn(runtime, 'execution'), false);
+  }
+});
+
+test('CPU instruction switches reject missing invalid and duplicate values', () => {
+  for (const args of [
+    ['--cpu-instructions'], ['--cpu-instructions', '--strict-fpu'],
+    ['--cpu-instructions', ''], ['--cpu-instructions', '0'],
+    ['--cpu-instructions', '-1'], ['--cpu-instructions', '4097'],
+    ['--cpu-instructions', '1.5'], ['--cpu-instructions', '1e2'],
+    ['--cpu-instructions', '0x40'], ['--cpu-instructions', 'Infinity'],
+    ['--cpu-instructions=64'],
+  ]) assert.throws(() => engineRuntimeOptions(args), /cpu-instructions/);
+  for (const args of [
+    ['--cpu-instructions', '64', '--cpu-instructions', '128'],
+    ['--cpu-instructions', '64', '--cpu-instructions=128'],
+  ]) assert.throws(() => engineRuntimeOptions(args), /duplicate.*cpu-instructions/);
+});
+
+test('CPU instruction limits reject other engines and invalid programmatic policies', () => {
+  for (const module of [core, external])
+    assert.throws(() => engineRuntime(module, {cpuInstructions: 64}), /independent/);
+  for (const value of [0, -1, 4097, 1.5, NaN, Infinity, '64', null])
+    assert.throws(() => engineRuntime(independent, {cpuInstructions: value}), /cpu-instructions/);
+});

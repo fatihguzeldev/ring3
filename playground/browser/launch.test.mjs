@@ -32,3 +32,28 @@ test("omitted runtime stays core and never enables relaxed FPU or the preset", (
   assert.equal(Object.hasOwn(options, "v86"), false);
   assert.equal(options.commandLine, undefined);
 });
+
+test("Run forwards an explicit independent compiler policy through public launch options", () => {
+  const runtime = { backend: "independent", execution: { budget: 50000, instructions: 64 } };
+  const game = { engineUrl: "/engine.wasm", manifest: { executable: "C:\\game.exe" } };
+  const options = launchOptions(game, { runtime, executable: "C:\\game.exe", argumentsText: "-skipstartup" });
+  assert.equal(options.backend, "independent");
+  assert.deepEqual(options.execution, { budget: 50000, instructions: 64 });
+  assert.notEqual(options.execution, runtime.execution);
+  assert.equal(options.commandLine, '"C:\\game.exe" -skipstartup');
+  assert.equal(options.manifest, game.manifest);
+  options.execution.instructions = 32;
+  assert.equal(runtime.execution.instructions, 64);
+});
+
+test("Run preserves defaults and excludes independent policy from other backends", () => {
+  for (const runtime of [
+    { backend: "independent" },
+    { backend: "core", execution: { budget: 50000, instructions: 64 } },
+    { backend: "v86", execution: { budget: 50000, instructions: 64 }, v86: { relaxedFpu: false, fastPreset: false } },
+  ]) {
+    const options = launchOptions({}, { runtime, executable: "C:\\game.exe" });
+    assert.equal(Object.hasOwn(options, "execution"), false);
+    if (runtime.backend === "v86") assert.deepEqual(options.v86, runtime.v86);
+  }
+});
