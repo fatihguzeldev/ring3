@@ -863,6 +863,29 @@ test('actual inexact PC24 division publishes PE and C1 before a later store can 
   } finally {f.close();}
 });
 
+for (const control of [0x003f, 0x023f]) for (const negative of [false, true]) for (const shift of [0, 2000])
+test(`actual raw80 MUL preserves PC${control === 0x003f ? 24 : 53} sign ${negative} extended exponent ${shift} and immediate PE C1`, {skip}, () => {
+  const f = fixture([0xd8, 0xc9], {fpControl: control, fpStatus: 0x4200, execution: {budget: 1}});
+  try {
+    const bank = f.engine.base + 4236, arena = new DataView(f.engine.memory.buffer);
+    arena.setUint16(bank + 20, 0xfff0, true);
+    const firstExponent = (0x3fff + shift) | (negative ? 0x8000 : 0), secondExponent = 0x3fff - shift;
+    new Uint8Array(f.engine.memory.buffer, bank + 40, 20).set([0, 8, 0, 0, 0, 0, 0, 0x80, firstExponent & 255, firstExponent >>> 8,
+      0, 8, 0, 0, 0, 0, 0, 0x80, secondExponent & 255, secondExponent >>> 8]);
+    const scalar = new Uint8Array(f.engine.memory.buffer, f.engine.base, 56).slice(), banks = processBanks(f), fp = view(banks[0]);
+    view(scalar).setUint32(48, 0x1002, true); fp.setUint16(18, 0x4020, true);
+    fp.setUint16(22, 0xc9, true); fp.setUint32(24, 0x1000, true); fp.setUint16(32, 0x1b, true);
+    banks[0].set([0, control === 0x003f ? 0 : 16, 0, 0, 0, 0, 0, 0x80, 0xff, negative ? 0xbf : 0x3f], 40);
+    const selected = f.cache.select(), state = f.slab(), backing = state.getUint32(84, true), length = state.getUint32(88, true) * 4096;
+    const ram = new Uint8Array(f.engine.memory.buffer, backing, length).slice(), run = f.cache.execute(selected);
+    assert.deepEqual([run.reason, run.retired, run.work, run.pc], [1, 1, 1, 0x1002]);
+    assert.deepEqual(new Uint8Array(f.engine.memory.buffer, f.engine.base, 56), scalar);
+    assert.deepEqual(processBanks(f), banks);
+    assert.deepEqual(new Uint8Array(f.engine.memory.buffer, backing, length), ram);
+    serviceCounts(f, 0);
+  } finally {f.close();}
+});
+
 for (const odd of [false, true]) test(`actual PC53 ADD rounds the ${odd ? 'odd' : 'even'} midpoint and publishes PE C1 at its budget boundary`, {skip}, () => {
   const f = fixture([0xd8, 0xc1], {fpControl: 0x023f, fpStatus: 0x4200, execution: {budget: 1}});
   try {

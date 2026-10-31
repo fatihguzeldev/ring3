@@ -229,4 +229,6 @@ mod tests;
 #[cfg(test)]
 mod x87_arithmetic_tests;
 #[cfg(test)]
+mod x87_multiply_tests;
+#[cfg(test)]
 mod x87_tests;

@@ -17,6 +17,7 @@ mod simd;
 mod string;
 mod x87;
 mod x87_arithmetic;
+mod x87_multiply;
 
 const FLAGS: u32 = 9;
 const PC: u32 = 10;
@@ -57,6 +58,7 @@ pub(super) fn supports(operation: &Operation) -> bool {
         || simd::supports(operation)
         || x87::supports(operation)
         || x87_arithmetic::supports(operation)
+        || x87_multiply::supports(operation)
         || matches!(
             operation,
             Operation::Nop
@@ -913,6 +915,7 @@ impl Output {
                     && !rotate::emit(self, operation)
                     && !simd::emit(self, operation)
                     && !x87::emit(self, operation)
+                    && !x87_multiply::emit(self, operation)
                     && !x87_arithmetic::emit(self, operation)
                 {
                     return false;

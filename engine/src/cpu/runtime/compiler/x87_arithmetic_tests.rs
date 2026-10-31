@@ -115,6 +115,8 @@ fn generated_exact_x87_arithmetic_matches_strict_state_and_falls_back_before_eff
             ]
         } else if name.starts_with("mul") {
             &[
+                (0x00800000, 0x3f000000),
+                (0x00800000, 0x3f7fffff),
                 (0x40400000, 0x40000000),
                 (0xc0400000, 0x40000000),
                 (0x00800000, 0x3f800000),
@@ -270,8 +272,6 @@ fn generated_exact_x87_arithmetic_matches_strict_state_and_falls_back_before_eff
         ("div-reg", 0, 0, 0x003f, 0),
         ("div-reg", 0x3f800000, 0, 0x007f, 0),
         ("add-reg", 0x7f7fffff, 0x7f7fffff, 0x007f, 0),
-        ("mul-reg", 0x00800000, 0x3f000000, 0x003f, 0),
-        ("mul-reg", 0x00800000, 0x3f7fffff, 0x003f, 0), // native f32 rounds up to minnormal; x87 retains a smaller normal
         ("div-reg", 0x3fffffff, 0x7f000000, 0x007f, 0), // same lower-bound distinction through division
         ("add-reg", 1, 0x3f800000, 0x007f, 0),
         ("add-reg", 0x7f800000, 0x3f800000, 0x003f, 0),
