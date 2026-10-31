@@ -272,25 +272,30 @@ pub(crate) fn cpu_prepare(low: u32, high: u32, pc: u32, maximum: u32) -> u32 {
             session.refresh(memory);
             return Ok(());
         }
-        let code =
-            match runtime::compile_with_gates(memory, GuestAddress(pc), maximum as usize, &gates) {
-                Ok(code) => code,
-                Err(runtime::CompileError::Decode(error)) => {
-                    instruction::decode_failure(&mut session.state, error)?;
-                    session.selected = None;
-                    stopped = true;
-                    session.refresh(memory);
-                    return Ok(());
-                }
-                Err(runtime::CompileError::Memory(error)) => {
-                    memory_failure(&mut session.state, error, 2);
-                    session.selected = None;
-                    stopped = true;
-                    session.refresh(memory);
-                    return Ok(());
-                }
-                Err(_) => return Err(HostError::InvalidArtifact),
-            };
+        let code = match runtime::compile_with_gates_until(
+            memory,
+            GuestAddress(pc),
+            maximum as usize,
+            &gates,
+            |address| session.cache.lookup(address.0).is_some(),
+        ) {
+            Ok(code) => code,
+            Err(runtime::CompileError::Decode(error)) => {
+                instruction::decode_failure(&mut session.state, error)?;
+                session.selected = None;
+                stopped = true;
+                session.refresh(memory);
+                return Ok(());
+            }
+            Err(runtime::CompileError::Memory(error)) => {
+                memory_failure(&mut session.state, error, 2);
+                session.selected = None;
+                stopped = true;
+                session.refresh(memory);
+                return Ok(());
+            }
+            Err(_) => return Err(HostError::InvalidArtifact),
+        };
         let slot = session.cache.install(code, memory)?;
         session.selected = Some(slot);
         session.refresh(memory);

@@ -116,7 +116,22 @@ pub fn compile_with_gates(
     limit: usize,
     gates: &[(GuestAddress, u32)],
 ) -> Result<CompiledUnit, CompileError> {
+    compile_with_gates_until(memory, pc, limit, gates, |_| false)
+}
+
+/// compile a missing entry, stopping before PCs owned by current cached code.
+/// coverage must remain stable during this call; the root must be uncovered.
+pub(crate) fn compile_with_gates_until(
+    memory: &AddressSpace,
+    pc: GuestAddress,
+    limit: usize,
+    gates: &[(GuestAddress, u32)],
+    covered: impl Fn(GuestAddress) -> bool,
+) -> Result<CompiledUnit, CompileError> {
     if limit == 0 || limit > 4096 {
+        return Err(CompileError::InvalidLimits);
+    }
+    if covered(pc) {
         return Err(CompileError::InvalidLimits);
     }
     let mut pending = VecDeque::from([pc.0]);
@@ -126,7 +141,11 @@ pub fn compile_with_gates(
     let mut services = Vec::new();
     let mut count = 0;
     while let Some(entry) = pending.pop_front() {
-        if count >= limit || blocks.len() >= 128 || !seen.insert(entry) {
+        if count >= limit
+            || blocks.len() >= 128
+            || covered(GuestAddress(entry))
+            || !seen.insert(entry)
+        {
             continue;
         }
         let mut instructions = Vec::new();
@@ -134,6 +153,9 @@ pub fn compile_with_gates(
         let mut current = entry;
         let mut source_length = 0;
         while count < limit && instructions.len() < 64 {
+            if covered(GuestAddress(current)) {
+                break;
+            }
             let mut matches = gates.iter().filter(|(address, _)| address.0 == current);
             if let Some(&(_, id)) = matches.next() {
                 if id == 0 || matches.next().is_some() {
@@ -239,6 +261,8 @@ pub fn compile_with_gates(
 
 #[cfg(test)]
 mod bit_tests;
+#[cfg(test)]
+mod coverage_tests;
 #[cfg(test)]
 mod exchange_tests;
 #[cfg(test)]

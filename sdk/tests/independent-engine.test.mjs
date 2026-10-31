@@ -997,6 +997,48 @@ test('actual numeric service resumes the compiled suffix without another admissi
   } finally {f.close();}
 });
 
+test('actual caller keeps its compiled prefix when a separately owned callee changes', {skip}, () => {
+  const code = [0x40, 0xe9, ...dword(0x1040 - 0x1006), ...Array(58).fill(0x90), 0x42, 0xeb, 0xfd];
+  const f = fixture(code, {execution: {budget: 3, instructions: 4}});
+  try {
+    f.engine.ok('map', 0x3000, 1, 7);
+    const caller = [0x43, 0xe9, ...dword(0x1040 - 0x3006)];
+    f.engine.request(Uint8Array.from(caller)); f.engine.ok('upload', 0x3000, caller.length);
+    f.engine.ok('protect', 0x3000, 1, 5);
+    const scalar = new Uint8Array(f.engine.memory.buffer, f.engine.base, 56).slice(), banks = processBanks(f);
+    const first = f.cache.select(), state = f.slab();
+    const backing = state.getUint32(84, true), length = state.getUint32(88, true) * 4096;
+    const ram = new Uint8Array(f.engine.memory.buffer, backing, length).slice();
+    const codeSlot = new DataView(f.engine.memory.buffer).getUint32(state.getUint32(76, true) + 4, true) - 1;
+    const execute = selected => {
+      let run, retired = 0, work = 0;
+      for (let attempt = 0; attempt < 4; attempt++) {
+        run = f.cache.execute(attempt ? f.cache.select() : selected);
+        retired += run.retired; work += run.work;
+        if (run.coreReason !== 1) break;
+      }
+      assert.deepEqual([run.reason, retired, work, run.pc], [1, 3, 3, 0x1041]);
+      assert.deepEqual(new Uint8Array(f.engine.memory.buffer, f.engine.base, 56), scalar);
+      assert.deepEqual(processBanks(f), banks);
+      assert.deepEqual(new Uint8Array(f.engine.memory.buffer, backing, length), ram);
+    };
+    view(scalar).setUint32(16, 1, true); view(scalar).setUint32(24, 1, true); view(scalar).setUint32(48, 0x1041, true);
+    execute(first);
+    new DataView(f.engine.memory.buffer).setUint32(f.engine.base + 48, 0x3000, true);
+    const second = f.cache.select(), secondFunction = f.cache.table.get(second.slot);
+    view(scalar).setUint32(24, 2, true); view(scalar).setUint32(28, 1, true);
+    execute(second);
+    f.engine.ok('protect', 0x1000, 1, 7); f.engine.ok('write8', 0x1040, 0x46); f.engine.ok('protect', 0x1000, 1, 5);
+    ram[codeSlot * 4096 + 0x40] = 0x46;
+    new DataView(f.engine.memory.buffer).setUint32(f.engine.base + 48, 0x3000, true);
+    view(scalar).setUint32(28, 2, true); view(scalar).setUint32(40, 1, true);
+    execute(f.cache.select());
+    serviceCounts(f, 0);
+    assert.equal(f.cache.table.get(second.slot), secondFunction,
+      'callee invalidation retains the caller function that did not compile those bytes');
+  } finally {f.close();}
+});
+
 for (const foreign of [false, true]) test(`actual direct service rejects ${foreign ? 'foreign context without counting it' : 'zero-quota continuation before effects'}`, {skip: directServiceSkip}, () => {
   const f = fixture([0xd9, 0xe8]);
   try {

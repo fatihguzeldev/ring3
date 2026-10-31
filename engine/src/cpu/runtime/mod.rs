@@ -8,5 +8,6 @@ pub use abi::{
     supports_segments,
 };
 pub(crate) use compiler::ServiceSite;
+pub(crate) use compiler::compile_with_gates_until;
 pub use compiler::{CompileError, CompiledUnit, compile, compile_with_gates};
 pub use dispatch::{emit_dispatch, emit_dispatch_with_service};
