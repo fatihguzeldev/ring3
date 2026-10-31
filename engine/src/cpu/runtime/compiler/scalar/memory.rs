@@ -221,6 +221,7 @@ pub(super) fn write_after_modify(out: &mut Output, width: u32, value: u32) {
 }
 
 fn store(out: &mut Output, width: u32, value: u32) {
+    out.emitted_guest_write = true;
     admit_store(out);
     out.c().local_get(READY).if_(BlockType::Empty);
     record_store(out);
@@ -313,6 +314,7 @@ pub(super) fn read_words(out: &mut Output, words: &[u32], alignment: u32) {
 }
 
 pub(super) fn write_words(out: &mut Output, words: &[u32], alignment: u32) {
+    out.emitted_guest_write = true;
     wide_access(out, words, alignment, true);
     record_store(out);
     for (index, &local) in words.iter().enumerate() {

@@ -172,6 +172,7 @@ pub(super) fn emit(blocks: &[Block], entries: &[EntryPoint]) -> Vec<u8> {
             (6, ValType::I64),
             (3, ValType::I32),
         ]),
+        emitted_guest_write: false,
     };
     out.c()
         .local_get(0)
@@ -232,6 +233,7 @@ pub(super) fn emit(blocks: &[Block], entries: &[EntryPoint]) -> Vec<u8> {
             out.c().local_get(REMAIN).i32_eqz().if_(BlockType::Empty);
             out.exit(2);
             out.c().end().i32_const(0).local_set(WRITE_STATUS);
+            out.emitted_guest_write = false;
             if !out.instruction(*instruction.operation(), instruction.next_pc().0) {
                 out.exit(7);
             } else {
@@ -243,13 +245,16 @@ pub(super) fn emit(blocks: &[Block], entries: &[EntryPoint]) -> Vec<u8> {
                     .local_get(RETIRED)
                     .i32_const(1)
                     .i32_add()
-                    .local_set(RETIRED)
-                    .local_get(WRITE_STATUS)
-                    .i32_const(6)
-                    .i32_eq()
-                    .if_(BlockType::Empty);
-                out.exit(6);
-                out.c().end();
+                    .local_set(RETIRED);
+                if out.emitted_guest_write {
+                    out.c()
+                        .local_get(WRITE_STATUS)
+                        .i32_const(6)
+                        .i32_eq()
+                        .if_(BlockType::Empty);
+                    out.exit(6);
+                    out.c().end();
+                }
             }
         }
         if let Some(gate) = block.gate {
@@ -276,6 +281,7 @@ pub(super) fn emit(blocks: &[Block], entries: &[EntryPoint]) -> Vec<u8> {
 
 struct Output {
     function: Function,
+    emitted_guest_write: bool,
 }
 
 impl Output {
