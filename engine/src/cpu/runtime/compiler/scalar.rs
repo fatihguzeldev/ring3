@@ -1194,6 +1194,9 @@ impl Output {
         self.deferred_bit(bit);
     }
     fn condition(&mut self, condition: Condition) {
+        if self.direct_condition(condition) {
+            return;
+        }
         match condition {
             Condition::Overflow | Condition::NotOverflow => self.bit(11),
             Condition::Below | Condition::AboveOrEqual => self.bit(0),

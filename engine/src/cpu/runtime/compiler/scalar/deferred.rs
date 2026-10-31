@@ -679,7 +679,75 @@ impl Output {
                 .i32_and();
         }
     }
-
+    pub(super) fn direct_condition(&mut self, condition: Condition) -> bool {
+        let Some(Recipe::Predicate {
+            kind: BinaryKind::Cmp,
+            left,
+            right,
+        }) = self.recipe
+        else {
+            return false;
+        };
+        if !matches!(
+            condition,
+            Condition::Equal
+                | Condition::NotEqual
+                | Condition::Below
+                | Condition::AboveOrEqual
+                | Condition::BelowOrEqual
+                | Condition::Above
+                | Condition::Less
+                | Condition::GreaterOrEqual
+                | Condition::LessOrEqual
+                | Condition::Greater
+        ) {
+            return false;
+        }
+        self.flags_pending();
+        self.c()
+            .if_(BlockType::Result(ValType::I32))
+            .local_get(reg(left));
+        right.emit(self);
+        match condition {
+            Condition::Equal => {
+                self.c().i32_eq();
+            }
+            Condition::NotEqual => {
+                self.c().i32_ne();
+            }
+            Condition::Below => {
+                self.c().i32_lt_u();
+            }
+            Condition::AboveOrEqual => {
+                self.c().i32_ge_u();
+            }
+            Condition::BelowOrEqual => {
+                self.c().i32_le_u();
+            }
+            Condition::Above => {
+                self.c().i32_gt_u();
+            }
+            Condition::Less => {
+                self.c().i32_lt_s();
+            }
+            Condition::GreaterOrEqual => {
+                self.c().i32_ge_s();
+            }
+            Condition::LessOrEqual => {
+                self.c().i32_le_s();
+            }
+            Condition::Greater => {
+                self.c().i32_gt_s();
+            }
+            _ => unreachable!(),
+        }
+        self.c().else_();
+        let saved = self.recipe.take();
+        self.condition(condition);
+        self.recipe = saved;
+        self.c().end();
+        true
+    }
 }
 
 fn descriptor(kind: BinaryKind, width: u32, preserve: bool) -> i32 {
