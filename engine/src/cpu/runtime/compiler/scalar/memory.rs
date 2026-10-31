@@ -152,6 +152,10 @@ fn access(width: u32) -> MemArg {
 }
 
 fn translate(out: &mut Output, width: u32, required: u32) {
+    if out.native_memory_bound && required == 1 {
+        translate_uncached(out, width, required);
+        return;
+    }
     out.c()
         .i32_const(0)
         .local_set(READY)

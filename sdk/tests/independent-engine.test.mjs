@@ -2360,14 +2360,15 @@ for (const precision of [24, 53]) for (const odd of [false, true]) {
   });
 }
 
-test('actual fused page proofs survive read-only helpers and expire across writes', {skip}, () => {
+test('actual fused store proofs survive read-only helpers and expire across writes', {skip}, () => {
   for (const probe of [
     {address: 0x2000, width: 4, value: 0x12345678, status: 0},
     {address: 0x2000, width: 0x104, value: 0x12345678, status: 0},
     {address: 0x9000, width: 4, value: 0, status: 3},
     {address: 0x2000, width: 3, value: 0, status: 8},
   ]) {
-    const f = fixture([0xa1, 0, 0x20, 0, 0], {independent: false,
+    const f = fixture([0xa3, 0, 0x20, 0, 0], {independent: false,
+      registers: [0x12345678, 0, 0, 0, 0x2f00, 0, 0, 0],
       data: [[0x2000, 0x78], [0x2001, 0x56], [0x2002, 0x34], [0x2003, 0x12]]});
     let active = false;
     try {
@@ -2383,19 +2384,27 @@ test('actual fused page proofs survive read-only helpers and expire across write
         assert.equal(unit.exports.run(pointer), 8);
         assert.deepEqual(new Uint8Array(f.engine.memory.buffer), beforeWrongContext);
       }
+      const expectedState = beforeWrongContext.slice(context, context + 160), scalar = new DataView(expectedState.buffer);
+      for (const [at, value] of [[40, 0x1005], [48, 1], [52, 0], [56, 1], [108, 1]]) scalar.setUint32(at, value, true);
       assert.equal(unit.exports.run(context), 0);
+      assert.deepEqual(new Uint8Array(f.engine.memory.buffer, context, 160), expectedState,
+        'the same-byte seed store retires once and records one ordinary dirty slot');
       const all = new DataView(f.engine.memory.buffer), state = f.slab(), header = state.getUint32(72, true);
       assert.deepEqual([4, 8, 12, 20].map(at => all.getUint32(header + at, true)), [0x434d3352, 32, 2, 1 << 20]);
       const rows = all.getUint32(header + 16, true), epoch = all.getUint32(header, true);
       const row = all.getBigUint64(rows + 2 * 8, true);
       assert.equal(Number(row >> 32n), epoch);
-      assert.equal(Number(row & 7n), 3);
+      assert.equal(Number(row & 7n), 7, 'the native seed creates an ordinary store proof');
       const table = new Uint8Array(f.engine.memory.buffer, rows, 8 << 20).slice();
       const proof = new Uint8Array(f.engine.memory.buffer, header, 32).slice();
       const backing = state.getUint32(84, true), length = state.getUint32(88, true) * 4096;
       const ram = new Uint8Array(f.engine.memory.buffer, backing, length).slice(), banks = processBanks(f);
+      assert.deepEqual(ram, beforeWrongContext.slice(backing, backing + length), 'the seed writes the same existing bytes across full physical RAM');
       assert.equal(api.cpu_runtime_read(context, probe.address, probe.width) >>> 0, probe.value);
       assert.equal(f.slab().getUint32(52, true), probe.status);
+      scalar.setUint32(52, probe.status, true);
+      if (probe.status === 3) for (const [at, value] of [[60, probe.address], [64, 0x10104], [68, 4]]) scalar.setUint32(at, value, true);
+      assert.deepEqual(new Uint8Array(f.engine.memory.buffer, context, 160), expectedState, 'read-only helper preserves scalar progress and the dirty queue');
       assert.deepEqual(new Uint8Array(f.engine.memory.buffer, header, 32), proof);
       assert.deepEqual(new Uint8Array(f.engine.memory.buffer, rows, 8 << 20), table);
       assert.deepEqual(new Uint8Array(f.engine.memory.buffer, backing, length), ram);
