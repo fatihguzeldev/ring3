@@ -270,12 +270,24 @@ fn cache_store(out: &mut Output) {
 }
 
 fn translate_uncached(out: &mut Output, width: u32, required: u32) {
+    if out.native_memory_bound && required == 1 {
+        memory_helpers::inline_translation(
+            &mut out.function,
+            ADDRESS,
+            width,
+            required,
+            [PAGE, SLOT, CACHE_FLAGS],
+            [HOST, SLOT, CACHE_FLAGS],
+        );
+    } else {
+        out.c()
+            .local_get(0)
+            .local_get(ADDRESS)
+            .i32_const(width as i32)
+            .i32_const(required as i32)
+            .call(4);
+    }
     out.c()
-        .local_get(0)
-        .local_get(ADDRESS)
-        .i32_const(width as i32)
-        .i32_const(required as i32)
-        .call(4)
         .local_set(CACHE_FLAGS)
         .local_set(SLOT)
         .local_set(HOST)
