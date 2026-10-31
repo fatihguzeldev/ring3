@@ -140,10 +140,13 @@ impl CodeCache {
     }
 
     pub(super) fn lookup(&self, pc: u32) -> Option<u32> {
+        // Rows sort by PC then monotonic slot: both preparation and the Wasm
+        // directory must choose the first retained owner of an overlapping PC.
+        let index = self.entries.partition_point(|entry| entry[0] < pc);
         self.entries
-            .binary_search_by_key(&pc, |entry| entry[0])
-            .ok()
-            .map(|index| self.entries[index][1])
+            .get(index)
+            .filter(|entry| entry[0] == pc)
+            .map(|entry| entry[1])
     }
 
     pub(super) fn service(
@@ -262,7 +265,11 @@ impl CodeCache {
                 .len()
                 .checked_add(code.entries.len())
                 .ok_or(HostError::Infrastructure)?;
-            let directory = directory_size(entries)?;
+            let unique = self
+                .unique_entry_count()
+                .checked_add(code.entries.len())
+                .ok_or(HostError::Infrastructure)?;
+            let directory = directory_size(unique)?;
             let services = self
                 .services
                 .len()
@@ -299,7 +306,6 @@ impl CodeCache {
         self.entries
             .extend(code.entries.iter().copied().map(|pc| [pc, slot]));
         self.entries.sort_unstable();
-        self.entries.dedup_by_key(|entry| entry[0]);
         self.services.extend(
             code.services
                 .iter()
@@ -323,18 +329,6 @@ impl CodeCache {
         self.victims.push(slot);
         self.retained_code_bytes -= self.units[index].as_ref().unwrap().charge;
         self.units[index] = None;
-        for (index, unit) in self
-            .units
-            .iter()
-            .enumerate()
-            .filter_map(|(index, code)| code.as_ref().map(|code| (index, code)))
-        {
-            for &pc in &unit.code.entries {
-                if let Err(at) = self.entries.binary_search_by_key(&pc, |entry| entry[0]) {
-                    self.entries.insert(at, [pc, index as u32 + 1]);
-                }
-            }
-        }
     }
 
     fn evict_oldest(&mut self) -> Result<bool, HostError> {
@@ -351,14 +345,31 @@ impl CodeCache {
         Ok(false)
     }
 
+    fn unique_entry_count(&self) -> usize {
+        let mut previous = None;
+        let mut count = 0;
+        for &[pc, _] in &self.entries {
+            if previous != Some(pc) {
+                count += 1;
+                previous = Some(pc);
+            }
+        }
+        count
+    }
+
     fn rebuild_directory(&mut self) -> Result<(), HostError> {
-        let length = directory_size(self.entries.len())?;
+        let length = directory_size(self.unique_entry_count())?;
         if length > self.directory.capacity() {
             return Err(HostError::Infrastructure);
         }
         self.directory.resize(length, [0; 2]);
         self.directory.fill([0; 2]);
+        let mut previous = None;
         for &[pc, slot] in &self.entries {
+            if previous == Some(pc) {
+                continue;
+            }
+            previous = Some(pc);
             let mut index = ((pc >> 1) ^ (pc >> 12)) as usize & (length - 1);
             while self.directory[index][1] != 0 {
                 index = (index + 1) & (length - 1);
@@ -819,5 +830,144 @@ mod tests {
             before
         );
         assert_eq!(cache.take_victim(), 0);
+    }
+
+    fn assert_entry_owner(cache: &CodeCache, pc: u32, expected: Option<u32>) {
+        assert_eq!(
+            cache.lookup(pc),
+            expected,
+            "lookup must choose the canonical owner"
+        );
+        let rows: Vec<_> = cache
+            .directory
+            .iter()
+            .filter(|row| row[1] != 0 && row[0] == pc)
+            .map(|row| row[1])
+            .collect();
+        assert_eq!(
+            rows,
+            expected.into_iter().collect::<Vec<_>>(),
+            "the Wasm directory and preparation lookup must choose the same owner"
+        );
+    }
+
+    #[test]
+    fn live_entry_owner_rows_preserve_three_overlaps_after_history_eviction_and_invalidation() {
+        let mut memory = fixture();
+        memory.write(GuestAddress(0x1000), &[0xd9, 0xe8]).unwrap();
+        let mut cache = CodeCache::new().unwrap();
+        for _ in 0..32 {
+            let slot = cache
+                .install(service_unit(&memory, 0x1000, 1), &memory)
+                .unwrap();
+            assert!(cache.evict_oldest().unwrap());
+            assert_eq!(cache.take_victim(), slot);
+        }
+        let mut owners = Vec::new();
+        for _ in 0..3 {
+            owners.push(
+                cache
+                    .install(service_unit(&memory, 0x1000, 1), &memory)
+                    .unwrap(),
+            );
+            let expected: Vec<_> = owners.iter().map(|&slot| [0x1000, slot]).collect();
+            assert_eq!(
+                cache.entries, expected,
+                "every retained owner must keep its own live row"
+            );
+            assert_entry_owner(&cache, 0x1000, Some(owners[0]));
+            assert_eq!(cache.charged_bytes(), recomputed_bytes(&cache));
+        }
+        assert!(owners[0] > 32);
+        for at in 0..2 {
+            assert!(cache.evict_oldest().unwrap());
+            assert_eq!(cache.take_victim(), owners[at]);
+            assert_eq!(cache.take_victim(), 0);
+            assert_entry_owner(&cache, 0x1000, Some(owners[at + 1]));
+            assert_eq!(
+                cache.entries,
+                owners[at + 1..]
+                    .iter()
+                    .map(|&slot| [0x1000, slot])
+                    .collect::<Vec<_>>()
+            );
+            assert_eq!(cache.charged_bytes(), recomputed_bytes(&cache));
+        }
+        memory.write(GuestAddress(0x1001), &[0xee]).unwrap();
+        cache.refresh(&memory).unwrap();
+        assert_entry_owner(&cache, 0x1000, None);
+        assert!(cache.entries.is_empty());
+        assert_eq!(cache.take_victim(), owners[2]);
+        assert_eq!(cache.take_victim(), 0);
+        let replacement = cache
+            .install(service_unit(&memory, 0x1000, 1), &memory)
+            .unwrap();
+        assert!(replacement > owners[2]);
+        assert_entry_owner(&cache, 0x1000, Some(replacement));
+        assert_eq!(cache.entries, [[0x1000, replacement]]);
+        assert_eq!(cache.charged_bytes(), recomputed_bytes(&cache));
+    }
+
+    #[test]
+    fn duplicate_live_owners_charge_rows_but_directory_geometry_counts_unique_pcs() {
+        let mut memory = fixture();
+        memory
+            .write(GuestAddress(0x1000), &[0xd9, 0xe8, 0xd9, 0xee])
+            .unwrap();
+        let mut cache = CodeCache::new().unwrap();
+        let mut owners = Vec::new();
+        for _ in 0..20 {
+            owners.push(
+                cache
+                    .install(service_unit(&memory, 0x1000, 1), &memory)
+                    .unwrap(),
+            );
+        }
+        assert_eq!(
+            cache.entries.len(),
+            owners.len(),
+            "duplicate owners are live, charged metadata"
+        );
+        assert_eq!(
+            cache.directory.len(),
+            MIN_DIRECTORY,
+            "one PC needs one directory row"
+        );
+        assert_entry_owner(&cache, 0x1000, Some(owners[0]));
+        assert_eq!(cache.charged_bytes(), recomputed_bytes(&cache));
+        cache.limit = cache.charged_bytes();
+        let next = cache
+            .install(service_unit(&memory, 0x1002, 1), &memory)
+            .unwrap();
+        assert!(next > *owners.last().unwrap());
+        assert!(cache.charged_bytes() <= cache.limit);
+        assert_eq!(cache.charged_bytes(), recomputed_bytes(&cache));
+        let mut victims = Vec::new();
+        loop {
+            let victim = cache.take_victim();
+            if victim == 0 {
+                break;
+            }
+            assert!(!victims.contains(&victim));
+            victims.push(victim);
+        }
+        assert!(!victims.is_empty());
+        assert!(victims.iter().all(|slot| cache.selected(*slot).is_none()));
+        let first = owners
+            .into_iter()
+            .find(|slot| cache.selected(*slot).is_some());
+        assert!(first.is_some());
+        assert_entry_owner(&cache, 0x1000, first);
+        assert_entry_owner(&cache, 0x1002, Some(next));
+        assert_eq!(cache.directory.len(), MIN_DIRECTORY);
+        assert_eq!(
+            cache.entries.len(),
+            cache
+                .units
+                .iter()
+                .flatten()
+                .map(|unit| unit.code.entries.len())
+                .sum::<usize>()
+        );
     }
 }
