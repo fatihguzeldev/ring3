@@ -1,6 +1,7 @@
 mod abi;
 mod compiler;
 mod dispatch;
+pub(crate) mod memory_cache;
 pub(crate) mod numeric;
 
 pub use abi::{

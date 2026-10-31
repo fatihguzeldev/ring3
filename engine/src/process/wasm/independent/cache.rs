@@ -186,6 +186,15 @@ impl CodeCache {
             .saturating_add(self.retained_code_bytes)
     }
 
+    pub(super) fn reserve_memory_cache(&mut self) -> Result<(), HostError> {
+        self.limit = self
+            .limit
+            .checked_sub(size_of::<crate::cpu::runtime::memory_cache::MemoryCache>())
+            .filter(|&limit| self.charged_bytes() <= limit)
+            .ok_or(HostError::Infrastructure)?;
+        Ok(())
+    }
+
     pub(super) fn directory_ptr(&self) -> u32 {
         self.directory.as_ptr() as usize as u32
     }

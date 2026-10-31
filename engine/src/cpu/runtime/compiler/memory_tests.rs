@@ -213,3 +213,91 @@ console.log('paired RMW, exact FLAGS, dirty tracking, COW/SMC/exhaustion and pri
     );
     fs::remove_dir_all(scratch).unwrap();
 }
+
+#[test]
+fn fused_page_cache_preserves_memory_effects_and_helper_invalidation() {
+    use std::{
+        fs,
+        process::Command,
+        time::{SystemTime, UNIX_EPOCH},
+    };
+    let scratch = std::env::temp_dir().join(format!(
+        "ring3-fused-pages-{}-{}",
+        std::process::id(),
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    fs::create_dir(&scratch).unwrap();
+    for (name, code, limit) in [
+        ("rmw", &[0x83, 0x03, 1, 0x83, 0x03, 1][..], 2),
+        ("read", &[0x8b, 0x03, 0x8b, 0x0e, 0x8b, 0x13][..], 3),
+    ] {
+        fs::write(
+            scratch.join(format!("{name}.wasm")),
+            compile_memory_case(code, limit).wasm,
+        )
+        .unwrap();
+    }
+    let result = Command::new("node").args(["--input-type=module", "-e", r#"
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+const memory=new WebAssembly.Memory({initial:4}),ram=new Uint8Array(memory.buffer),d=new DataView(memory.buffer);
+const ctx=0x8000,map=0x1000,perm=0x2000,exec=0x3000,cow=0x4000,bits=0x5000,slots=0x6000,seq=0x7000,cache=0x9000,back=0x10000;
+const put=(at,v)=>d.setUint32(at,v>>>0,true),get=at=>d.getUint32(at,true),word=(at,v)=>put(ctx+at,v);
+let mode='',helpers=0,cached=false;
+const invalidate=()=>{if(cached)put(cache,get(cache)+1);};
+function fault(address,width,write){word(52,3);word(60,address);word(64,width|((write?2:1)<<8)|((get(map+(address>>>12)*4)?2:1)<<16));word(68,width);return 3;}
+function span(address,width,write){
+ const result=[];
+ for(let i=0;i<width;i++){const at=(address+i)>>>0,p=at>>>12,s=get(map+p*4),rights=d.getUint8(perm+p);if(!s||(rights&8)||(rights&(write?2:1))!==(write?2:1)){fault(at,width,write);return null;}result.push(back+(s-1)*4096+(at&4095));}
+ return result;
+}
+const imports={env:{memory},cpu:{
+ read(p,a,w){assert.equal(p,ctx);helpers++;invalidate();word(52,0);const out=span(a,w&255,(w&256)!==0);if(!out)return 0;const result=out.reduce((v,at,i)=>v+ram[at]*2**(i*8),0)>>>0;
+  if(a===0x4ffe){if(mode==='remap')put(map+12,2);if(mode==='permission')d.setUint8(perm+3,0);if(mode==='guard')d.setUint8(perm+3,11);}
+  return result;
+ },
+ write(p,a,w,v){assert.equal(p,ctx);helpers++;invalidate();word(52,0);const out=span(a,w,true);if(!out)return 3;
+  if(d.getBigUint64(seq,true)===0xffffffffffffffffn||get(ctx+108)>get(ctx+112)){word(52,8);return 8;}
+  const page=a>>>12,slot=get(map+page*4)-1;
+  if(get(cow+page*4)){ram.copyWithin(back+8192,back+slot*4096,back+(slot+1)*4096);put(map+page*4,3);put(cow+page*4,0);const moved=span(a,w,true);moved.forEach((at,i)=>ram[at]=v>>>i*8);return 0;}
+  if(get(exec+slot*4)){out.forEach((at,i)=>ram[at]=v>>>i*8);word(52,6);return 6;}
+  if(!ram[bits+slot]){if(get(ctx+108)>=get(ctx+112)){word(52,8);return 8;}put(slots+get(ctx+108)*4,slot);ram[bits+slot]=1;word(108,get(ctx+108)+1);}
+  out.forEach((at,i)=>ram[at]=v>>>i*8);return 0;
+ }
+}};
+const run={};for(const name of ['read','rmw'])run[name]=(await WebAssembly.instantiate(fs.readFileSync(`${process.argv[1]}/${name}.wasm`),imports)).instance.exports.run;
+function init(cacheOn){cached=cacheOn;helpers=0;ram.fill(0);word(0,1);word(4,160);[1,0x11223344,0x55667788,0x3000,0x6800,0xabcdef01,0x4ffe,0x76543210].forEach((v,i)=>word(8+i*4,v));
+ for(const[a,v]of[[40,0x1000],[44,0xcd7],[48,3],[72,cacheOn?cache:0],[76,map],[80,perm],[84,back],[88,4],[92,exec],[96,cow],[100,bits],[104,slots],[112,4],[152,0x1f],[156,seq]])word(a,v);
+ for(const[p,s]of[[3,1],[4,2],[5,3]]){put(map+p*4,s);ram[perm+p]=3;}put(cache,1);put(cache+4,0x434d3352);put(cache+8,4112);put(cache+12,1);d.setBigUint64(seq,10n,true);put(back,7);put(back+4096,0x10203040);put(back+8192,0x50607080);
+}
+function snapshot(){const out=ram.slice();out.fill(0,cache,cache+4112);new DataView(out.buffer).setUint32(ctx+72,0,true);return out;}
+for(mode of ['ordinary','remap','permission','guard','cow','code','saturation','dirty-capacity']){
+ let expected;
+ for(const cacheOn of [false,true]){
+  init(cacheOn);const fn=['ordinary','cow','code','saturation','dirty-capacity'].includes(mode)?run.rmw:run.read;
+  if(fn===run.rmw)word(48,2);
+  if(mode==='cow')put(cow+12,3);if(mode==='code')put(exec,1);
+  if(mode==='saturation'||mode==='dirty-capacity'){
+   assert.equal(fn(ctx),0);word(40,0x1000);word(48,2);word(56,0);
+   if(mode==='saturation')d.setBigUint64(seq,0xffffffffffffffffn,true);else word(108,5);
+  }
+  const status=fn(ctx),observed={status,helpers,bytes:snapshot()};
+  if(!cacheOn)expected=observed;else assert.deepEqual(observed,expected,mode);
+  if(cacheOn&&mode==='ordinary'){const entry=cache+16+3*16;assert.equal(get(entry),get(cache));assert.equal(get(entry+4),3);assert.equal(get(entry+8),back);assert.equal(get(entry+12)&7,7);assert.equal(get(ctx+108),1);assert.equal(get(back),9);}
+  if(cacheOn&&(mode==='remap'||mode==='permission'||mode==='guard'))assert(helpers>=1);
+ }
+}
+console.log('fused page proof matches legacy full memory, COW, SMC, permissions, helper remap, saturation and dirty capacity');
+"#]).arg(&scratch).output().unwrap();
+    assert!(
+        result.status.success(),
+        "fixture {} failed:\n{}\n{}",
+        scratch.display(),
+        String::from_utf8_lossy(&result.stdout),
+        String::from_utf8_lossy(&result.stderr)
+    );
+    fs::remove_dir_all(scratch).unwrap();
+}

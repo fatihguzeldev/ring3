@@ -57,7 +57,7 @@ pub struct CpuState {
     pub detail: u32,
     pub auxiliary: u32,
     pub vector: u32,
-    pub read_result: u32,
+    pub memory_cache: u32,
     pub mappings: u32,
     pub permissions: u32,
     pub backing: u32,
@@ -93,7 +93,7 @@ impl Default for CpuState {
             detail: 0,
             auxiliary: 0,
             vector: 0,
-            read_result: 0,
+            memory_cache: 0,
             mappings: 0,
             permissions: 0,
             backing: 0,
@@ -147,6 +147,7 @@ mod tests {
         assert_eq!(std::mem::size_of::<CpuState>(), ABI_SIZE as usize);
         assert_eq!(std::mem::offset_of!(CpuState, registers), 8);
         assert_eq!(std::mem::offset_of!(CpuState, eip), 40);
+        assert_eq!(std::mem::offset_of!(CpuState, memory_cache), 72);
         assert_eq!(std::mem::offset_of!(CpuState, mappings), 76);
         assert_eq!(std::mem::offset_of!(CpuState, numeric), 124);
         assert_eq!(std::mem::offset_of!(CpuState, mapping_epoch), 128);

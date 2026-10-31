@@ -19,6 +19,7 @@ pub(super) struct IndependentSession {
     pub(super) state: Box<CpuState>,
     pub(super) numeric: Box<NumericState>,
     numeric_view: Box<runtime::NumericView>,
+    memory_cache: Box<runtime::memory_cache::MemoryCache>,
     pub(super) segments: SegmentContext,
     pub(super) dirty: DirtyPages,
     cache: CodeCache,
@@ -34,13 +35,16 @@ pub(super) struct IndependentSession {
 impl IndependentSession {
     fn new(instance: &EngineInstance) -> Result<Self, HostError> {
         let memory = instance.memory.as_ref().ok_or(HostError::InvalidRequest)?;
+        let mut cache = CodeCache::new()?;
+        cache.reserve_memory_cache()?;
         Ok(Self {
             state: Box::default(),
             numeric: Box::default(),
             numeric_view: Box::default(),
+            memory_cache: Box::default(),
             segments: instance.segment_context()?,
             dirty: DirtyPages::new(memory.capacity_pages()).map_err(HostError::Memory)?,
-            cache: CodeCache::new()?,
+            cache,
             selected: None,
             active: false,
             failed: false,
@@ -77,6 +81,7 @@ impl IndependentSession {
     }
 
     pub(super) fn flush(&mut self, memory: &mut AddressSpace) -> Result<(), HostError> {
+        self.memory_cache.invalidate();
         self.dirty.len = self.state.dirty_len;
         self.dirty.publish(memory).map_err(HostError::Memory)?;
         self.state.dirty_len = 0;
@@ -84,6 +89,8 @@ impl IndependentSession {
     }
 
     pub(super) fn refresh(&mut self, memory: &mut AddressSpace) {
+        self.memory_cache.invalidate();
+        self.state.memory_cache = std::ptr::from_ref(&*self.memory_cache) as usize as u32;
         self.numeric_view.x87_state = std::ptr::from_ref(&self.numeric.x87) as usize as u32;
         self.numeric_view.selectors = self.segments.state.selectors.map(u32::from);
         self.numeric_view.simd_state =
@@ -362,7 +369,10 @@ pub(crate) fn cpu_dispatch_code_len() -> u32 {
 }
 
 pub(crate) fn cpu_cache_bytes() -> u32 {
-    inspect_session(|session| session.cache.charged_bytes() as u32)
+    inspect_session(|session| {
+        (session.cache.charged_bytes() + std::mem::size_of::<runtime::memory_cache::MemoryCache>())
+            as u32
+    })
 }
 
 pub(crate) fn cpu_cache_victim() -> u32 {
@@ -440,6 +450,7 @@ fn helper(
             session.state.status = Status::Infrastructure as u32;
             return Status::Infrastructure as u32;
         }
+        session.memory_cache.invalidate();
         operation(instance, session)
     })
 }

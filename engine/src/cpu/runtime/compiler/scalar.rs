@@ -174,7 +174,7 @@ pub(super) fn emit(blocks: &[Block], entries: &[EntryPoint]) -> Vec<u8> {
             (9, ValType::F64),
             (5, ValType::I32),
             (6, ValType::I64),
-            (10, ValType::I32),
+            (14, ValType::I32),
         ]),
         emitted_guest_write: false,
     };
@@ -200,6 +200,7 @@ pub(super) fn emit(blocks: &[Block], entries: &[EntryPoint]) -> Vec<u8> {
     {
         out.c().local_get(0).i32_load(mem(offset)).local_set(local);
     }
+    memory::initialize(&mut out);
     out.c().loop_(BlockType::Empty);
     entry_route(&mut out, entries);
     out.c().local_set(A);
