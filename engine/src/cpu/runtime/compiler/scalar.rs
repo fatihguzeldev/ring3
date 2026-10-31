@@ -10,6 +10,7 @@ mod bit;
 mod deferred;
 mod exchange;
 mod flags;
+mod flags_analysis;
 mod flags_flow;
 mod memory;
 mod memory_helpers;
@@ -142,6 +143,7 @@ pub(super) fn emit(
     entries: &[EntryPoint],
     binding: Option<NativeMemoryBinding>,
 ) -> Vec<u8> {
+    let flag_analysis = flags_analysis::Analysis::new(blocks, entries);
     let mut module = Module::new();
     let mut types = TypeSection::new();
     types.ty().function([ValType::I32; 3], [ValType::I32]);
@@ -262,7 +264,9 @@ pub(super) fn emit(
             landing_count + remaining_blocks - 1 + local_loop,
         );
         for instruction in &block.instructions {
+            flags_flow::edge(&mut out, flag_analysis.expected(instruction.pc().0));
             out.c().end();
+            out.recipe = flag_analysis.expected(instruction.pc().0);
             out.c().local_get(REMAIN).i32_eqz().if_(BlockType::Empty);
             out.exit(2);
             out.c().end().i32_const(0).local_set(WRITE_STATUS);
@@ -270,6 +274,7 @@ pub(super) fn emit(
             if !out.instruction(*instruction.operation(), instruction.next_pc().0) {
                 out.exit(7);
             } else {
+                debug_assert_eq!(out.recipe, flag_analysis.after(instruction.pc().0));
                 out.c()
                     .local_get(REMAIN)
                     .i32_const(1)
@@ -291,7 +296,13 @@ pub(super) fn emit(
             }
         }
         if let Some(gate) = block.gate {
+            let gate_pc = block
+                .instructions
+                .last()
+                .map_or(block.pc, |instruction| instruction.next_pc().0);
+            flags_flow::edge(&mut out, flag_analysis.expected(gate_pc));
             out.c().end();
+            out.recipe = flag_analysis.expected(gate_pc);
             out.c().local_get(REMAIN).i32_eqz().if_(BlockType::Empty);
             out.exit(2);
             out.c()
@@ -301,7 +312,7 @@ pub(super) fn emit(
                 .i32_store(mem(68));
             out.exit(5);
         }
-        flags_flow::finish(&mut out, blocks, entries, block_index);
+        flags_flow::finish(&mut out, blocks, &flag_analysis, block_index);
         if routing::next(&mut out, blocks, entries, block_index) {
             out.c()
                 .local_get(A)
