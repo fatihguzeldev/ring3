@@ -137,3 +137,86 @@ console.log('deferred FLAGS complete-state literals: overwrite, prefix quota, in
     );
     fs::remove_dir_all(scratch).unwrap();
 }
+
+#[test]
+fn generated_pending_flags_survive_numeric_success_faults_and_status_observers() {
+    use std::{
+        fs,
+        process::Command,
+        time::{SystemTime, UNIX_EPOCH},
+    };
+    let scratch = std::env::temp_dir().join(format!(
+        "ring3-runtime-numeric-flags-{}-{}",
+        std::process::id(),
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    fs::create_dir(&scratch).unwrap();
+    let mut memory = AddressSpace::new(1).unwrap();
+    memory
+        .map_zeroed(
+            PageRange::new(GuestAddress(0x1000), 1).unwrap(),
+            Permissions::ALL,
+        )
+        .unwrap();
+    for (name, code, count) in [
+        ("constant", &[0x01, 0xc8, 0xd9, 0xe8, 0x31, 0xd2][..], 3),
+        ("simd", &[0x01, 0xc8, 0x0f, 0x28, 0xc1, 0x31, 0xd2][..], 3),
+        ("status", &[0x01, 0xc8, 0xdf, 0xe0, 0x9e][..], 3),
+        ("wait", &[0x01, 0xc8, 0x9b][..], 2),
+        ("load", &[0x01, 0xc8, 0xd9, 0x03][..], 2),
+        ("integer-compare", &[0x01, 0xc8, 0xdb, 0xf1][..], 2),
+    ] {
+        memory.write(GuestAddress(0x1000), code).unwrap();
+        fs::write(
+            scratch.join(format!("{name}.wasm")),
+            compile(&memory, GuestAddress(0x1000), count).unwrap().wasm,
+        )
+        .unwrap();
+    }
+    let result = Command::new("node").arg("--input-type=module").arg("-e").arg(r#"
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+const memory=new WebAssembly.Memory({initial:2}),ram=new Uint8Array(memory.buffer),d=new DataView(memory.buffer),ctx=0x8000,view=0x9000,fp=0xa000,simd=0xa100;
+const word=(at,value)=>d.setUint32(ctx+at,value>>>0,true);let reads=0;
+const imports={env:{memory},cpu:{
+ read(p,a,w){assert.deepEqual([p,a>>>0,w],[ctx,0x3000,4]);reads++;word(52,3);word(60,0x3000);word(64,0x10104);word(68,4);return 0;},
+ write(){throw Error('no guest store in these numeric consumers');}
+}};
+const units={};for(const name of['constant','simd','status','wait','load','integer-compare'])units[name]=(await WebAssembly.instantiate(fs.readFileSync(`${process.argv[1]}/${name}.wasm`),imports)).instance.exports.run;
+function scenario(name,quota,expect,{pending=false}={}){
+ for(let i=0;i<ram.length;i++)ram[i]=(i*41+13)&255;ram.fill(0,ctx,ctx+160);ram.fill(0,view,view+40);
+ word(0,1);word(4,160);[0x7fffffff,1,0x12345678,0x3000,0x4800,10,11,12].forEach((v,i)=>word(8+4*i,v));word(40,0x1000);word(44,0x603);word(48,quota);word(52,0xabcdef01);word(56,0xffffffff);word(60,0x11223344);word(64,0x55667788);word(68,0x12345678);word(124,view);word(152,63);
+ d.setUint32(view,1,true);d.setUint32(view+4,40,true);d.setUint32(view+8,fp,true);d.setUint32(view+36,simd,true);[0x23,0x1b,0x23,0x23,0x3b,0x43].forEach((v,i)=>d.setUint32(view+12+4*i,v,true));
+ for(const[at,v]of[[0,pending?0x003e:0x003f],[2,pending?0x4501:0x4500],[4,0xffff],[6,0x321],[16,0x71],[18,0x72]])d.setUint16(fp+at,v,true);d.setUint32(fp+8,0x12345678,true);d.setUint32(fp+12,0x87654321,true);d.setUint32(simd,0x1f80,true);
+ const initial=ram.slice(),expected=initial.slice(),out=new DataView(expected.buffer),set=(at,v)=>out.setUint32(ctx+at,v>>>0,true);reads=0;
+ for(const[at,v]of[[8,expect.eax??0x80000000],[16,expect.edx??0x12345678],[40,expect.pc],[44,expect.flags??0xe96],[48,quota-expect.steps],[52,expect.status],[56,(0xffffffff+expect.steps)>>>0]])set(at,v);
+ if(expect.loaded){out.setUint16(fp+2,0x7d00,true);out.setUint16(fp+4,0x3fff,true);out.setUint16(fp+6,0x1e8,true);out.setUint32(fp+8,0x1002,true);out.setUint16(fp+16,0x1b,true);out.setBigUint64(fp+90,0x8000000000000000n,true);out.setUint16(fp+98,0x3fff,true);}
+ if(expect.simd)expected.set(initial.slice(simd+20,simd+36),simd+4);
+ if(name==='load'){set(60,0x3000);set(64,0x10104);set(68,4);}
+ assert.equal(units[name](ctx),expect.status,name);assert.deepEqual(ram,expected,`${name}/quota${quota}: full numeric, scalar, RAM and retirement state`);assert.equal(reads,name==='load'?1:0);
+}
+scenario('constant',1,{pc:0x1002,steps:1,status:2});
+scenario('constant',2,{pc:0x1004,steps:2,status:2,loaded:true});
+scenario('constant',3,{pc:0x1006,steps:3,status:0,flags:0x646,edx:0,loaded:true});
+scenario('simd',2,{pc:0x1005,steps:2,status:2,simd:true});
+scenario('simd',3,{pc:0x1007,steps:3,status:0,flags:0x646,edx:0,simd:true});
+scenario('status',2,{pc:0x1004,steps:2,status:2,eax:0x80004500});
+scenario('status',3,{pc:0x1005,steps:3,status:0,eax:0x80004500,flags:0xe47});
+scenario('wait',2,{pc:0x1003,steps:2,status:0});
+scenario('wait',2,{pc:0x1002,steps:1,status:7},{pending:true});
+scenario('load',2,{pc:0x1002,steps:1,status:3});
+scenario('integer-compare',2,{pc:0x1002,steps:1,status:7});
+console.log('pending integer FLAGS survive exact x87/SIMD effects, later overwrite, short quotas, FNSTSW/SAHF observation, waiting fallback, operand fault and FCOMI service');
+"#).arg(&scratch).output().unwrap();
+    assert!(
+        result.status.success(),
+        "fixture {} failed:\n{}\n{}",
+        scratch.display(),
+        String::from_utf8_lossy(&result.stdout),
+        String::from_utf8_lossy(&result.stderr)
+    );
+    fs::remove_dir_all(scratch).unwrap();
+}

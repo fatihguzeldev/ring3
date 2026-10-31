@@ -1,10 +1,81 @@
 use super::*;
+use crate::cpu::x86::{
+    X87Binary, X87Format, X87Operation,
+    simd::{FloatKind, SimdKind},
+};
 
 const PENDING: u32 = 72;
 const LEFT: u32 = 73;
 const RIGHT: u32 = 74;
 const RESULT: u32 = 75;
 const INPUT_CARRY: u32 = 76;
+
+fn numeric_preserves_flags(operation: Operation) -> bool {
+    match operation {
+        Operation::X87 {
+            operation: numeric, ..
+        } => {
+            let preserving = matches!(
+                numeric,
+                X87Operation::Wait
+                    | X87Operation::Load(X87Format::Float32 | X87Format::Float64)
+                    | X87Operation::Store {
+                        format: X87Format::Float32 | X87Format::Float64,
+                        truncate: false,
+                        ..
+                    }
+                    | X87Operation::LoadConstant { index: 0 | 6 }
+                    | X87Operation::LoadRegister { .. }
+                    | X87Operation::StoreRegister { .. }
+                    | X87Operation::Exchange { .. }
+                    | X87Operation::ChangeSign
+                    | X87Operation::LoadControl
+                    | X87Operation::StoreControl
+                    | X87Operation::StoreStatus
+                    | X87Operation::StatusToAx
+                    | X87Operation::Compare {
+                        integer_flags: false,
+                        ..
+                    }
+                    | X87Operation::CompareMemory {
+                        format: X87Format::Float32 | X87Format::Float64,
+                        ..
+                    }
+                    | X87Operation::Binary {
+                        kind: X87Binary::Add
+                            | X87Binary::Subtract
+                            | X87Binary::ReverseSubtract
+                            | X87Binary::Multiply
+                            | X87Binary::Divide,
+                        ..
+                    }
+                    | X87Operation::BinaryMemory {
+                        kind: X87Binary::Add
+                            | X87Binary::Subtract
+                            | X87Binary::ReverseSubtract
+                            | X87Binary::Multiply
+                            | X87Binary::Divide,
+                        format: X87Format::Float32 | X87Format::Float64,
+                    }
+            );
+            preserving
+                && (x87::supports(&operation)
+                    || x87_compare::supports(&operation)
+                    || x87_arithmetic::supports(&operation)
+                    || x87_multiply::supports(&operation))
+        }
+        Operation::X87StatusToAx
+        | Operation::X87StatusToMemory { .. }
+        | Operation::X87ControlToMemory { .. } => true,
+        Operation::Simd(numeric) => {
+            matches!(
+                numeric.kind,
+                SimdKind::Move | SimdKind::Float(FloatKind::Add)
+            ) && simd::supports(&operation)
+        }
+        _ => false,
+    }
+}
 
 pub(super) fn materializer() -> Function {
     let mut function = Function::new([(3, ValType::I32), (1, ValType::I64)]);
@@ -141,7 +212,8 @@ impl Output {
     }
 
     pub(super) fn prepare_flags(&mut self, operation: Operation) {
-        if narrow::supports(&operation)
+        if numeric_preserves_flags(operation)
+            || narrow::supports(&operation)
             || matches!(
                 operation,
                 Operation::Nop
