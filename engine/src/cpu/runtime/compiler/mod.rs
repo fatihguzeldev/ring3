@@ -26,6 +26,32 @@ pub struct CompiledUnit {
     pub sources: Vec<CodeSnapshot>,
     pub entries: Vec<u32>,
     pub instruction_count: usize,
+    pub(crate) services: Vec<ServiceSite>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct ServiceSite {
+    pub(crate) pc: u32,
+    pub(crate) next_pc: u32,
+    pub(crate) operation: Operation,
+}
+
+fn can_service(operation: &Operation) -> bool {
+    // inline numeric operations may still defer at runtime, even in a block's
+    // interior; other unsupported operations retain the same strict service.
+    !scalar::supports(operation)
+        || matches!(
+            operation,
+            Operation::X87 { .. }
+                | Operation::Simd(_)
+                | Operation::Avx(_)
+                | Operation::XState(_)
+                | Operation::InitializeX87
+                | Operation::ClearX87Exceptions
+                | Operation::X87StatusToAx
+                | Operation::X87StatusToMemory { .. }
+                | Operation::X87ControlToMemory { .. }
+        )
 }
 
 impl CompiledUnit {
@@ -63,6 +89,7 @@ pub fn compile_with_gates(
     let mut seen = BTreeSet::new();
     let mut blocks = Vec::new();
     let mut sources = Vec::new();
+    let mut services = Vec::new();
     let mut count = 0;
     while let Some(entry) = pending.pop_front() {
         if count >= limit || blocks.len() >= 128 || !seen.insert(entry) {
@@ -106,6 +133,13 @@ pub fn compile_with_gates(
             };
             let next = instruction.next_pc().0;
             let operation = *instruction.operation();
+            if can_service(&operation) {
+                services.push(ServiceSite {
+                    pc: current,
+                    next_pc: next,
+                    operation,
+                });
+            }
             source_length += usize::from(instruction.length());
             instructions.push(instruction);
             count += 1;
@@ -157,11 +191,14 @@ pub fn compile_with_gates(
         }
     }
     let entries = blocks.iter().map(|block| block.pc).collect();
+    services.sort_unstable_by_key(|site| site.pc);
+    services.dedup_by_key(|site| site.pc);
     Ok(CompiledUnit {
         wasm: scalar::emit(&blocks),
         sources,
         entries,
         instruction_count: count,
+        services,
     })
 }
 
@@ -177,6 +214,8 @@ mod memory_tests;
 mod multiply_tests;
 #[cfg(test)]
 mod rotate_tests;
+#[cfg(test)]
+mod service_tests;
 #[cfg(test)]
 mod shift_tests;
 #[cfg(test)]

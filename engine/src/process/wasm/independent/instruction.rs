@@ -1,12 +1,15 @@
 use super::{IndependentSession, memory_failure, paging_failure};
 use crate::{
     cpu::{
-        runtime::{CpuState, Status, numeric::NumericError},
+        runtime::{CpuState, ServiceSite, Status, numeric::NumericError},
         x86::{
             ControlOperation, PagingAccess32, Register32, SegmentAccess, SegmentContext,
             SegmentRegister, StackPointerSize, State32, USER_MODE_ENVIRONMENT,
             capabilities::CPU_ID_LEAVES,
-            decode::{DecodeError, decode_one},
+            decode::{
+                BoundDecode, DecodeAuthority, DecodeError, DecodePolicy, DecodedOperation,
+                decode_for_compilation,
+            },
             ir::{AddressSize, EffectiveAddress, Operation},
             read_cpu_paging_access32,
         },
@@ -25,6 +28,35 @@ enum Effect {
     Unsupported,
 }
 
+fn decode_instruction(
+    memory: &AddressSpace,
+    pc: GuestAddress,
+) -> Result<DecodedOperation, DecodeError> {
+    #[cfg(feature = "observability")]
+    let _scope = ring3_observability::current().scope(
+        ring3_observability::Level::Detailed,
+        ring3_observability::categories::ENGINE_CPU_DECODE,
+        "instruction",
+        &[
+            ring3_observability::Field::unsigned("pc", u64::from(pc.0)),
+            ring3_observability::Field::unsigned("cache_hit", 0),
+        ],
+    );
+    // this is decode_one's strict, unbound decode without its immediately dropped
+    // currency snapshot; the immutable fetch already proves the consumed span.
+    match decode_for_compilation(
+        memory,
+        pc,
+        DecodePolicy::Strict,
+        None,
+        DecodeAuthority::default(),
+    )? {
+        BoundDecode::Instruction(instruction) => Ok(instruction),
+        // strict unbound decoding cannot capture a deferred code fault.
+        BoundDecode::CodeFault(_) => Err(DecodeError::Infrastructure(MemoryError::InvalidRange)),
+    }
+}
+
 pub(super) fn execute(
     instance: &mut EngineInstance,
     session: &mut IndependentSession,
@@ -34,16 +66,36 @@ pub(super) fn execute(
     }
     let memory = instance.memory.as_mut().ok_or(HostError::Closed)?;
     session.flush(memory)?;
-    let instruction = match decode_one(memory, GuestAddress(session.state.eip)) {
-        Ok(instruction) => instruction,
-        Err(error) => {
-            decode_failure(&mut session.state, error)?;
-            session.refresh(memory);
-            return Ok(());
+    let pc = session.state.eip;
+    let instruction = match session.cache.service(memory, pc)? {
+        Some(site) => {
+            #[cfg(feature = "observability")]
+            let _scope = ring3_observability::current().scope(
+                ring3_observability::Level::Detailed,
+                ring3_observability::categories::ENGINE_CPU_DECODE,
+                "instruction",
+                &[
+                    ring3_observability::Field::unsigned("pc", u64::from(pc)),
+                    ring3_observability::Field::unsigned("cache_hit", 1),
+                ],
+            );
+            site
         }
+        None => match decode_instruction(memory, GuestAddress(pc)) {
+            Ok(decoded) => ServiceSite {
+                pc: decoded.pc().0,
+                next_pc: decoded.next_pc().0,
+                operation: *decoded.operation(),
+            },
+            Err(error) => {
+                decode_failure(&mut session.state, error)?;
+                session.refresh(memory);
+                return Ok(());
+            }
+        },
     };
-    let operation = *instruction.operation();
-    let next = instruction.next_pc().0;
+    let operation = instruction.operation;
+    let next = instruction.next_pc;
     let before = memory.code_validation_version();
     let mut scalar = session.state.state();
     let result =
@@ -84,14 +136,14 @@ pub(super) fn execute(
             retire(&mut session.state, Status::CpuFault);
             session.state.vector = vector;
             session.state.detail = u32::from(vector == 1);
-            session.state.auxiliary = instruction.pc().0;
+            session.state.auxiliary = instruction.pc;
         }
         Ok(Effect::SystemEntry(vector)) => {
             scalar.eip = next;
             session.state.set_state(scalar);
             retire(&mut session.state, Status::SystemEntry);
             session.state.vector = vector;
-            session.state.detail = instruction.pc().0;
+            session.state.detail = instruction.pc;
             session.state.auxiliary = 0;
         }
         Ok(Effect::Fault { vector, detail }) | Err(NumericError::Cpu { vector, detail }) => {
