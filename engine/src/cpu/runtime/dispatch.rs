@@ -11,6 +11,15 @@ fn mem(offset: u64) -> MemArg {
     }
 }
 
+// keep the Wasm sequence below identical, mixing all PC bits before masking.
+pub(crate) fn directory_hash(pc: u32) -> u32 {
+    let mut hash = pc ^ (pc >> 16);
+    hash = hash.wrapping_mul(0x7feb_352d);
+    hash ^= hash >> 15;
+    hash = hash.wrapping_mul(0x846c_a68b);
+    hash ^ (hash >> 16)
+}
+
 pub fn emit_dispatch() -> Vec<u8> {
     emit(false)
 }
@@ -90,11 +99,23 @@ fn emit(with_service: bool) -> Vec<u8> {
     c.local_get(0).i32_load(mem(144)).local_set(2);
     c.local_get(0).i32_load(mem(148)).local_set(3);
     c.local_get(1)
-        .i32_const(1)
+        .i32_const(16)
         .i32_shr_u()
         .local_get(1)
-        .i32_const(12)
+        .i32_xor()
+        .i32_const(0x7feb_352d)
+        .i32_mul()
+        .local_tee(4)
+        .i32_const(15)
         .i32_shr_u()
+        .local_get(4)
+        .i32_xor()
+        .i32_const(0x846c_a68b_u32 as i32)
+        .i32_mul()
+        .local_tee(4)
+        .i32_const(16)
+        .i32_shr_u()
+        .local_get(4)
         .i32_xor()
         .local_get(3)
         .i32_and()

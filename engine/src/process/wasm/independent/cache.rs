@@ -1,5 +1,7 @@
 use crate::{
-    cpu::runtime::{CompiledUnit, ServiceSite, emit_dispatch_with_service as emit_dispatch},
+    cpu::runtime::{
+        CompiledUnit, ServiceSite, directory_hash, emit_dispatch_with_service as emit_dispatch,
+    },
     memory::{AddressSpace, CodeSnapshot, PageVersion},
     process::HostError,
 };
@@ -370,7 +372,7 @@ impl CodeCache {
                 continue;
             }
             previous = Some(pc);
-            let mut index = ((pc >> 1) ^ (pc >> 12)) as usize & (length - 1);
+            let mut index = directory_hash(pc) as usize & (length - 1);
             while self.directory[index][1] != 0 {
                 index = (index + 1) & (length - 1);
             }
@@ -969,5 +971,110 @@ mod tests {
                 .map(|unit| unit.code.entries.len())
                 .sum::<usize>()
         );
+    }
+
+    fn directory_lookup(cache: &CodeCache, pc: u32) -> Option<u32> {
+        let mask = cache.directory.len() - 1;
+        let mut at = directory_hash(pc) as usize & mask;
+        for _ in 0..cache.directory.len() {
+            let [key, slot] = cache.directory[at];
+            if slot == 0 {
+                return None;
+            }
+            if slot != u32::MAX && key == pc {
+                return Some(slot);
+            }
+            at = (at + 1) & mask;
+        }
+        None
+    }
+
+    #[test]
+    fn dense_instruction_directories_keep_exact_owners_without_long_probe_clusters() {
+        use std::collections::BTreeMap;
+        let dense: Vec<_> = (0..4096).map(|offset| 0x7800_0000 + offset).collect();
+        let modules: Vec<_> = [0x0040_0000, 0x1000_0000, 0x7800_0000, 0x7c80_0000]
+            .into_iter()
+            .flat_map(|base| (0..1024).map(move |offset| base + offset))
+            .collect();
+        let fragmented: Vec<_> = [0x0040_0000, 0x7800_0000, 0xfff0_0000]
+            .into_iter()
+            .flat_map(|base| {
+                (0..32).flat_map(move |page| {
+                    [1, 3, 7, 12, 31, 63, 127, 255]
+                        .into_iter()
+                        .map(move |offset| base + page * 4096 + offset)
+                })
+            })
+            .chain([0, u32::MAX])
+            .collect();
+        let mut measurements = Vec::new();
+        for (name, keys) in [
+            ("dense module page", dense),
+            ("multiple module bases", modules),
+            ("fragmented pages and unsigned endpoints", fragmented),
+        ] {
+            let mut cache = CodeCache::new().unwrap();
+            let expected: BTreeMap<_, _> = keys
+                .iter()
+                .enumerate()
+                .map(|(index, &pc)| (pc, index as u32 + 1))
+                .collect();
+            assert_eq!(expected.len(), keys.len(), "fixture PCs must be unique");
+            cache.entries = expected.iter().map(|(&pc, &slot)| [pc, slot]).collect();
+            // duplicate retained owners remain charged, while one directory row
+            // must keep the first owner for each exact PC.
+            cache.entries.extend(
+                expected
+                    .iter()
+                    .step_by(31)
+                    .map(|(&pc, &slot)| [pc, slot + keys.len() as u32]),
+            );
+            cache.entries.sort_unstable();
+            let length = directory_size(expected.len()).unwrap();
+            reserve(&mut cache.directory, length).unwrap();
+            cache.rebuild_directory().unwrap();
+            assert_eq!(cache.directory.len(), length);
+            assert_eq!(
+                cache.directory.iter().filter(|row| row[1] != 0).count(),
+                expected.len()
+            );
+            for (&pc, &slot) in &expected {
+                assert_eq!(cache.lookup(pc), Some(slot));
+                assert_eq!(directory_lookup(&cache, pc), Some(slot));
+            }
+            for missing in [2, 0x7801_0000, 0x8000_0000, 0xffff_fffe] {
+                if !expected.contains_key(&missing) {
+                    assert_eq!(cache.lookup(missing), None);
+                    assert_eq!(directory_lookup(&cache, missing), None);
+                }
+            }
+            assert_eq!(cache.charged_bytes(), recomputed_bytes(&cache));
+            assert!(cache.charged_bytes() <= cache.limit);
+            let mask = length - 1;
+            let mut total = 0;
+            let mut maximum = 0;
+            for (index, &[pc, slot]) in cache.directory.iter().enumerate() {
+                if slot != 0 {
+                    let home = directory_hash(pc) as usize & mask;
+                    let probes = index.wrapping_sub(home) & mask;
+                    total += probes + 1;
+                    maximum = maximum.max(probes + 1);
+                }
+            }
+            eprintln!(
+                "{name}: {} exact PCs, {length} slots, {total} successful probes, maximum {maximum}",
+                expected.len()
+            );
+            measurements.push((name, expected.len(), total, maximum));
+        }
+        // all exact mapping, duplicate-owner and charge oracles above must pass
+        // before assessing the deterministic clustered-PC scalability bound.
+        for (name, count, total, maximum) in measurements {
+            assert!(
+                total <= count * 8 && maximum <= 128,
+                "{name}: fixture probe budget exceeded: total {total} / {count}, maximum {maximum}"
+            );
+        }
     }
 }

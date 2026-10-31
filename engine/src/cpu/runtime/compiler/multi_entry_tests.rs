@@ -126,13 +126,14 @@ import fs from 'node:fs';
 const root=process.argv[1],memory=new WebAssembly.Memory({initial:4}),ram=new Uint8Array(memory.buffer),data=new DataView(memory.buffer),ptr=0x8000,directory=0x10000,mask=8191;
 const word=(at,value)=>data.setUint32(ptr+at,value>>>0,true),get=at=>data.getUint32(ptr+at,true),regs=()=>Array.from({length:8},(_,i)=>get(8+4*i));
 const metadata=new Map(JSON.parse(fs.readFileSync(`${root}/entries.json`)).map(item=>[item.name,item.entries]));
+function directoryHash(pc){let value=pc>>>0;value=Math.imul(value^(value>>>16),0x7feb352d);value=Math.imul(value^(value>>>15),0x846ca68b);return(value^(value>>>16))>>>0;}
 const table=new WebAssembly.Table({initial:2,element:'anyfunc'}),units=new Map();
 const imports={env:{memory},cpu:{read(){throw Error('no scalar memory access expected');},write(){throw Error('no scalar memory write expected');}}};
 for(const name of metadata.keys())units.set(name,(await WebAssembly.instantiate(fs.readFileSync(`${root}/${name}.wasm`),imports)).instance.exports.run);
 let services=0;
 const service=context=>{assert.equal(context,ptr);assert.equal(get(40),0x1001);assert.equal(get(52),7);assert(get(48)>0);services++;word(40,0x1008);word(48,get(48)-1);word(56,get(56)+1);word(52,0);return 0;};
 const dispatch=(await WebAssembly.instantiate(fs.readFileSync(`${root}/dispatch.wasm`),{env:{memory,functions:table},cpu:{instruction:service}})).instance.exports.run;
-function init(name,pc,quota,flags=0x203){ram.fill(0);word(0,1);word(4,160);[5,6,7,8,0x4800,10,11,12].forEach((v,i)=>word(8+i*4,v));word(40,pc);word(44,flags);word(48,quota);word(144,directory);word(148,mask);word(152,63);table.set(1,units.get(name));for(const entry of metadata.get(name)){let index=((entry>>>1)^(entry>>>12))&mask;while(data.getUint32(directory+index*8+4,true))index=(index+1)&mask;data.setUint32(directory+index*8,entry,true);data.setUint32(directory+index*8+4,1,true);}services=0;}
+function init(name,pc,quota,flags=0x203){ram.fill(0);word(0,1);word(4,160);[5,6,7,8,0x4800,10,11,12].forEach((v,i)=>word(8+i*4,v));word(40,pc);word(44,flags);word(48,quota);word(144,directory);word(148,mask);word(152,63);table.set(1,units.get(name));for(const entry of metadata.get(name)){let index=directoryHash(entry)&mask;while(data.getUint32(directory+index*8+4,true))index=(index+1)&mask;data.setUint32(directory+index*8,entry,true);data.setUint32(directory+index*8+4,1,true);}services=0;}
 function complete(pc,remaining,retired,status=2){assert.deepEqual([get(40),get(48),get(56),get(52)],[pc>>>0,remaining,retired,status]);}
 assert.deepEqual(metadata.get('plain'),[0x1000,0x1001,0x1002,0x1003]);
 for(const[pc,index,result,flags]of[[0x1000,0,6,0x207],[0x1001,3,9,0x207],[0x1002,2,8,0x203],[0x1003,null,null,0x203]]){init('plain',pc,1);const expected=regs();if(index!==null)expected[index]=result;assert.equal(dispatch(ptr),2);assert.deepEqual(regs(),expected);assert.equal(get(44),flags);complete(pc+1,0,1);assert.equal(services,0);}
