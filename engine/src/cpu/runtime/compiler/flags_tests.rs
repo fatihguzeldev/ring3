@@ -358,3 +358,103 @@ console.log('pending integer FLAGS survive exact x87/SIMD effects, later overwri
     );
     fs::remove_dir_all(scratch).unwrap();
 }
+
+#[test]
+fn generated_sahf_and_narrow_producers_preserve_only_the_required_old_flags() {
+    use std::{
+        fs,
+        process::Command,
+        time::{SystemTime, UNIX_EPOCH},
+    };
+    let scratch = std::env::temp_dir().join(format!(
+        "ring3-runtime-partial-flag-observers-{}-{}",
+        std::process::id(),
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    fs::create_dir(&scratch).unwrap();
+    let mut memory = AddressSpace::new(1).unwrap();
+    memory
+        .map_zeroed(
+            PageRange::new(GuestAddress(0x1000), 1).unwrap(),
+            Permissions::ALL,
+        )
+        .unwrap();
+    for (name, code, count) in [
+        ("sahf-one", &[0x01, 0xcb, 0x9e][..], 2),
+        ("sahf-zero", &[0x31, 0xd2, 0x9e][..], 2),
+        (
+            "adc-byte",
+            &[0x01, 0xc2, 0x10, 0xe0, 0x0f, 0x92, 0xc3, 0x0f, 0x90, 0xc7][..],
+            4,
+        ),
+        (
+            "sbb-word",
+            &[
+                0x29, 0xc2, 0x66, 0x19, 0xc0, 0x0f, 0x92, 0xc3, 0x0f, 0x90, 0xc7,
+            ][..],
+            4,
+        ),
+        ("read-fault", &[0x01, 0xca, 0x12, 0x06][..], 2),
+        ("write-fault", &[0x01, 0xca, 0x00, 0x06][..], 2),
+    ] {
+        memory.write(GuestAddress(0x1000), code).unwrap();
+        fs::write(
+            scratch.join(format!("{name}.wasm")),
+            compile(&memory, GuestAddress(0x1000), count).unwrap().wasm,
+        )
+        .unwrap();
+    }
+    let result = Command::new("node").arg("--input-type=module").arg("-e").arg(r#"
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+const memory=new WebAssembly.Memory({initial:2}),ram=new Uint8Array(memory.buffer),d=new DataView(memory.buffer),ctx=0x8000;
+const word=(at,v)=>d.setUint32(ctx+at,v>>>0,true);
+let mode='',reads=[],writes=[];
+const imports={env:{memory},cpu:{
+ read(p,a,w){assert.equal(p,ctx);assert.equal(a>>>0,0x6000);assert.equal(w,mode==='write-fault'?0x101:1);reads.push(ram.slice());
+  if(mode==='write-fault'){word(52,0);return 1;}
+  word(52,3);word(60,a);word(64,0x10101);word(68,1);return 0;
+ },
+ write(p,a,w,v){assert.deepEqual([p,a>>>0,w,v>>>0],[ctx,0x6000,1,0x80]);writes.push(ram.slice());
+  word(52,3);word(60,a);word(64,0x20201);word(68,1);return 3;
+ }
+}};
+const runs={};for(const name of['sahf-one','sahf-zero','adc-byte','sbb-word','read-fault','write-fault'])runs[name]=(await WebAssembly.instantiate(fs.readFileSync(`${process.argv[1]}/${name}.wasm`),imports)).instance.exports.run;
+function scenario(name,input,expect){
+ for(let i=0;i<ram.length;i++)ram[i]=(i*53+17)&255;ram.fill(0,ctx,ctx+160);
+ word(0,1);word(4,160);[0x12340056,1,0xffffffff,0x7fffffff,0x4800,10,0x6000,12].forEach((v,i)=>word(8+4*i,v));
+ for(const[index,v]of Object.entries(input.regs??{}))word(8+4*Number(index),v);
+ word(40,input.pc??0x1000);word(44,input.flags??0x200603);word(48,input.quota);word(56,0xfffffffe);word(60,0x11223344);word(64,0x55667788);word(68,0x12345678);word(152,63);
+ const before=ram.slice(),expected=before.slice(),view=new DataView(expected.buffer),set=(at,v)=>view.setUint32(ctx+at,v>>>0,true);mode=name;reads=[];writes=[];
+ for(const[at,v]of[[40,expect.pc],[44,expect.flags],[48,input.quota-expect.steps],[52,expect.status??0],[56,(0xfffffffe+expect.steps)>>>0],...(expect.fields??[])])set(at,v);
+ for(const[index,v]of Object.entries(expect.regs??{}))set(8+4*Number(index),v);
+ assert.equal(runs[name](ctx),expect.status??0,name);assert.deepEqual(ram,expected,`${name} full state`);
+ assert.equal(reads.length,expect.reads??0);assert.equal(writes.length,expect.writes??0);
+ for(const observed of [...reads,...writes])assert.deepEqual(observed,before,'a faultable narrow producer retains the old helper-visible publication');
+}
+scenario('sahf-one',{quota:1},{pc:0x1002,steps:1,status:2,flags:0x200e96,regs:{3:0x80000000}});
+scenario('sahf-one',{quota:2},{pc:0x1003,steps:2,flags:0x200e02,regs:{3:0x80000000}});
+scenario('sahf-zero',{quota:1,flags:0x200e03,regs:{0:0x1234ff56}},{pc:0x1002,steps:1,status:2,flags:0x200646,regs:{2:0}});
+scenario('sahf-zero',{quota:2,flags:0x200e03,regs:{0:0x1234ff56}},{pc:0x1003,steps:2,flags:0x2006d7,regs:{2:0}});
+scenario('sahf-one',{pc:0x1002,quota:1,flags:0x200e03},{pc:0x1003,steps:1,flags:0x200e02});
+scenario('sahf-zero',{pc:0x1002,quota:1,flags:0x200e03,regs:{0:0x1234ff56}},{pc:0x1003,steps:1,flags:0x200ed7});
+scenario('adc-byte',{quota:1,flags:0x200602,regs:{0:0x1234aa7f,3:0x89abccdd}},{pc:0x1002,steps:1,status:2,flags:0x200617,regs:{2:0x1234aa7e}});
+scenario('adc-byte',{quota:4,flags:0x200602,regs:{0:0x1234aa7f,3:0x89abccdd}},{pc:0x100a,steps:4,flags:0x200613,regs:{0:0x1234aa2a,2:0x1234aa7e,3:0x89ab0001}});
+scenario('sbb-word',{quota:1,flags:0x200602,regs:{0:0x12348000,2:0,3:0x89abccdd}},{pc:0x1002,steps:1,status:2,flags:0x200687,regs:{2:0xedcb8000}});
+scenario('sbb-word',{quota:4,flags:0x200602,regs:{0:0x12348000,2:0,3:0x89abccdd}},{pc:0x100b,steps:4,flags:0x200697,regs:{0:0x1234ffff,2:0xedcb8000,3:0x89ab0001}});
+scenario('read-fault',{quota:2,regs:{0:0x1234ff7f,2:0x7fffffff}},{pc:0x1002,steps:1,status:3,flags:0x200e96,regs:{2:0x80000000},reads:1,fields:[[60,0x6000],[64,0x10101],[68,1]]});
+scenario('write-fault',{quota:2,regs:{0:0x1234ff7f,2:0x7fffffff}},{pc:0x1002,steps:1,status:3,flags:0x200e96,regs:{2:0x80000000},reads:1,writes:1,fields:[[60,0x6000],[64,0x20201],[68,1]]});
+console.log('SAHF preserves only old OF; narrow carry aliases, incoming landings, partial registers and read/write fault frontiers retain complete state');
+"#).arg(&scratch).output().unwrap();
+    assert!(
+        result.status.success(),
+        "fixture {} failed:\n{}\n{}",
+        scratch.display(),
+        String::from_utf8_lossy(&result.stdout),
+        String::from_utf8_lossy(&result.stderr)
+    );
+    fs::remove_dir_all(scratch).unwrap();
+}
