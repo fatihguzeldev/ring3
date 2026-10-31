@@ -280,6 +280,8 @@ mod flags_tests;
 #[cfg(test)]
 mod memory_tests;
 #[cfg(test)]
+mod mechanism_tests;
+#[cfg(test)]
 mod multi_entry_tests;
 #[cfg(test)]
 mod multiply_tests;

@@ -289,3 +289,156 @@ console.log('generated route boundaries: CALL inside/outside SMC and neutral fau
     );
     fs::remove_dir_all(scratch).unwrap();
 }
+
+#[test]
+fn generated_block_continuation_late_traps_keep_the_unpublished_entry_snapshot() {
+    use std::{
+        fs,
+        process::Command,
+        time::{SystemTime, UNIX_EPOCH},
+    };
+    let scratch = std::env::temp_dir().join(format!(
+        "ring3-runtime-continuation-traps-{}-{}",
+        std::process::id(),
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    fs::create_dir(&scratch).unwrap();
+    let mut memory = AddressSpace::new(1).unwrap();
+    memory
+        .map_zeroed(
+            PageRange::new(GuestAddress(0x1000), 1).unwrap(),
+            Permissions::ALL,
+        )
+        .unwrap();
+    for (name, tail) in [
+        ("short", &[0x8b, 0x0b, 0x8b, 0x13][..]),
+        ("repeat", &[0xf3, 0xa5, 0x90][..]),
+    ] {
+        let mut code = vec![0xb8, 0x78, 0x56, 0x34, 0x12, 0xeb, 0];
+        code.extend_from_slice(tail);
+        memory.write(GuestAddress(0x1000), &code).unwrap();
+        let unit = compile(&memory, GuestAddress(0x1000), 4).unwrap();
+        assert_eq!(unit.entries, [0x1000, 0x1005, 0x1007, 0x1009]);
+        fs::write(scratch.join(format!("{name}.wasm")), unit.wasm).unwrap();
+    }
+    let result = Command::new("node").arg("--input-type=module").arg("-e").arg(r#"
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+const root=process.argv[1],memory=new WebAssembly.Memory({initial:4}),ram=new Uint8Array(memory.buffer),d=new DataView(memory.buffer),ptr=0x8000,view=0x9000,fp=0xa000,simd=0xa100,map=0x10000,permissions=0x11000;
+const word=(at,value)=>d.setUint32(ptr+at,value>>>0,true);
+let expectedAtImport,reads=0,writes=0;
+const imports={env:{memory},cpu:{
+  read(context,address,width){assert.deepEqual([context,address>>>0,width],[ptr,0x3000,4]);reads++;assert.deepEqual(ram,expectedAtImport,'the import observes the original slab and banks after a completed prior block');throw Error('late continuation import throw');},
+  write(){writes++;throw Error('no write may precede the source trap');}
+}};
+const runs=new Map();for(const name of['short','repeat'])runs.set(name,new WebAssembly.Instance(new WebAssembly.Module(fs.readFileSync(`${root}/${name}.wasm`)),imports).exports.run);
+for(const name of['short','repeat'])for(const rawBounds of[false,true]){
+  for(let i=0;i<ram.length;i++)ram[i]=(i*29+7)&255;
+  ram.fill(0,ptr,ptr+160);ram.fill(0,view,view+40);
+  word(0,1);word(4,160);[5,2,7,0x3000,0x4800,10,0x3000,0x4000].forEach((value,index)=>word(8+index*4,value));
+  word(40,0x1000);word(44,0x203);word(48,name==='short'?3:5);word(52,0xabcdef01);word(56,11);word(60,0x11223344);word(64,0x55667788);word(68,0x12345678);word(124,view);word(152,63);
+  d.setUint32(view,1,true);d.setUint32(view+4,40,true);d.setUint32(view+8,fp,true);d.setUint32(view+36,simd,true);
+  if(rawBounds){word(76,map);word(80,permissions);word(84,ram.length+4096);word(88,1);d.setUint32(map+3*4,1,true);d.setUint8(permissions+3,1);}
+  reads=writes=0;const expected=ram.slice();expectedAtImport=expected;
+  if(rawBounds)assert.throws(()=>runs.get(name)(ptr),WebAssembly.RuntimeError,`${name}: late private backing bounds trap`);
+  else assert.throws(()=>runs.get(name)(ptr),/late continuation import throw/,`${name}: late native import throw`);
+  assert.deepEqual(ram,expected,`${name}/${rawBounds}: no scalar spill, bank mutation, RAM store or publication before the late trap`);
+  assert.deepEqual([reads,writes],[rawBounds?0:1,0]);
+}
+console.log('completed prior block followed by short-quota or REP continuation preserves full unpublished RAM on late raw bounds and native import throws');
+"#).arg(&scratch).output().unwrap();
+    assert!(
+        result.status.success(),
+        "fixture {} failed:\n{}\n{}",
+        scratch.display(),
+        String::from_utf8_lossy(&result.stdout),
+        String::from_utf8_lossy(&result.stderr)
+    );
+    fs::remove_dir_all(scratch).unwrap();
+}
+
+#[test]
+fn generated_block_continuation_carries_both_numeric_proofs_without_reimporting_the_slab() {
+    use std::{
+        fs,
+        process::Command,
+        time::{SystemTime, UNIX_EPOCH},
+    };
+    let scratch = std::env::temp_dir().join(format!(
+        "ring3-runtime-continuation-proofs-{}-{}",
+        std::process::id(),
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    fs::create_dir(&scratch).unwrap();
+    let mut memory = AddressSpace::new(1).unwrap();
+    memory
+        .map_zeroed(
+            PageRange::new(GuestAddress(0x1000), 1).unwrap(),
+            Permissions::ALL,
+        )
+        .unwrap();
+    for (name, prefix) in [
+        ("x87-first", &[0x9b, 0x0f, 0x28, 0xc1][..]),
+        ("simd-first", &[0x0f, 0x28, 0xc1, 0x9b][..]),
+    ] {
+        let mut code = prefix.to_vec();
+        code.extend_from_slice(&[0x8b, 0x03, 0xeb, 0, 0xd9, 0xe8, 0x0f, 0x28, 0xd3, 0x90]);
+        memory.write(GuestAddress(0x1000), &code).unwrap();
+        let unit = compile(&memory, GuestAddress(0x1000), 7).unwrap();
+        assert!(unit.entries.contains(&0x1008) && unit.entries.contains(&0x100d));
+        assert_eq!(unit.entries.len(), 7);
+        fs::write(scratch.join(format!("{name}.wasm")), unit.wasm).unwrap();
+    }
+    let result = Command::new("node").arg("--input-type=module").arg("-e").arg(r#"
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+const root=process.argv[1],memory=new WebAssembly.Memory({initial:2}),ram=new Uint8Array(memory.buffer),d=new DataView(memory.buffer),ptr=0x8000,view=0x9000,otherView=0x9400,fp=0xa000,simd=0xa100,otherFP=0xb000,otherSimd=0xb100;
+const word=(at,value)=>d.setUint32(ptr+at,value>>>0,true);let expectedAtImport,reads=0,writes=0;
+function helperChanges(v){
+  v.setUint32(ptr,2,true);v.setUint32(ptr+4,159,true);
+  for(let i=0;i<8;i++)v.setUint32(ptr+8+i*4,0xfeed0000+i,true);
+  for(const[at,value]of[[40,0xdeadbeef],[44,0xdeadbeef],[48,0xfffffff0],[52,0],[56,0xf00000ff],[124,otherView]])v.setUint32(ptr+at,value,true);
+  v.setUint32(view+8,otherFP,true);v.setUint32(view+36,otherSimd,true);v.setUint32(view+16,0x4b,true);
+  v.setUint16(fp+2,0x5f20,true);v.setUint16(fp+4,0xffff,true);
+}
+const imports={env:{memory},cpu:{
+  read(context,address,width){assert.deepEqual([context,address>>>0,width],[ptr,0x3000,4]);reads++;assert.deepEqual(ram,expectedAtImport,'the helper observes only eager bank effects, without a new scalar publication');helperChanges(d);return 0x11223344;},
+  write(){writes++;throw Error('no guest memory write in this fixture');}
+}};
+const runs=new Map();for(const name of['x87-first','simd-first'])runs.set(name,new WebAssembly.Instance(new WebAssembly.Module(fs.readFileSync(`${root}/${name}.wasm`)),imports).exports.run);
+for(const name of['x87-first','simd-first']){
+  for(let i=0;i<ram.length;i++)ram[i]=(i*13+0x59)&255;
+  ram.fill(0,ptr,ptr+160);ram.fill(0,view,view+40);ram.fill(0,otherView,otherView+40);
+  word(0,1);word(4,160);[5,6,7,0x3000,0x4800,10,11,12].forEach((value,index)=>word(8+index*4,value));word(40,0x1000);word(44,0x203);word(48,6);word(52,0xabcdef01);word(56,11);word(60,0x11223344);word(64,0x55667788);word(68,0x12345678);word(124,view);word(152,63);
+  for(const[at,bank,vectors,cs]of[[view,fp,simd,0x1b],[otherView,otherFP,otherSimd,0x6b]]){
+    d.setUint32(at,1,true);d.setUint32(at+4,40,true);d.setUint32(at+8,bank,true);d.setUint32(at+36,vectors,true);
+    [0x23,cs,0x23,0x23,0x3b,0x43].forEach((value,index)=>d.setUint32(at+12+index*4,value,true));
+    d.setUint16(bank,0x003f,true);d.setUint16(bank+2,0x4700,true);d.setUint16(bank+4,0xffff,true);d.setUint16(bank+6,0x321,true);d.setUint32(bank+8,0x12345678,true);d.setUint32(bank+12,0x87654321,true);d.setUint16(bank+16,0x71,true);d.setUint16(bank+18,0x72,true);d.setUint32(vectors,0x1f80,true);
+    for(let i=0;i<8;i++){d.setBigUint64(bank+20+i*10,0x8000000000000000n+(BigInt(i)<<40n),true);d.setUint16(bank+28+i*10,0x3fff,true);}
+  }
+  reads=writes=0;const initial=ram.slice();expectedAtImport=initial.slice();expectedAtImport.set(initial.slice(simd+20,simd+36),simd+4);
+  const expected=expectedAtImport.slice(),v=new DataView(expected.buffer);helperChanges(v);
+  for(const[at,value]of[[8,0x11223344],[12,6],[16,7],[20,0x3000],[24,0x4800],[28,10],[32,11],[36,12],[40,0x100d],[44,0x203],[48,0],[52,2],[56,17]])v.setUint32(ptr+at,value,true);
+  v.setUint16(fp+2,0x5520,true);v.setUint16(fp+4,0xffcf,true);v.setUint16(fp+6,0x1e8,true);v.setUint32(fp+8,0x1008,true);v.setUint16(fp+16,0x4b,true);v.setBigUint64(fp+40,0x8000000000000000n,true);v.setUint16(fp+48,0x3fff,true);
+  expected.set(initial.slice(simd+52,simd+68),simd+36);
+  assert.equal(runs.get(name)(ptr),2,`${name}: continuation retains original header admission and live scalar values`);
+  assert.deepEqual(ram,expected,`${name}: cached x87/SIMD bank addresses and original view survive helper rebinding; mutable TOP/TAG reload and all bytes remain exact`);
+  assert.deepEqual([reads,writes],[1,0]);
+}
+console.log('both numeric bank orders and FWAIT proof survive slab/header/view rebinding across a short-quota continuation, with full RAM and mutable TOP/TAG exact');
+"#).arg(&scratch).output().unwrap();
+    assert!(
+        result.status.success(),
+        "fixture {} failed:\n{}\n{}",
+        scratch.display(),
+        String::from_utf8_lossy(&result.stdout),
+        String::from_utf8_lossy(&result.stderr)
+    );
+    fs::remove_dir_all(scratch).unwrap();
+}

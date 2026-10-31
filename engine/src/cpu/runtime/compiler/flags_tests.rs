@@ -60,3 +60,80 @@ console.log('SAHF/LAHF/SALC reserved-bit and partial-register transport, preserv
     );
     fs::remove_dir_all(scratch).unwrap();
 }
+
+#[test]
+fn generated_deferred_flag_observers_preserve_prefix_fault_smc_and_interior_state() {
+    use std::{
+        fs,
+        process::Command,
+        time::{SystemTime, UNIX_EPOCH},
+    };
+    let scratch = std::env::temp_dir().join(format!(
+        "ring3-runtime-deferred-flags-{}-{}",
+        std::process::id(),
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    fs::create_dir(&scratch).unwrap();
+    let mut memory = AddressSpace::new(1).unwrap();
+    memory
+        .map_zeroed(
+            PageRange::new(GuestAddress(0x1000), 1).unwrap(),
+            Permissions::ALL,
+        )
+        .unwrap();
+    for (name, code, count) in [
+        ("overwrite", &[0x01, 0xc8, 0x31, 0xd2][..], 2),
+        ("read", &[0x01, 0xc8, 0x8b, 0x13][..], 2),
+        ("store", &[0x01, 0xc8, 0x89, 0x03][..], 2),
+        ("condition", &[0x01, 0xc8, 0x0f, 0x90, 0xc2][..], 2),
+        ("zero", &[0x31, 0xc0, 0x0f, 0x94, 0xc2][..], 2),
+        ("carry", &[0x01, 0xc8, 0x11, 0xd2][..], 2),
+        ("partial", &[0x01, 0xc8, 0xf9][..], 2),
+        ("lahf", &[0x01, 0xc8, 0x9f][..], 2),
+    ] {
+        memory.write(GuestAddress(0x1000), code).unwrap();
+        let unit = compile(&memory, GuestAddress(0x1000), count).unwrap();
+        fs::write(scratch.join(format!("{name}.wasm")), unit.wasm).unwrap();
+    }
+    let result = Command::new("node").arg("--input-type=module").arg("-e").arg(r#"
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+const root=process.argv[1],memory=new WebAssembly.Memory({initial:2}),ram=new Uint8Array(memory.buffer),data=new DataView(memory.buffer),ptr=0x8000;
+const word=(at,value)=>data.setUint32(ptr+at,value>>>0,true);let mode='',reads=0,writes=0;
+const imports={env:{memory},cpu:{
+ read(context,address,width){assert.deepEqual([context,address>>>0,width],[ptr,0x3000,4]);reads++;word(52,3);word(60,0x3000);word(64,0x10104);word(68,4);return 0;},
+ write(context,address,width,value){assert.deepEqual([context,address>>>0,width,value>>>0],[ptr,0x3000,4,0x80000000]);writes++;data.setUint32(0x3000,value,true);word(52,6);return 6;}
+}};
+const runs=new Map();for(const name of['overwrite','read','store','condition','zero','carry','partial','lahf'])runs.set(name,(await WebAssembly.instantiate(fs.readFileSync(`${root}/${name}.wasm`),imports)).instance.exports.run);
+function scenario(name,{quota=2,pc=0x1000,initialEax:eax=0x7fffffff,initialEcx:ecx=1,initialEdx:edx=0x12345678,...expected}={}){
+ for(let i=0;i<ram.length;i++)ram[i]=(i*31+9)&255;ram.fill(0,ptr,ptr+160);word(0,1);word(4,160);[eax,ecx,edx,0x3000,0x4800,10,11,12].forEach((value,index)=>word(8+4*index,value));word(40,pc);word(44,0x603);word(48,quota);word(52,0xabcdef01);word(56,0xffffffff);word(60,0x11223344);word(64,0x55667788);word(68,0x12345678);word(152,63);reads=writes=0;
+ const want=ram.slice(),view=new DataView(want.buffer),put=(at,value)=>view.setUint32(ptr+at,value>>>0,true);
+ for(const[at,value]of[[8,expected.eax??eax],[16,expected.edx??edx],[40,expected.next],[44,expected.flags],[48,quota-expected.work],[52,expected.status],[56,(0xffffffff+expected.work)>>>0]])put(at,value);
+ if(name==='read'){put(60,0x3000);put(64,0x10104);put(68,4);}if(name==='store')view.setUint32(0x3000,0x80000000,true);
+ assert.equal(runs.get(name)(ptr),expected.status,name);assert.deepEqual(ram,want,`${name}: complete scalar, banks, RAM and wrap`);assert.deepEqual([reads,writes],[name==='read'?1:0,name==='store'?1:0]);
+}
+scenario('overwrite',{quota:0,next:0x1000,flags:0x603,work:0,status:2});
+scenario('overwrite',{quota:1,next:0x1002,eax:0x80000000,flags:0xe96,work:1,status:2});
+scenario('overwrite',{next:0x1004,eax:0x80000000,edx:0,flags:0x646,work:2,status:0});
+scenario('overwrite',{pc:0x1002,next:0x1004,edx:0,flags:0x646,work:1,status:0});
+scenario('read',{next:0x1002,eax:0x80000000,flags:0xe96,work:1,status:3});
+scenario('store',{next:0x1004,eax:0x80000000,flags:0xe96,work:2,status:6});
+scenario('condition',{next:0x1005,eax:0x80000000,edx:0x12345601,flags:0xe96,work:2,status:0});
+scenario('zero',{next:0x1005,eax:0,edx:0x12345601,flags:0x646,work:2,status:0});
+scenario('carry',{initialEdx:0,edx:0,next:0x1004,eax:0x80000000,flags:0x646,work:2,status:0});
+scenario('partial',{next:0x1003,eax:0x80000000,flags:0xe97,work:2,status:0});
+scenario('lahf',{next:0x1003,eax:0x80009600,flags:0xe96,work:2,status:0});
+console.log('deferred FLAGS complete-state literals: overwrite, prefix quota, interior entry, fault, SMC, conditions, carry, partial write, LAHF and retirement wrap passed');
+"#).arg(&scratch).output().unwrap();
+    assert!(
+        result.status.success(),
+        "fixture {} failed:\n{}\n{}",
+        scratch.display(),
+        String::from_utf8_lossy(&result.stdout),
+        String::from_utf8_lossy(&result.stderr)
+    );
+    fs::remove_dir_all(scratch).unwrap();
+}
