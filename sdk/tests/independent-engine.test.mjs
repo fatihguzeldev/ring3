@@ -2682,3 +2682,44 @@ test('actual internal generic route publishes dirty scalar state before an uncon
     f.close();
   }
 });
+
+test('actual native quota exits publish each pending predicate and preserve cold interior FLAGS', {skip}, () => {
+  const f = fixture([0x39, 0xc8, 0x39, 0xda, 0x90], {independent: false, fpControl: 0x127f, fpStatus: 0x4720,
+    registers: [1, 2, 0x80000000, 1, 0x2f00, 0x13579bdf, 0x2468ace0, 0x0f1e2d3c]});
+  let active = false;
+  try {
+    const api = f.engine.api;
+    f.engine.ok('cpu_begin', ...KEY); active = true;
+    const context = api.cpu_context_ptr() >>> 0;
+    f.slab().setUint32(48, 3, true);
+    f.engine.ok('cpu_prepare', ...KEY, 0x1000, 3);
+    const bytes = new Uint8Array(f.engine.memory.buffer, api.cpu_code_ptr() >>> 0, api.cpu_code_len() >>> 0);
+    const unit = new WebAssembly.Instance(new WebAssembly.Module(bytes), {env: {memory: f.engine.memory},
+      cpu: {read: api.cpu_runtime_read, write: api.cpu_runtime_write}});
+    const expected = new Uint8Array(f.engine.memory.buffer).slice();
+    const initialState = expected.slice(context, context + 160), state = new DataView(expected.buffer, context, 160);
+    const rows = [
+      {pc: 0x1000, quota: 0, flags: 0x80000603, next: 0x1000, retired: 0, after: 0x80000603, status: 2},
+      {pc: 0x1000, quota: 1, flags: 0x80000603, next: 0x1002, retired: 1, after: 0x80000697, status: 2},
+      {pc: 0x1000, quota: 2, flags: 0x80000603, next: 0x1004, retired: 2, after: 0x80000e16, status: 2},
+      {pc: 0x1000, quota: 3, flags: 0x80000603, next: 0x1005, retired: 3, after: 0x80000e16, status: 0},
+      {pc: 0x1002, quota: 0, flags: 0x80000800, next: 0x1002, retired: 0, after: 0x80000800, status: 2},
+      {pc: 0x1004, quota: 0, flags: 0x80000800, next: 0x1004, retired: 0, after: 0x80000800, status: 2},
+    ];
+    for (const row of rows) {
+      new Uint8Array(f.engine.memory.buffer, context, 160).set(initialState);
+      new Uint8Array(expected.buffer, context, 160).set(initialState);
+      for (const [at, value] of [[40, row.pc], [44, row.flags], [48, row.quota], [56, 0xfffffffe]]) {
+        f.slab().setUint32(at, value, true); state.setUint32(at, value, true);
+      }
+      for (const [at, value] of [[40, row.next], [44, row.after], [48, 0], [52, row.status], [56, (0xfffffffe + row.retired) >>> 0]])
+        state.setUint32(at, value, true);
+      assert.equal(unit.exports.run(context), row.status);
+      assert.deepEqual(new Uint8Array(f.engine.memory.buffer), expected,
+        `PC${row.pc.toString(16)} quota${row.quota}: full scalar state, opaque FLAGS, native/process numeric banks, RAM, cache and dirty queue remain exact`);
+    }
+  } finally {
+    if (active) f.engine.ok('cpu_end', ...KEY);
+    f.close();
+  }
+});

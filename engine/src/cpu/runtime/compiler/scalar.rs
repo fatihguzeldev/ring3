@@ -268,19 +268,29 @@ pub(super) fn emit(
             out.c().loop_(BlockType::Empty);
         }
         let landing_count = (block.instructions.len() + usize::from(block.gate.is_some())) as u32;
+        let share_quota = binding.is_some() && landing_count >= 2;
+        if share_quota {
+            // quota exits leave the inner block; normal completion leaves both.
+            out.c().block(BlockType::Empty).block(BlockType::Empty);
+        }
         for _ in 0..landing_count {
             out.c().block(BlockType::Empty);
         }
         out.c().local_get(A).i32_const(63).i32_and().br_table(
             0..landing_count,
-            landing_count + remaining_blocks - 1 + local_loop,
+            landing_count + remaining_blocks - 1 + local_loop + 2 * u32::from(share_quota),
         );
-        for instruction in &block.instructions {
+        for (instruction_index, instruction) in block.instructions.iter().enumerate() {
             flags_flow::edge(&mut out, flag_analysis.expected(instruction.pc().0));
             out.c().end();
             out.recipe = flag_analysis.expected(instruction.pc().0);
             out.c().local_get(REMAIN).i32_eqz().if_(BlockType::Empty);
-            out.exit(2);
+            if share_quota {
+                out.materialize_flags();
+                out.c().br(landing_count - instruction_index as u32);
+            } else {
+                out.exit(2);
+            }
             out.c().end().i32_const(0).local_set(WRITE_STATUS);
             out.emitted_guest_write = false;
             if !out.instruction(*instruction.operation(), instruction.next_pc().0) {
@@ -316,13 +326,25 @@ pub(super) fn emit(
             out.c().end();
             out.recipe = flag_analysis.expected(gate_pc);
             out.c().local_get(REMAIN).i32_eqz().if_(BlockType::Empty);
-            out.exit(2);
+            if share_quota {
+                out.materialize_flags();
+                out.c().br(1);
+            } else {
+                out.exit(2);
+            }
             out.c()
                 .end()
                 .local_get(0)
                 .i32_const(gate as i32)
                 .i32_store(mem(68));
             out.exit(5);
+        }
+        if share_quota {
+            let normal_recipe = out.recipe.take();
+            out.c().br(1).end();
+            out.exit(2);
+            out.c().end();
+            out.recipe = normal_recipe;
         }
         flags_flow::finish(&mut out, blocks, &flag_analysis, block_index);
         if routing::next(&mut out, blocks, entries, block_index) {
