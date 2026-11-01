@@ -3188,6 +3188,92 @@ test('actual native memory ADD publishes the right recipe on faults and complete
   }
 });
 
+test('actual native DEC branches preserve carry cold FLAGS and result clobbers', {skip}, () => {
+  const f = fixture([0x49, 0x75, 0x0b, 0xb9, 0x44, 0x33, 0x22, 0x11, 0x9f,
+    0xe9, 0xf2, 0xef, 1, 0, 0xb9, 0x88, 0x77, 0x66, 0x55, 0x9f, 0xe9, 0xe7, 0xef, 1, 0],
+  {independent: false, fpControl: 0x127f, fpStatus: 0x4720,
+    registers: [0x11223344, 0, 0xa1b2c3d4, 0x55667788, 0x2f00, 0x13579bdf, 0x2468ace0, 0x0f1e2d3c]});
+  let active = false;
+  try {
+    const api = f.engine.api;
+    f.engine.ok('cpu_begin', ...KEY); active = true;
+    const context = api.cpu_context_ptr() >>> 0;
+    f.slab().setUint32(48, 8, true);
+    f.engine.ok('cpu_prepare', ...KEY, 0x1000, 8);
+    const unit = new WebAssembly.Instance(new WebAssembly.Module(new Uint8Array(f.engine.memory.buffer,
+      api.cpu_code_ptr() >>> 0, api.cpu_code_len() >>> 0)), {env: {memory: f.engine.memory},
+      cpu: {read: api.cpu_runtime_read, write: api.cpu_runtime_write}});
+    const expected = new Uint8Array(f.engine.memory.buffer).slice();
+    const initial = expected.slice(context, context + 160), output = new DataView(expected.buffer, context, 160);
+    for (const row of [
+      {ecx: 1, before: 0x80000e00, quota: 2, c: 0, next: 0x1003, flags: 0x80000646},
+      {ecx: 0, before: 0x80000643, quota: 2, c: 0xffffffff, next: 0x100e, flags: 0x80000697},
+      {ecx: 1, before: 0x80000e00, quota: 5, c: 0x11223344, a: 0x11224644, next: 0x20000, flags: 0x80000646, status: 0},
+      {ecx: 0, before: 0x80000643, quota: 5, c: 0x55667788, a: 0x11229744, next: 0x20000, flags: 0x80000697, status: 0},
+      {pc: 0x1001, ecx: 0, before: 0x80000800, quota: 1, c: 0, next: 0x100e, flags: 0x80000800},
+    ]) {
+      new Uint8Array(f.engine.memory.buffer, context, 160).set(initial);
+      new Uint8Array(expected.buffer, context, 160).set(initial);
+      for (const [at, value] of [[12, row.ecx], [40, row.pc ?? 0x1000], [44, row.before], [48, row.quota]]) {
+        f.slab().setUint32(at, value, true); output.setUint32(at, value, true);
+      }
+      const status = row.status ?? 2;
+      for (const [at, value] of [[8, row.a ?? 0x11223344], [12, row.c], [40, row.next], [44, row.flags],
+        [48, 0], [52, status], [56, row.quota]]) output.setUint32(at, value, true);
+      assert.equal(unit.exports.run(context), status);
+      assert.deepEqual(new Uint8Array(f.engine.memory.buffer), expected,
+        'DEC publishes exact state and preserves carry across both branches, result clobbers and canonical cold entry');
+    }
+  } finally {
+    if (active) f.engine.ok('cpu_end', ...KEY);
+    f.close();
+  }
+});
+
+test('actual native DEC flags survive later RMW and CALL stack faults', {skip}, () => {
+  for (const row of [
+    {name: 'RMW read fault', code: [0x49, 0x83, 0x05, ...dword(0x9000), 1, 0x90], stack: 0x2f00, auxiliary: 0x10204,
+      calls: {read: 1, write: 0}},
+    {name: 'CALL write fault', code: [0x49, 0xe8, ...dword(0x20000 - 0x1006), 0x90], stack: 0x9004, auxiliary: 0x10204,
+      calls: {read: 0, write: 1}},
+  ]) {
+    const f = fixture(row.code, {independent: false, fpControl: 0x127f, fpStatus: 0x4720,
+      registers: [0x11223344, 0, 0xa1b2c3d4, 0x55667788, row.stack, 0x13579bdf, 0x2468ace0, 0x0f1e2d3c]});
+    let active = false;
+    try {
+      const api = f.engine.api;
+      f.engine.ok('cpu_begin', ...KEY); active = true;
+      const context = api.cpu_context_ptr() >>> 0;
+      f.slab().setUint32(48, 3, true);
+      f.engine.ok('cpu_prepare', ...KEY, 0x1000, 3);
+      const calls = {read: 0, write: 0};
+      const unit = new WebAssembly.Instance(new WebAssembly.Module(new Uint8Array(f.engine.memory.buffer,
+        api.cpu_code_ptr() >>> 0, api.cpu_code_len() >>> 0)), {env: {memory: f.engine.memory}, cpu: {
+        read: (...args) => {calls.read++; return api.cpu_runtime_read(...args);},
+        write: (...args) => {calls.write++; return api.cpu_runtime_write(...args);},
+      }});
+      const state = f.slab(), banks = processBanks(f);
+      const ranges = [[state.getUint32(84, true), state.getUint32(88, true) * 4096],
+        [state.getUint32(100, true), state.getUint32(112, true)],
+        [state.getUint32(104, true), state.getUint32(112, true) * 4]];
+      const expectedRanges = ranges.map(([pointer, count]) => new Uint8Array(f.engine.memory.buffer, pointer, count).slice());
+      state.setUint32(40, 0x1000, true); state.setUint32(44, 0x80000643, true); state.setUint32(48, 2, true);
+      const expected = new Uint8Array(f.engine.memory.buffer, context, 160).slice(), output = new DataView(expected.buffer);
+      for (const [at, value] of [[12, 0xffffffff], [40, 0x1001], [44, 0x80000697], [48, 1], [52, 3],
+        [56, 1], [60, 0x9000], [64, row.auxiliary], [68, 4]]) output.setUint32(at, value, true);
+      assert.equal(unit.exports.run(context), 3, row.name);
+      assert.deepEqual(new Uint8Array(f.engine.memory.buffer, context, 160), expected, row.name);
+      for (const [index, [pointer, count]] of ranges.entries())
+        assert.deepEqual(new Uint8Array(f.engine.memory.buffer, pointer, count), expectedRanges[index], row.name);
+      assert.deepEqual(processBanks(f), banks, row.name);
+      assert.deepEqual(calls, row.calls, row.name);
+    } finally {
+      if (active) f.engine.ok('cpu_end', ...KEY);
+      f.close();
+    }
+  }
+});
+
 test('actual native canonical INC DEC preserve carry and publish exact quota state', {skip}, () => {
   for (const variant of [
     {name: 'INC', opcode: 0x40, rows: [
