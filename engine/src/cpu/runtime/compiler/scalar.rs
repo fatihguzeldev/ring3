@@ -110,60 +110,32 @@ pub(super) fn supports(operation: &Operation) -> bool {
         )
 }
 
-const NATIVE_SERVICE_ENTRY: i32 = -3;
-
 fn entry_route(out: &mut Output, entries: &[EntryPoint]) {
-    emit_entry_route(&mut out.function, entries, PC, None);
-}
-
-fn emit_entry_route(
-    function: &mut Function,
-    entries: &[EntryPoint],
-    pc: u32,
-    services: Option<&[u32]>,
-) {
     if entries.is_empty() {
-        function.instructions().i32_const(-1);
+        out.c().i32_const(-1);
     } else if entries.len() == 1 {
         let entry = &entries[0];
-        let encoded = ((entry.block << 6) | entry.instruction) as i32;
-        function
-            .instructions()
-            .local_get(pc)
+        out.c()
+            .local_get(PC)
             .i32_const(entry.pc as i32)
             .i32_eq()
-            .if_(BlockType::Result(ValType::I32));
-        if services.is_some_and(|services| services.contains(&(encoded as u32))) {
-            function
-                .instructions()
-                .i32_const(NATIVE_SERVICE_ENTRY)
-                .i32_const(encoded)
-                .local_get(1)
-                .select();
-        } else {
-            function.instructions().i32_const(encoded);
-        }
-        function.instructions().else_().i32_const(-1).end();
+            .if_(BlockType::Result(ValType::I32))
+            .i32_const(((entry.block << 6) | entry.instruction) as i32)
+            .else_()
+            .i32_const(-1)
+            .end();
     } else {
         let middle = entries.len() / 2;
-        function
-            .instructions()
-            .local_get(pc)
+        out.c()
+            .local_get(PC)
             .i32_const(entries[middle].pc as i32)
             .i32_lt_u()
             .if_(BlockType::Result(ValType::I32));
-        emit_entry_route(function, &entries[..middle], pc, services);
-        function.instructions().else_();
-        emit_entry_route(function, &entries[middle..], pc, services);
-        function.instructions().end();
+        entry_route(out, &entries[..middle]);
+        out.c().else_();
+        entry_route(out, &entries[middle..]);
+        out.c().end();
     }
-}
-
-fn native_entry_resolver(entries: &[EntryPoint], services: &[u32]) -> Function {
-    let mut function = Function::new([]);
-    emit_entry_route(&mut function, entries, 0, Some(services));
-    function.instructions().end();
-    function
 }
 
 pub(super) fn emit(
@@ -172,7 +144,6 @@ pub(super) fn emit(
     binding: Option<NativeMemoryBinding>,
 ) -> Vec<u8> {
     let flag_analysis = flags_analysis::Analysis::new(blocks, entries);
-    let mut native_services = Vec::new();
     let mut module = Module::new();
     let mut types = TypeSection::new();
     types.ty().function([ValType::I32; 3], [ValType::I32]);
@@ -181,9 +152,6 @@ pub(super) fn emit(
     types.ty().function([ValType::I32; 6], [ValType::I32]);
     types.ty().function([ValType::I32; 4], [ValType::I32; 3]);
     types.ty().function([ValType::I32; 3], [ValType::I32; 3]);
-    if binding.is_some() {
-        types.ty().function([ValType::I32; 2], [ValType::I32]);
-    }
     module.section(&types);
     let mut imports = ImportSection::new();
     imports.import(
@@ -205,9 +173,6 @@ pub(super) fn emit(
     functions.function(3);
     functions.function(4);
     functions.function(5);
-    if binding.is_some() {
-        functions.function(6);
-    }
     module.section(&functions);
     let mut exports = ExportSection::new();
     exports.export("run", ExportKind::Func, 2);
@@ -262,16 +227,12 @@ pub(super) fn emit(
         .i32_const(8)
         .return_()
         .end();
-    let prefix = std::mem::replace(&mut out.function, Function::new([]));
     for (offset, local) in
         (8..40)
             .step_by(4)
             .zip(1..9)
             .chain([(40, PC), (44, FLAGS), (48, REMAIN), (56, RETIRED)])
     {
-        if binding.is_some() && matches!(local, PC | REMAIN) {
-            continue;
-        }
         out.c().local_get(0).i32_load(mem(offset));
         if local == FLAGS {
             out.c().i64_extend_i32_u();
@@ -283,13 +244,9 @@ pub(super) fn emit(
     } else {
         memory::initialize(&mut out);
     }
-    if binding.is_some() {
-        out.c().loop_(BlockType::Empty).block(BlockType::Empty);
-    } else {
-        out.c().loop_(BlockType::Empty);
-        entry_route(&mut out, entries);
-        out.c().local_set(A);
-    }
+    out.c().loop_(BlockType::Empty);
+    entry_route(&mut out, entries);
+    out.c().local_set(A);
     // the two tables bound label nesting by blocks plus instructions per block.
     let block_count = blocks.len() as u32;
     out.c().loop_(BlockType::Empty).block(BlockType::Empty);
@@ -318,7 +275,7 @@ pub(super) fn emit(
             0..landing_count,
             landing_count + remaining_blocks - 1 + local_loop,
         );
-        for (instruction_index, instruction) in block.instructions.iter().enumerate() {
+        for instruction in &block.instructions {
             flags_flow::edge(&mut out, flag_analysis.expected(instruction.pc().0));
             out.c().end();
             out.recipe = flag_analysis.expected(instruction.pc().0);
@@ -327,9 +284,6 @@ pub(super) fn emit(
             out.c().end().i32_const(0).local_set(WRITE_STATUS);
             out.emitted_guest_write = false;
             if !out.instruction(*instruction.operation(), instruction.next_pc().0) {
-                if binding.is_some() {
-                    native_services.push(((block_index as u32) << 6) | instruction_index as u32);
-                }
                 out.exit(7);
             } else {
                 debug_assert_eq!(out.recipe, flag_analysis.after(instruction.pc().0));
@@ -388,56 +342,12 @@ pub(super) fn emit(
     }
     out.c().end();
     out.exit(0);
-    out.c().end().unreachable().end();
-    if binding.is_some() {
-        out.c()
-            .local_get(PC)
-            .i32_const(0)
-            .call(6)
-            .local_set(A)
-            .br(0)
-            .end();
-    }
-    out.c().unreachable().end();
-    let body = std::mem::replace(&mut out.function, prefix).into_raw_body();
-    if binding.is_some() {
-        out.c()
-            .local_get(0)
-            .i32_load(mem(40))
-            .local_set(PC)
-            .local_get(0)
-            .i32_load(mem(48))
-            .local_set(REMAIN)
-            .local_get(PC)
-            .i32_const(1)
-            .call(6)
-            .local_set(A)
-            .local_get(A)
-            .i32_const(NATIVE_SERVICE_ENTRY)
-            .i32_eq()
-            .if_(BlockType::Empty)
-            .local_get(0)
-            .i32_const(2)
-            .i32_const(7)
-            .local_get(REMAIN)
-            .i32_eqz()
-            .select()
-            .local_tee(TEMP)
-            .i32_store(mem(52))
-            .local_get(TEMP)
-            .return_()
-            .end();
-    }
-    assert_eq!(body.first(), Some(&0));
-    out.function.raw(body.into_iter().skip(1));
+    out.c().end().unreachable().end().unreachable().end();
     let mut code = CodeSection::new();
     code.function(&out.function);
     code.function(&deferred::materializer());
     code.function(&memory_helpers::translation());
     code.function(&memory_helpers::admission());
-    if binding.is_some() {
-        code.function(&native_entry_resolver(entries, &native_services));
-    }
     module.section(&code);
     module.finish()
 }
