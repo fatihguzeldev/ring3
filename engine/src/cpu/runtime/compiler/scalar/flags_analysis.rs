@@ -94,6 +94,15 @@ impl Analysis {
                             return None;
                         };
                         if native
+                            && let Operation::Binary {
+                                kind: BinaryKind::Xor,
+                                destination: Location32::Register(result),
+                                source: Value32::Register(_) | Value32::Immediate(_),
+                            } = operation
+                        {
+                            return Some(deferred::Recipe::Logical { result });
+                        }
+                        if native
                             && matches!(kind, BinaryKind::Add | BinaryKind::Sub)
                             && let Operation::Binary {
                                 destination: Location32::Register(result),
@@ -133,6 +142,7 @@ impl Analysis {
             }
             for (node, entry) in nodes.iter_mut().zip(entries) {
                 if let Some(recipe) = node.produced
+                    && !matches!(recipe, deferred::Recipe::Logical { .. })
                     && !killed_before_barrier(
                         &blocks[entry.block as usize],
                         entry.instruction as usize,
@@ -240,6 +250,56 @@ mod tests {
     };
 
     #[test]
+    fn native_register_xor_defers_flags_until_a_memory_overwrite() {
+        for xor in [&[0x31, 0xc2][..], &[0x83, 0xf2, 3][..]] {
+            let mut memory = AddressSpace::new(1).unwrap();
+            memory
+                .map_zeroed(
+                    PageRange::new(GuestAddress(0x1000), 1).unwrap(),
+                    Permissions::ALL,
+                )
+                .unwrap();
+            let mut code = xor.to_vec();
+            code.extend_from_slice(&[0x83, 0x43, 0x0c, 1]);
+            memory.write(GuestAddress(0x1000), &code).unwrap();
+            let next = 0x1000 + xor.len() as u32;
+            let instructions = [0x1000, next]
+                .into_iter()
+                .map(|pc| {
+                    let BoundDecode::Instruction(instruction) = decode_for_compilation(
+                        &memory,
+                        GuestAddress(pc),
+                        DecodePolicy::Strict,
+                        None,
+                        DecodeAuthority::default(),
+                    )
+                    .unwrap() else {
+                        panic!("authored instruction must decode");
+                    };
+                    instruction
+                })
+                .collect();
+            let blocks = [Block {
+                pc: 0x1000,
+                instructions,
+                gate: None,
+            }];
+            let entries = entry_points(&blocks);
+            let native = Analysis::new(&blocks, &entries, true);
+            let recipe = Some(deferred::Recipe::Logical {
+                result: Register32::Edx,
+            });
+            assert_eq!(native.produced(0x1000), recipe);
+            assert_eq!(native.expected(next), recipe);
+            assert_eq!(native.after(next), None);
+            assert_eq!(
+                Analysis::new(&blocks, &entries, false).produced(0x1000),
+                None
+            );
+        }
+    }
+
+    #[test]
     fn native_register_xor_kills_prior_add_flags_without_crossing_memory() {
         for (suffix, eligible) in [
             (&[0x31, 0xc2][..], true),
@@ -280,8 +340,8 @@ mod tests {
             let native = Analysis::new(&blocks, &entries, true);
             assert_eq!(native.produced(0x1000).is_some(), eligible);
             assert_eq!(native.expected(0x1003).is_some(), eligible);
-            assert_eq!(native.produced(0x1003), None);
-            assert_eq!(native.after(0x1003), None);
+            assert_eq!(native.produced(0x1003).is_some(), eligible);
+            assert_eq!(native.after(0x1003).is_some(), eligible);
             assert_eq!(
                 Analysis::new(&blocks, &entries, false).produced(0x1000),
                 None
