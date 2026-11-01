@@ -103,6 +103,32 @@ impl Analysis {
                             return Some(deferred::Recipe::Logical { result });
                         }
                         if native
+                            && let Operation::Binary {
+                                kind: BinaryKind::Add,
+                                destination: Location32::Memory(_),
+                                source,
+                            } = operation
+                        {
+                            // return edges require canonical flags, so keep the eager path.
+                            if blocks[entry.block as usize]
+                                .instructions
+                                .get(entry.instruction as usize + 1)
+                                .is_some_and(|next| {
+                                    matches!(next.operation(), Operation::Return { .. })
+                                })
+                            {
+                                return None;
+                            }
+                            let right = match source {
+                                Value32::Register(register) => {
+                                    deferred::Operand::Register(register)
+                                }
+                                Value32::Immediate(value) => deferred::Operand::Immediate(value),
+                                _ => return None,
+                            };
+                            return Some(deferred::Recipe::MemoryAdd { right });
+                        }
+                        if native
                             && matches!(kind, BinaryKind::Add | BinaryKind::Sub)
                             && let Operation::Binary {
                                 destination: Location32::Register(result),
@@ -142,7 +168,10 @@ impl Analysis {
             }
             for (node, entry) in nodes.iter_mut().zip(entries) {
                 if let Some(recipe) = node.produced
-                    && !matches!(recipe, deferred::Recipe::Logical { .. })
+                    && !matches!(
+                        recipe,
+                        deferred::Recipe::Logical { .. } | deferred::Recipe::MemoryAdd { .. }
+                    )
                     && !killed_before_barrier(
                         &blocks[entry.block as usize],
                         entry.instruction as usize,
@@ -250,6 +279,56 @@ mod tests {
     };
 
     #[test]
+    fn native_memory_add_defers_for_carry_but_stays_eager_before_return() {
+        for (code, defer) in [
+            (&[0x83, 0x43, 0x0c, 1, 0x49][..], true),
+            (&[0x01, 0x43, 0x0c, 0x49][..], true),
+            (&[0x83, 0x43, 0x0c, 1, 0xc3][..], false),
+            (&[0x01, 0x43, 0x0c, 0xc3][..], false),
+        ] {
+            let mut memory = AddressSpace::new(1).unwrap();
+            memory
+                .map_zeroed(
+                    PageRange::new(GuestAddress(0x1000), 1).unwrap(),
+                    Permissions::ALL,
+                )
+                .unwrap();
+            memory.write(GuestAddress(0x1000), code).unwrap();
+            let next = 0x1000 + code.len() as u32 - 1;
+            let instructions = [0x1000, next]
+                .into_iter()
+                .map(|pc| {
+                    let BoundDecode::Instruction(instruction) = decode_for_compilation(
+                        &memory,
+                        GuestAddress(pc),
+                        DecodePolicy::Strict,
+                        None,
+                        DecodeAuthority::default(),
+                    )
+                    .unwrap() else {
+                        panic!("authored instruction must decode");
+                    };
+                    instruction
+                })
+                .collect();
+            let blocks = [Block {
+                pc: 0x1000,
+                instructions,
+                gate: None,
+            }];
+            let entries = entry_points(&blocks);
+            let native = Analysis::new(&blocks, &entries, true);
+            assert_eq!(native.produced(0x1000).is_some(), defer);
+            assert_eq!(native.expected(next), native.produced(0x1000));
+            assert_eq!(native.after(next), None);
+            assert_eq!(
+                Analysis::new(&blocks, &entries, false).produced(0x1000),
+                None
+            );
+        }
+    }
+
+    #[test]
     fn native_register_xor_defers_flags_until_a_memory_overwrite() {
         for xor in [&[0x31, 0xc2][..], &[0x83, 0xf2, 3][..]] {
             let mut memory = AddressSpace::new(1).unwrap();
@@ -291,7 +370,12 @@ mod tests {
             });
             assert_eq!(native.produced(0x1000), recipe);
             assert_eq!(native.expected(next), recipe);
-            assert_eq!(native.after(next), None);
+            assert_eq!(
+                native.after(next),
+                Some(deferred::Recipe::MemoryAdd {
+                    right: deferred::Operand::Immediate(1),
+                })
+            );
             assert_eq!(
                 Analysis::new(&blocks, &entries, false).produced(0x1000),
                 None

@@ -4,6 +4,8 @@ use crate::cpu::x86::{
     simd::{FloatKind, SimdKind},
 };
 
+const MEMORY_RESULT: u32 = 85;
+
 fn numeric_preserves_flags(operation: Operation) -> bool {
     match operation {
         Operation::X87 {
@@ -226,6 +228,10 @@ pub(super) enum Recipe {
         result: Register32,
         right: Operand,
     },
+    // carry stays canonical while the remaining arithmetic flags are pending.
+    MemoryAdd {
+        right: Operand,
+    },
     Negate {
         result: Register32,
     },
@@ -247,6 +253,7 @@ impl Recipe {
                 1 << result.index()
             }
             Self::Arithmetic { result, right, .. } => (1 << result.index()) | right.dependencies(),
+            Self::MemoryAdd { right } => right.dependencies(),
             Self::Predicate { left, right, .. } => (1 << left.index()) | right.dependencies(),
         }
     }
@@ -293,6 +300,7 @@ impl Recipe {
             Self::Arithmetic { kind, .. } | Self::Predicate { kind, .. } => {
                 descriptor(kind, 32, false)
             }
+            Self::MemoryAdd { .. } => descriptor(BinaryKind::Add, 32, false),
             Self::Negate { .. } => descriptor(BinaryKind::Sub, 32, false),
             Self::Increment { decrement, .. } => descriptor(
                 if decrement {
@@ -313,6 +321,9 @@ impl Recipe {
             | Self::Increment { result, .. } => {
                 out.c().local_get(reg(result));
             }
+            Self::MemoryAdd { .. } => {
+                out.c().local_get(MEMORY_RESULT);
+            }
             Self::Predicate { kind, left, right } => {
                 out.c().local_get(reg(left));
                 right.emit(out);
@@ -329,7 +340,9 @@ impl Recipe {
             Self::Logical { .. } => {
                 out.c().i32_const(0);
             }
-            Self::Arithmetic { right, .. } | Self::Predicate { right, .. } => right.emit(out),
+            Self::Arithmetic { right, .. }
+            | Self::MemoryAdd { right }
+            | Self::Predicate { right, .. } => right.emit(out),
             Self::Negate { .. } => {
                 out.c().i32_const(0);
                 self.result(out);
@@ -429,7 +442,7 @@ impl Recipe {
                 out.c().i32_const(0);
             }
             0 => match self {
-                Self::Increment { .. } => {
+                Self::Increment { .. } | Self::MemoryAdd { .. } => {
                     out.c()
                         .local_get(FLAGS)
                         .i32_wrap_i64()
@@ -597,13 +610,23 @@ impl Output {
     }
     pub(super) fn flags(&mut self, kind: BinaryKind, width: u32, preserve: bool) {
         if let Some(recipe) = self.produced_recipe {
+            let memory_add = matches!(recipe, Recipe::MemoryAdd { .. });
+            if memory_add {
+                self.c().local_get(R).local_set(MEMORY_RESULT);
+            }
             self.c()
                 .local_get(FLAGS)
-                .i64_const(0xffff_ffff)
-                .i64_and()
-                .i64_const(1_i64 << 32)
-                .i64_or()
-                .local_set(FLAGS);
+                .i64_const(if memory_add { 0xffff_fffe } else { 0xffff_ffff })
+                .i64_and();
+            if memory_add {
+                self.c()
+                    .local_get(R)
+                    .local_get(B)
+                    .i32_lt_u()
+                    .i64_extend_i32_u()
+                    .i64_or();
+            }
+            self.c().i64_const(1_i64 << 32).i64_or().local_set(FLAGS);
             self.recipe = Some(recipe);
         } else {
             self.eager_flags(kind, width, preserve);
@@ -709,6 +732,12 @@ impl Output {
     }
 
     pub(super) fn deferred_bit(&mut self, bit: u32) {
+        if bit == 0
+            && let Some(recipe @ Recipe::MemoryAdd { .. }) = self.recipe
+        {
+            recipe.bit(self, bit);
+            return;
+        }
         if let Some(recipe) = self.recipe.filter(|_| matches!(bit, 0 | 2 | 6 | 7 | 11)) {
             self.flags_pending();
             self.c().if_(BlockType::Result(ValType::I32));
