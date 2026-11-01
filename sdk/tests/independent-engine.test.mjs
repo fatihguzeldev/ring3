@@ -2608,3 +2608,77 @@ test('actual warmed ordinary store proof still rejects a cross-page suffix befor
     f.close();
   }
 });
+
+test('actual unconditional service entry preserves canonical state before service at every cold frontier', {skip}, () => {
+  const f = fixture([0xdb, 0xe3], {independent: false, fpControl: 0x127f, fpStatus: 0x4720,
+    registers: [0xffffffff, 0x80000000, 0xa1b2c3d4, 0x55667788, 0x2f00, 0x13579bdf, 0x2468ace0, 0x0f1e2d3c]});
+  let active = false;
+  try {
+    const api = f.engine.api;
+    f.engine.ok('cpu_begin', ...KEY); active = true;
+    const context = api.cpu_context_ptr() >>> 0;
+    f.slab().setUint32(44, 0x80000800, true);
+    f.slab().setUint32(48, 2, true);
+    f.engine.ok('cpu_prepare', ...KEY, 0x1000, 1);
+    const bytes = new Uint8Array(f.engine.memory.buffer, api.cpu_code_ptr() >>> 0, api.cpu_code_len() >>> 0);
+    const unit = new WebAssembly.Instance(new WebAssembly.Module(bytes), {env: {memory: f.engine.memory},
+      cpu: {read: api.cpu_runtime_read, write: api.cpu_runtime_write}});
+    const expected = new Uint8Array(f.engine.memory.buffer).slice(), state = new DataView(expected.buffer, context, 160);
+    const numeric = state.getUint32(124, true), all = new DataView(expected.buffer);
+    assert.equal(all.getUint16(all.getUint32(numeric + 8, true), true), 0x127f,
+      'the imported native FP bank makes an accidental FNINIT execution observable');
+    for (const pointer of [0, context + 8, 0xfffffff0]) {
+      assert.equal(unit.exports.run(pointer), 8);
+      assert.deepEqual(new Uint8Array(f.engine.memory.buffer), expected);
+    }
+    for (const quota of [0, 2]) {
+      f.slab().setUint32(48, quota, true); state.setUint32(48, quota, true);
+      const status = quota === 0 ? 2 : 7;
+      state.setUint32(52, status, true);
+      assert.equal(unit.exports.run(context), status);
+      assert.deepEqual(new Uint8Array(f.engine.memory.buffer), expected,
+        'only status changes; every scalar byte, raw opaque FLAGS, native and process banks, cache proof, RAM and dirty record remain exact');
+    }
+    f.slab().setUint32(40, 0x10ff, true); state.setUint32(40, 0x10ff, true);
+    f.slab().setUint32(48, 0, true); state.setUint32(48, 0, true);
+    state.setUint32(52, 0, true);
+    assert.equal(unit.exports.run(context), 0, 'an unknown PC retains unit Continue0 even with zero quota');
+    assert.deepEqual(new Uint8Array(f.engine.memory.buffer), expected);
+  } finally {
+    if (active) f.engine.ok('cpu_end', ...KEY);
+    f.close();
+  }
+});
+
+test('actual internal generic route publishes dirty scalar state before an unconditional service entry', {skip}, () => {
+  const f = fixture([
+    0x74, 0x0e,
+    0x83, 0xc0, 1,
+    0xb9, 0x10, 0x10, 0, 0,
+    0xff, 0xe1,
+    0x90, 0x90, 0x90, 0x90,
+    0xdb, 0xe3,
+  ], {independent: false, fpControl: 0x127f, fpStatus: 0x4720,
+    registers: [0x7fffffff, 0xaabbccdd, 0xa1b2c3d4, 0x55667788, 0x2f00, 0x13579bdf, 0x2468ace0, 0x0f1e2d3c]});
+  let active = false;
+  try {
+    const api = f.engine.api;
+    f.engine.ok('cpu_begin', ...KEY); active = true;
+    const context = api.cpu_context_ptr() >>> 0;
+    f.slab().setUint32(44, 0x80000603, true);
+    f.slab().setUint32(48, 8, true);
+    f.engine.ok('cpu_prepare', ...KEY, 0x1000, 5);
+    const bytes = new Uint8Array(f.engine.memory.buffer, api.cpu_code_ptr() >>> 0, api.cpu_code_len() >>> 0);
+    const unit = new WebAssembly.Instance(new WebAssembly.Module(bytes), {env: {memory: f.engine.memory},
+      cpu: {read: api.cpu_runtime_read, write: api.cpu_runtime_write}});
+    const expected = new Uint8Array(f.engine.memory.buffer).slice(), state = new DataView(expected.buffer, context, 160);
+    for (const [at, value] of [[8, 0x80000000], [12, 0x1010], [40, 0x1010], [44, 0x80000e96], [48, 4], [52, 7], [56, 4]])
+      state.setUint32(at, value, true);
+    assert.equal(unit.exports.run(context), 7);
+    assert.deepEqual(new Uint8Array(f.engine.memory.buffer), expected,
+      'the not-taken JZ retains FNINIT, while ADD/MOV/indirect JMP publish four retired instructions and exact FLAGS before service without executing FNINIT');
+  } finally {
+    if (active) f.engine.ok('cpu_end', ...KEY);
+    f.close();
+  }
+});

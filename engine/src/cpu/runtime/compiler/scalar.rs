@@ -172,6 +172,7 @@ pub(super) fn emit(
     binding: Option<NativeMemoryBinding>,
 ) -> Vec<u8> {
     let flag_analysis = flags_analysis::Analysis::new(blocks, entries);
+    let mut native_services = Vec::new();
     let mut module = Module::new();
     let mut types = TypeSection::new();
     types.ty().function([ValType::I32; 3], [ValType::I32]);
@@ -261,12 +262,16 @@ pub(super) fn emit(
         .i32_const(8)
         .return_()
         .end();
+    let prefix = std::mem::replace(&mut out.function, Function::new([]));
     for (offset, local) in
         (8..40)
             .step_by(4)
             .zip(1..9)
             .chain([(40, PC), (44, FLAGS), (48, REMAIN), (56, RETIRED)])
     {
+        if binding.is_some() && matches!(local, PC | REMAIN) {
+            continue;
+        }
         out.c().local_get(0).i32_load(mem(offset));
         if local == FLAGS {
             out.c().i64_extend_i32_u();
@@ -279,13 +284,7 @@ pub(super) fn emit(
         memory::initialize(&mut out);
     }
     if binding.is_some() {
-        out.c()
-            .local_get(PC)
-            .i32_const(0)
-            .call(6)
-            .local_set(A)
-            .loop_(BlockType::Empty)
-            .block(BlockType::Empty);
+        out.c().loop_(BlockType::Empty).block(BlockType::Empty);
     } else {
         out.c().loop_(BlockType::Empty);
         entry_route(&mut out, entries);
@@ -319,7 +318,7 @@ pub(super) fn emit(
             0..landing_count,
             landing_count + remaining_blocks - 1 + local_loop,
         );
-        for instruction in &block.instructions {
+        for (instruction_index, instruction) in block.instructions.iter().enumerate() {
             flags_flow::edge(&mut out, flag_analysis.expected(instruction.pc().0));
             out.c().end();
             out.recipe = flag_analysis.expected(instruction.pc().0);
@@ -328,6 +327,9 @@ pub(super) fn emit(
             out.c().end().i32_const(0).local_set(WRITE_STATUS);
             out.emitted_guest_write = false;
             if !out.instruction(*instruction.operation(), instruction.next_pc().0) {
+                if binding.is_some() {
+                    native_services.push(((block_index as u32) << 6) | instruction_index as u32);
+                }
                 out.exit(7);
             } else {
                 debug_assert_eq!(out.recipe, flag_analysis.after(instruction.pc().0));
@@ -397,13 +399,44 @@ pub(super) fn emit(
             .end();
     }
     out.c().unreachable().end();
+    let body = std::mem::replace(&mut out.function, prefix).into_raw_body();
+    if binding.is_some() {
+        out.c()
+            .local_get(0)
+            .i32_load(mem(40))
+            .local_set(PC)
+            .local_get(0)
+            .i32_load(mem(48))
+            .local_set(REMAIN)
+            .local_get(PC)
+            .i32_const(1)
+            .call(6)
+            .local_set(A)
+            .local_get(A)
+            .i32_const(NATIVE_SERVICE_ENTRY)
+            .i32_eq()
+            .if_(BlockType::Empty)
+            .local_get(0)
+            .i32_const(2)
+            .i32_const(7)
+            .local_get(REMAIN)
+            .i32_eqz()
+            .select()
+            .local_tee(TEMP)
+            .i32_store(mem(52))
+            .local_get(TEMP)
+            .return_()
+            .end();
+    }
+    assert_eq!(body.first(), Some(&0));
+    out.function.raw(body.into_iter().skip(1));
     let mut code = CodeSection::new();
     code.function(&out.function);
     code.function(&deferred::materializer());
     code.function(&memory_helpers::translation());
     code.function(&memory_helpers::admission());
     if binding.is_some() {
-        code.function(&native_entry_resolver(entries, &[]));
+        code.function(&native_entry_resolver(entries, &native_services));
     }
     module.section(&code);
     module.finish()
