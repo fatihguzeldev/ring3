@@ -2890,3 +2890,62 @@ test('actual qualified native ADD SUB recipes preserve quota overflow carry borr
     }
   }
 });
+
+test('actual native flag recipes survive bounded branch trees and canonical cold branches', {skip}, () => {
+  for (const variant of [
+    {name: 'CMP', opcode: 0xf8, rows: [
+      {eax: 0, result: 0, quota: 1, next: 0x1003, flags: 0x80000697},
+      {eax: 0, result: 0, quota: 2, next: 0x1012, flags: 0x80000697},
+      {eax: 0, result: 0, quota: 3, next: 0x1015, flags: 0x80000646},
+      {eax: 0, result: 0, quota: 5, next: 0x20000, flags: 0x80000646, edx: 0x11111111},
+      {eax: 0x80000000, result: 0x80000000, quota: 2, next: 0x1005, flags: 0x80000e16, incoming: 0x80000603},
+      {eax: 0x80000000, result: 0x80000000, quota: 5, next: 0x20000, flags: 0x80000602, incoming: 0x80000603, edx: 0x22222222},
+    ]},
+    {name: 'ADD', opcode: 0xc0, rows: [
+      {eax: 0xffffffff, result: 0, quota: 2, next: 0x1012, flags: 0x80000657},
+      {eax: 0xffffffff, result: 0, quota: 5, next: 0x20000, flags: 0x80000646, edx: 0x11111111},
+      {eax: 0x7fffffff, result: 0x80000000, quota: 2, next: 0x1005, flags: 0x80000e96, incoming: 0x80000603},
+      {eax: 0x7fffffff, result: 0x80000000, quota: 5, next: 0x20000, flags: 0x80000602, incoming: 0x80000603, edx: 0x22222222},
+    ]},
+  ]) {
+    const f = fixture([
+      0x83, variant.opcode, 1, 0x72, 0x0d,
+      0x83, 0xf9, 0, 0xba, 0x22, 0x22, 0x22, 0x22, 0xe9, 0xee, 0xef, 1, 0,
+      0x83, 0xfb, 0, 0xba, 0x11, 0x11, 0x11, 0x11, 0xe9, 0xe1, 0xef, 1, 0,
+    ], {independent: false, fpControl: 0x127f, fpStatus: 0x4720,
+      registers: [0, 1, 0xa1b2c3d4, 0, 0x2f00, 0x13579bdf, 0x2468ace0, 0x0f1e2d3c]});
+    let active = false;
+    try {
+      const api = f.engine.api;
+      f.engine.ok('cpu_begin', ...KEY); active = true;
+      const context = api.cpu_context_ptr() >>> 0;
+      f.slab().setUint32(48, 5, true);
+      f.engine.ok('cpu_prepare', ...KEY, 0x1000, 8);
+      const bytes = new Uint8Array(f.engine.memory.buffer, api.cpu_code_ptr() >>> 0, api.cpu_code_len() >>> 0);
+      const unit = new WebAssembly.Instance(new WebAssembly.Module(bytes), {env: {memory: f.engine.memory},
+        cpu: {read: api.cpu_runtime_read, write: api.cpu_runtime_write}});
+      const expected = new Uint8Array(f.engine.memory.buffer).slice();
+      const initial = expected.slice(context, context + 160), state = new DataView(expected.buffer, context, 160);
+      const rows = [...variant.rows,
+        {pc: 0x1003, eax: 0, result: 0, quota: 1, next: 0x1005, flags: 0x80000800, incoming: 0x80000800},
+        {pc: 0x1003, eax: 0x80000000, result: 0x80000000, quota: 1, next: 0x1012, flags: 0x80000801, incoming: 0x80000801},
+      ];
+      for (const row of rows) {
+        new Uint8Array(f.engine.memory.buffer, context, 160).set(initial);
+        new Uint8Array(expected.buffer, context, 160).set(initial);
+        for (const [at, value] of [[8, row.eax], [40, row.pc ?? 0x1000], [44, row.incoming ?? 0x80000602], [48, row.quota]]) {
+          f.slab().setUint32(at, value, true); state.setUint32(at, value, true);
+        }
+        const status = row.next === 0x20000 ? 0 : 2;
+        for (const [at, value] of [[8, row.result], [16, row.edx ?? 0xa1b2c3d4], [40, row.next], [44, row.flags], [48, 0], [52, status], [56, row.quota]])
+          state.setUint32(at, value, true);
+        assert.equal(unit.exports.run(context), status);
+        assert.deepEqual(new Uint8Array(f.engine.memory.buffer), expected,
+          `${variant.name} PC${(row.pc ?? 0x1000).toString(16)} quota${row.quota}: exact branch, producer or killer FLAGS, complete scalar state, RAM and banks`);
+      }
+    } finally {
+      if (active) f.engine.ok('cpu_end', ...KEY);
+      f.close();
+    }
+  }
+});

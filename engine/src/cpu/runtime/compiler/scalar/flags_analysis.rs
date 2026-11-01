@@ -1,5 +1,5 @@
 use super::*;
-use std::collections::{BTreeMap, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
 pub(super) struct Analysis {
     nodes: Vec<Node>,
@@ -31,19 +31,31 @@ pub(super) fn targets(operation: Operation, next: u32) -> [Option<u32>; 2] {
     }
 }
 
-fn killed_before_barrier(
-    block: &Block,
+fn killed_on_all_paths(
+    nodes: &[Node],
     index: usize,
     recipe: deferred::Recipe,
+    indices: &BTreeMap<u32, usize>,
     incoming: &BTreeMap<u32, Option<u32>>,
 ) -> bool {
-    let mut previous = block.instructions[index].pc().0;
-    for instruction in block.instructions.iter().skip(index + 1) {
-        // a competing edge may require canonical flags before the quota guard.
-        if incoming.get(&instruction.pc().0) != Some(&Some(previous)) {
+    let producer = &nodes[index];
+    let Some(next) = producer.targets[0] else {
+        return false;
+    };
+    let mut pending = VecDeque::from([(next, producer.pc)]);
+    let mut visited = BTreeSet::from([producer.pc]);
+    while let Some((pc, previous)) = pending.pop_front() {
+        // competing edges can require canonical flags before the quota guard.
+        if incoming.get(&pc) != Some(&Some(previous)) || !visited.insert(pc) {
             return false;
         }
-        let operation = *instruction.operation();
+        let Some(&index) = indices.get(&pc) else {
+            return false;
+        };
+        let node = &nodes[index];
+        let Some(operation) = node.operation else {
+            return false;
+        };
         if matches!(
             operation,
             Operation::Binary {
@@ -52,9 +64,9 @@ fn killed_before_barrier(
                 source: Value32::Register(_) | Value32::Immediate(_),
             }
         ) {
-            return true;
+            continue;
         }
-        let pure = matches!(
+        let preserving = matches!(
             operation,
             Operation::Nop
                 | Operation::Direction { .. }
@@ -68,13 +80,27 @@ fn killed_before_barrier(
                     kind: UnaryKind::Not,
                     destination: Location32::Register(_),
                 }
+                | Operation::Jump {
+                    target: BranchTarget::Direct(_),
+                }
+                | Operation::ConditionalJump { .. }
         );
-        if !pure || !flags_flow::preserves(operation, recipe.dependencies(), false) {
+        if !preserving || !flags_flow::preserves(operation, recipe.dependencies(), false) {
             return false;
         }
-        previous = instruction.pc().0;
+        let target_count = if matches!(operation, Operation::ConditionalJump { .. }) {
+            2
+        } else {
+            1
+        };
+        for target in node.targets.into_iter().take(target_count) {
+            let Some(target) = target else {
+                return false;
+            };
+            pending.push_back((target, pc));
+        }
     }
-    false
+    true
 }
 
 impl Analysis {
@@ -117,6 +143,11 @@ impl Analysis {
                 }
             })
             .collect();
+        let indices: BTreeMap<_, _> = nodes
+            .iter()
+            .enumerate()
+            .map(|(index, node)| (node.pc, index))
+            .collect();
         if native {
             let mut incoming = BTreeMap::new();
             for node in &nodes {
@@ -131,24 +162,14 @@ impl Analysis {
                         .or_insert(Some(node.pc));
                 }
             }
-            for (node, entry) in nodes.iter_mut().zip(entries) {
-                if let Some(recipe) = node.produced
-                    && !killed_before_barrier(
-                        &blocks[entry.block as usize],
-                        entry.instruction as usize,
-                        recipe,
-                        &incoming,
-                    )
+            for index in 0..nodes.len() {
+                if let Some(recipe) = nodes[index].produced
+                    && !killed_on_all_paths(&nodes, index, recipe, &indices, &incoming)
                 {
-                    node.produced = None;
+                    nodes[index].produced = None;
                 }
             }
         }
-        let indices = nodes
-            .iter()
-            .enumerate()
-            .map(|(index, node)| (node.pc, index))
-            .collect();
         let mut analysis = Self { nodes, indices };
         let mut pending: VecDeque<_> = (0..analysis.nodes.len()).collect();
         while let Some(index) = pending.pop_front() {
