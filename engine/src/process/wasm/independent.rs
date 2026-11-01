@@ -299,7 +299,7 @@ pub(crate) fn cpu_prepare(low: u32, high: u32, pc: u32, maximum: u32) -> u32 {
             session.refresh(memory);
             return Ok(());
         }
-        let binding = session.memory_cache.binding(&session.state);
+        let binding = session.memory_cache.binding(&session.state, &session.dirty);
         let code = match runtime::compile_with_native_memory(
             memory,
             GuestAddress(pc),

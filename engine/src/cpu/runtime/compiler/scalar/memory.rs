@@ -411,11 +411,13 @@ fn admit_store(out: &mut Output) {
         .local_set(CACHE_FLAGS);
     cache_store(out);
     out.c().end().end();
+    out.c().local_get(READY).if_(BlockType::Empty);
+    if let Some(binding) = out.native_memory_binding {
+        out.c().i32_const(binding.dirty_bits() as i32);
+    } else {
+        out.c().local_get(0).i32_load(mem(100));
+    }
     out.c()
-        .local_get(READY)
-        .if_(BlockType::Empty)
-        .local_get(0)
-        .i32_load(mem(100))
         .local_get(SLOT)
         .i32_add()
         .i32_load8_u(access(1))
@@ -425,14 +427,13 @@ fn admit_store(out: &mut Output) {
     if out.native_memory_bound {
         out.c().local_get(0).i32_load(mem(108)).local_set(LENGTH);
     }
-    out.c()
-        .local_get(LENGTH)
-        .local_get(0)
-        .i32_load(mem(112))
-        .i32_lt_u()
-        .local_set(READY)
-        .end()
-        .end();
+    out.c().local_get(LENGTH);
+    if let Some(binding) = out.native_memory_binding {
+        out.c().i32_const(binding.dirty_capacity() as i32);
+    } else {
+        out.c().local_get(0).i32_load(mem(112));
+    }
+    out.c().i32_lt_u().local_set(READY).end().end();
 }
 
 fn admit_store_uncached(out: &mut Output) {
@@ -496,20 +497,25 @@ fn store(out: &mut Output, width: u32, value: u32) {
 }
 
 fn record_store(out: &mut Output) {
+    out.c().local_get(BIT).i32_eqz().if_(BlockType::Empty);
+    if let Some(binding) = out.native_memory_binding {
+        out.c().i32_const(binding.dirty_slots() as i32);
+    } else {
+        out.c().local_get(0).i32_load(mem(104));
+    }
     out.c()
-        .local_get(BIT)
-        .i32_eqz()
-        .if_(BlockType::Empty)
-        .local_get(0)
-        .i32_load(mem(104))
         .local_get(LENGTH)
         .i32_const(2)
         .i32_shl()
         .i32_add()
         .local_get(SLOT)
-        .i32_store(mem(0))
-        .local_get(0)
-        .i32_load(mem(100))
+        .i32_store(mem(0));
+    if let Some(binding) = out.native_memory_binding {
+        out.c().i32_const(binding.dirty_bits() as i32);
+    } else {
+        out.c().local_get(0).i32_load(mem(100));
+    }
+    out.c()
         .local_get(SLOT)
         .i32_add()
         .i32_const(1)

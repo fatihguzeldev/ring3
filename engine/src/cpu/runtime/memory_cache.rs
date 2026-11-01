@@ -7,6 +7,9 @@ pub(crate) struct NativeMemoryBinding {
     context: u32,
     header: u32,
     rows: u32,
+    dirty_bits: u32,
+    dirty_slots: u32,
+    dirty_capacity: u32,
 }
 
 impl NativeMemoryBinding {
@@ -21,6 +24,18 @@ impl NativeMemoryBinding {
     pub(super) fn rows(self) -> u32 {
         self.rows
     }
+
+    pub(super) fn dirty_bits(self) -> u32 {
+        self.dirty_bits
+    }
+
+    pub(super) fn dirty_slots(self) -> u32 {
+        self.dirty_slots
+    }
+
+    pub(super) fn dirty_capacity(self) -> u32 {
+        self.dirty_capacity
+    }
 }
 
 #[repr(C, align(16))]
@@ -34,12 +49,19 @@ pub(crate) struct MemoryCache {
 }
 
 impl MemoryCache {
-    // bound units stay owned by the session retaining these state and cache boxes.
-    pub(crate) fn binding(&self, state: &super::CpuState) -> NativeMemoryBinding {
+    // bound units stay owned by the session retaining these state, cache and dirty boxes.
+    pub(crate) fn binding(
+        &self,
+        state: &super::CpuState,
+        dirty: &crate::memory::DirtyPages,
+    ) -> NativeMemoryBinding {
         NativeMemoryBinding {
             context: std::ptr::from_ref(state) as usize as u32,
             header: std::ptr::from_ref(self) as usize as u32,
             rows: self.entries.as_ptr() as usize as u32,
+            dirty_bits: dirty.bits.as_ptr() as usize as u32,
+            dirty_slots: dirty.slots.as_ptr() as usize as u32,
+            dirty_capacity: dirty.slots.len() as u32,
         }
     }
 

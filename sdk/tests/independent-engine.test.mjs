@@ -2723,3 +2723,77 @@ test('actual native quota exits publish each pending predicate and preserve cold
     f.close();
   }
 });
+
+test('actual retained native stores keep owned dirty descriptors across COW and published leases', {skip}, () => {
+  const f = fixture(undefined, {windowsMappings: true, physicalPages: 1024, execution: {budget: 2, instructions: 2}});
+  let nativePublish;
+  try {
+    const [shared, copy] = sharedViews(f, 4, [2, 1]);
+    f.engine.ok('write32', shared, 0x11223344);
+    replaceCode(f, [0xa3, ...dword(copy), 0xeb, 0xf9]);
+    const calls = memoryCalls(f), values = [0xaabbccdd, 0x55667788, 0x87654321];
+    let retained, descriptors, expectedRam, originalSlot, copiedSlot, publications = 0;
+    const api = f.engine.api; nativePublish = api.cpu_publish;
+    for (const [index, value] of values.entries()) {
+      new DataView(f.engine.memory.buffer).setUint32(f.engine.base + 16, value, true);
+      f.cache.import(); const unit = f.cache.select(), state = f.slab();
+      const current = [api.cpu_context_ptr() >>> 0, state.getUint32(100, true), state.getUint32(104, true), state.getUint32(112, true)];
+      if (index === 0) {retained = unit; descriptors = current;}
+      else {
+        assert.equal(unit, retained, 'each fresh lease executes the same previously instantiated native unit');
+        assert.deepEqual(current, descriptors, 'the same owner keeps its bitmap, list and capacity across publication and begin');
+      }
+      const [, bits, slots, capacity] = current;
+      const all = new DataView(f.engine.memory.buffer), backing = state.getUint32(84, true), length = state.getUint32(88, true) * 4096;
+      const mappings = state.getUint32(76, true);
+      const slot = address => new DataView(f.engine.memory.buffer).getUint32(mappings + (address >>> 12) * 4, true) - 1;
+      const version = state.getUint32(156, true), beforeVersion = all.getBigUint64(version, true);
+      if (index === 0) {
+        originalSlot = slot(shared); assert.equal(slot(copy), originalSlot);
+        expectedRam = new Uint8Array(f.engine.memory.buffer, backing, length).slice();
+      } else assert.equal(slot(copy), copiedSlot);
+      assert.equal(state.getUint32(108, true), 0);
+      assert.deepEqual(new Uint8Array(f.engine.memory.buffer, bits, capacity), new Uint8Array(capacity));
+      const banks = processBanks(f), numeric = state.getUint32(124, true);
+      const numericRanges = [[all.getUint32(numeric + 8, true), 100], [all.getUint32(numeric + 36, true), 132]];
+      const nativeBanks = numericRanges.map(([pointer, count]) => new Uint8Array(f.engine.memory.buffer, pointer, count).slice());
+      const writesBefore = calls.write;
+      api.cpu_publish = (...key) => {
+        publications++;
+        const pending = f.slab(), target = slot(copy);
+        assert.deepEqual([pending.getUint32(40, true), pending.getUint32(44, true), pending.getUint32(48, true),
+          pending.getUint32(52, true), pending.getUint32(56, true)], [0x1000, 2, 0, 2, 2]);
+        assert.deepEqual(Array.from({length: 8}, (_, register) => pending.getUint32(8 + register * 4, true)),
+          [value, 0, 0, 0, 0x2f00, 0, 0, 0]);
+        assert.equal(pending.getUint32(108, true), index === 0 ? 0 : 1,
+          'the split is canonical once; each later ordinary batch starts again at list index zero');
+        if (index !== 0) {
+          const memory = new DataView(f.engine.memory.buffer);
+          assert.equal(memory.getUint8(bits + target), 1);
+          assert.equal(memory.getUint32(slots, true), target);
+        }
+        return nativePublish(...key);
+      };
+      const run = f.cache.execute(unit);
+      assert.deepEqual([run.reason, run.retired, run.work, run.pc], [1, 2, 2, 0x1000]);
+      assert.equal(calls.write - writesBefore, index === 0 ? 1 : 0,
+        'only the first COW split needs the real native write helper');
+      assert.equal(slot(shared), originalSlot);
+      if (index === 0) {
+        copiedSlot = slot(copy); assert.notEqual(copiedSlot, originalSlot);
+        expectedRam.set(expectedRam.slice(originalSlot * 4096, (originalSlot + 1) * 4096), copiedSlot * 4096);
+      }
+      new DataView(expectedRam.buffer).setUint32(copiedSlot * 4096, value, true);
+      assert.deepEqual(new Uint8Array(f.engine.memory.buffer, f.slab().getUint32(84, true), length), expectedRam);
+      assert.equal(f.slab().getUint32(108, true), 0);
+      assert.deepEqual(new Uint8Array(f.engine.memory.buffer, bits, capacity), new Uint8Array(capacity));
+      if (index !== 0) assert.equal(new DataView(f.engine.memory.buffer).getBigUint64(version, true), beforeVersion + 1n);
+      assert.deepEqual(processBanks(f), banks);
+      assert.deepEqual(numericRanges.map(([pointer, count]) => new Uint8Array(f.engine.memory.buffer, pointer, count)), nativeBanks);
+    }
+    assert.equal(publications, 3);
+  } finally {
+    if (nativePublish) f.engine.api.cpu_publish = nativePublish;
+    f.close();
+  }
+});
