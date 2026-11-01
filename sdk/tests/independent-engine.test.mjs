@@ -2841,3 +2841,52 @@ test('actual native CMP branch consumers and cold entries publish canonical opaq
     f.close();
   }
 });
+
+test('actual qualified native ADD SUB recipes preserve quota overflow carry borrow and cold state', {skip}, () => {
+  for (const variant of [
+    {name: 'ADD', opcode: 0xc0, input: 0x7fffffff, result: 0x80000000, flags: 0x80000e96,
+      edgeInput: 0xffffffff, edgeResult: 0, edgeFlags: 0x80000657},
+    {name: 'SUB', opcode: 0xe8, input: 0x80000000, result: 0x7fffffff, flags: 0x80000e16,
+      edgeInput: 0, edgeResult: 0xffffffff, edgeFlags: 0x80000697},
+  ]) {
+    const f = fixture([0x83, variant.opcode, 1, 0x83, 0xf9, 0, 0x90],
+      {independent: false, fpControl: 0x127f, fpStatus: 0x4720,
+        registers: [variant.input, 1, 0xa1b2c3d4, 0x55667788, 0x2f00, 0x13579bdf, 0x2468ace0, 0x0f1e2d3c]});
+    let active = false;
+    try {
+      const api = f.engine.api;
+      f.engine.ok('cpu_begin', ...KEY); active = true;
+      const context = api.cpu_context_ptr() >>> 0;
+      f.slab().setUint32(48, 3, true);
+      f.engine.ok('cpu_prepare', ...KEY, 0x1000, 3);
+      const bytes = new Uint8Array(f.engine.memory.buffer, api.cpu_code_ptr() >>> 0, api.cpu_code_len() >>> 0);
+      const unit = new WebAssembly.Instance(new WebAssembly.Module(bytes), {env: {memory: f.engine.memory},
+        cpu: {read: api.cpu_runtime_read, write: api.cpu_runtime_write}});
+      const expected = new Uint8Array(f.engine.memory.buffer).slice();
+      const initial = expected.slice(context, context + 160), state = new DataView(expected.buffer, context, 160);
+      const rows = [
+        {pc: 0x1000, quota: 0, input: variant.input, before: 0x80000603, result: variant.input, after: 0x80000603, next: 0x1000, retired: 0, status: 2},
+        {pc: 0x1000, quota: 1, input: variant.input, before: 0x80000603, result: variant.result, after: variant.flags, next: 0x1003, retired: 1, status: 2},
+        {pc: 0x1000, quota: 2, input: variant.input, before: 0x80000603, result: variant.result, after: 0x80000602, next: 0x1006, retired: 2, status: 2},
+        {pc: 0x1000, quota: 3, input: variant.input, before: 0x80000603, result: variant.result, after: 0x80000602, next: 0x1007, retired: 3, status: 0},
+        {pc: 0x1003, quota: 0, input: 0x12345678, before: 0x80000800, result: 0x12345678, after: 0x80000800, next: 0x1003, retired: 0, status: 2},
+        {pc: 0x1000, quota: 1, input: variant.edgeInput, before: 0x80000603, result: variant.edgeResult, after: variant.edgeFlags, next: 0x1003, retired: 1, status: 2},
+      ];
+      for (const row of rows) {
+        new Uint8Array(f.engine.memory.buffer, context, 160).set(initial);
+        new Uint8Array(expected.buffer, context, 160).set(initial);
+        for (const [at, value] of [[8, row.input], [40, row.pc], [44, row.before], [48, row.quota]]) {
+          f.slab().setUint32(at, value, true); state.setUint32(at, value, true);
+        }
+        for (const [at, value] of [[8, row.result], [40, row.next], [44, row.after], [48, 0], [52, row.status], [56, row.retired]])
+          state.setUint32(at, value, true);
+        assert.equal(unit.exports.run(context), row.status);
+        assert.deepEqual(new Uint8Array(f.engine.memory.buffer), expected,
+          `${variant.name} PC${row.pc.toString(16)} quota${row.quota}: exact scalar state, opaque FLAGS, RAM and all native/process numeric banks`);
+      }
+    } finally {
+      if (active) f.engine.ok('cpu_end', ...KEY);
+      f.close();
+    }
+  }
+});

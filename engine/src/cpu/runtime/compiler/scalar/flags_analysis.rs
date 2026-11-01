@@ -93,6 +93,20 @@ impl Analysis {
                         let Operation::Binary { kind, .. } = operation else {
                             return None;
                         };
+                        if native
+                            && matches!(kind, BinaryKind::Add | BinaryKind::Sub)
+                            && let Operation::Binary {
+                                destination: Location32::Register(result),
+                                source: Value32::Immediate(right),
+                                ..
+                            } = operation
+                        {
+                            return Some(deferred::Recipe::Arithmetic {
+                                kind,
+                                result,
+                                right: deferred::Operand::Immediate(right),
+                            });
+                        }
                         deferred::recipe_for_flags(operation, kind, 32)
                     }),
                     targets: instruction.map_or([None, None], |instruction| {
