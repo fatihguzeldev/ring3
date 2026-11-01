@@ -571,7 +571,6 @@ impl Output {
         self.c().i64_extend_i32_u().i64_or().local_set(FLAGS);
     }
     pub(super) fn prepare_flags(&mut self, operation: Operation) {
-        self.operation = operation;
         match preparation(operation, self.recipe) {
             Preparation::Keep => {}
             Preparation::Canonical => self.canonicalize_flags(),
@@ -597,7 +596,7 @@ impl Output {
         }
     }
     pub(super) fn flags(&mut self, kind: BinaryKind, width: u32, preserve: bool) {
-        if let Some(recipe) = recipe_for_flags(self.operation, kind, width) {
+        if let Some(recipe) = self.produced_recipe {
             self.c()
                 .local_get(FLAGS)
                 .i64_const(0xffff_ffff)
@@ -894,25 +893,29 @@ pub(super) fn preparation(operation: Operation, recipe: Option<Recipe>) -> Prepa
     }
 }
 
-pub(super) fn transfer(operation: Operation, incoming: Option<Recipe>) -> Option<Recipe> {
+pub(super) fn transfer(
+    operation: Operation,
+    incoming: Option<Recipe>,
+    produced: Option<Recipe>,
+) -> Option<Recipe> {
     let prepared = match preparation(operation, incoming) {
         Preparation::Keep => incoming,
         _ => None,
     };
     match operation {
-        Operation::Binary { kind, .. } => recipe_for_flags(operation, kind, 32),
+        Operation::Binary { .. } => produced,
         Operation::Unary {
             kind: UnaryKind::Neg,
             ..
-        } => recipe_for_flags(operation, BinaryKind::Sub, 32),
+        } => produced,
         Operation::Unary {
             kind: UnaryKind::Inc,
             ..
-        } => recipe_for_flags(operation, BinaryKind::Add, 32),
+        } => produced,
         Operation::Unary {
             kind: UnaryKind::Dec,
             ..
-        } => recipe_for_flags(operation, BinaryKind::Sub, 32),
+        } => produced,
         _ if full_producer(operation) => None,
         _ => prepared,
     }

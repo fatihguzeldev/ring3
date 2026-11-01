@@ -143,7 +143,7 @@ pub(super) fn emit(
     entries: &[EntryPoint],
     binding: Option<NativeMemoryBinding>,
 ) -> Vec<u8> {
-    let flag_analysis = flags_analysis::Analysis::new(blocks, entries);
+    let flag_analysis = flags_analysis::Analysis::new(blocks, entries, binding.is_some());
     let mut module = Module::new();
     let mut types = TypeSection::new();
     types.ty().function([ValType::I32; 3], [ValType::I32]);
@@ -201,8 +201,8 @@ pub(super) fn emit(
             (2, ValType::I32),
         ]),
         emitted_guest_write: false,
+        produced_recipe: None,
         recipe: None,
-        operation: Operation::Nop,
     };
     if let Some(binding) = binding {
         out.c()
@@ -294,6 +294,7 @@ pub(super) fn emit(
             }
             out.c().end().i32_const(0).local_set(WRITE_STATUS);
             out.emitted_guest_write = false;
+            out.produced_recipe = flag_analysis.produced(instruction.pc().0);
             if !out.instruction(*instruction.operation(), instruction.next_pc().0) {
                 out.exit(7);
             } else {
@@ -381,8 +382,8 @@ struct Output {
     return_prediction_possible: bool,
     function: Function,
     emitted_guest_write: bool,
+    produced_recipe: Option<deferred::Recipe>,
     recipe: Option<deferred::Recipe>,
-    operation: Operation,
 }
 
 impl Output {
@@ -868,7 +869,7 @@ impl Output {
                 destination: Location32::Register(_),
                 source: Value32::Register(_) | Value32::Immediate(_),
             } if matches!(kind, BinaryKind::Cmp | BinaryKind::Test)
-                && deferred::recipe_for_flags(operation, kind, 32).is_some() =>
+                && self.produced_recipe.is_some() =>
             {
                 self.flags(kind, 32, false);
             }

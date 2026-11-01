@@ -2797,3 +2797,47 @@ test('actual retained native stores keep owned dirty descriptors across COW and 
     f.close();
   }
 });
+
+test('actual native CMP branch consumers and cold entries publish canonical opaque FLAGS', {skip}, () => {
+  const f = fixture([
+    0x39, 0xc8, 0x72, 0x0a,
+    0xba, 0x22, 0x22, 0x22, 0x22, 0xe9, 0xf2, 0xef, 1, 0,
+    0xba, 0x11, 0x11, 0x11, 0x11, 0xe9, 0xe8, 0xef, 1, 0,
+  ], {independent: false, fpControl: 0x127f, fpStatus: 0x4720,
+    registers: [1, 2, 0xa1b2c3d4, 0x55667788, 0x2f00, 0x13579bdf, 0x2468ace0, 0x0f1e2d3c]});
+  let active = false;
+  try {
+    const api = f.engine.api;
+    f.engine.ok('cpu_begin', ...KEY); active = true;
+    const context = api.cpu_context_ptr() >>> 0;
+    f.slab().setUint32(48, 4, true);
+    f.engine.ok('cpu_prepare', ...KEY, 0x1000, 6);
+    const bytes = new Uint8Array(f.engine.memory.buffer, api.cpu_code_ptr() >>> 0, api.cpu_code_len() >>> 0);
+    const unit = new WebAssembly.Instance(new WebAssembly.Module(bytes), {env: {memory: f.engine.memory},
+      cpu: {read: api.cpu_runtime_read, write: api.cpu_runtime_write}});
+    const expected = new Uint8Array(f.engine.memory.buffer).slice();
+    const initial = expected.slice(context, context + 160), state = new DataView(expected.buffer, context, 160);
+    const rows = [
+      {pc: 0x1000, eax: 0, ecx: 1, flags: 0x80000602, quota: 4, edx: 0x11111111, after: 0x80000697, next: 0x20000, retired: 4, status: 0},
+      {pc: 0x1000, eax: 0x80000000, ecx: 1, flags: 0x80000603, quota: 4, edx: 0x22222222, after: 0x80000e16, next: 0x20000, retired: 4, status: 0},
+      {pc: 0x1002, eax: 0, ecx: 1, flags: 0x80000800, quota: 3, edx: 0x22222222, after: 0x80000800, next: 0x20000, retired: 3, status: 0},
+      {pc: 0x1002, eax: 0x80000000, ecx: 1, flags: 0x80000801, quota: 3, edx: 0x11111111, after: 0x80000801, next: 0x20000, retired: 3, status: 0},
+      {pc: 0x1000, eax: 0, ecx: 1, flags: 0x80000602, quota: 1, edx: 0xa1b2c3d4, after: 0x80000697, next: 0x1002, retired: 1, status: 2},
+    ];
+    for (const row of rows) {
+      new Uint8Array(f.engine.memory.buffer, context, 160).set(initial);
+      new Uint8Array(expected.buffer, context, 160).set(initial);
+      for (const [at, value] of [[8, row.eax], [12, row.ecx], [40, row.pc], [44, row.flags], [48, row.quota]]) {
+        f.slab().setUint32(at, value, true); state.setUint32(at, value, true);
+      }
+      for (const [at, value] of [[16, row.edx], [40, row.next], [44, row.after], [48, 0], [52, row.status], [56, row.retired]])
+        state.setUint32(at, value, true);
+      assert.equal(unit.exports.run(context), row.status);
+      assert.deepEqual(new Uint8Array(f.engine.memory.buffer), expected,
+        `PC${row.pc.toString(16)} quota${row.quota}: CMP/JB uses the executed producer or canonical cold FLAGS, preserving every scalar byte, RAM and bank`);
+    }
+  } finally {
+    if (active) f.engine.ok('cpu_end', ...KEY);
+    f.close();
+  }
+});
