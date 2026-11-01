@@ -235,6 +235,7 @@ pub(super) enum Recipe {
     Negate {
         result: Register32,
     },
+    // zero stays canonical for native decrement recipes, including cold entries.
     Increment {
         result: Register32,
         decrement: bool,
@@ -562,7 +563,17 @@ impl Output {
         if let Some(recipe) = self.recipe {
             self.flags_pending();
             self.c().if_(BlockType::Empty);
-            recipe.materialize(self);
+            if matches!(
+                recipe,
+                Recipe::Increment {
+                    decrement: true,
+                    ..
+                }
+            ) {
+                recipe.materialize_inline(self);
+            } else {
+                recipe.materialize(self);
+            }
             self.c().end();
         }
     }
@@ -611,18 +622,38 @@ impl Output {
     pub(super) fn flags(&mut self, kind: BinaryKind, width: u32, preserve: bool) {
         if let Some(recipe) = self.produced_recipe {
             let memory_add = matches!(recipe, Recipe::MemoryAdd { .. });
+            let decrement = matches!(
+                recipe,
+                Recipe::Increment {
+                    decrement: true,
+                    ..
+                }
+            );
             if memory_add {
                 self.c().local_get(R).local_set(MEMORY_RESULT);
             }
-            self.c()
-                .local_get(FLAGS)
-                .i64_const(if memory_add { 0xffff_fffe } else { 0xffff_ffff })
-                .i64_and();
+            let mask = if memory_add {
+                0xffff_fffe
+            } else if decrement {
+                0xffff_ffbf
+            } else {
+                0xffff_ffff
+            };
+            self.c().local_get(FLAGS).i64_const(mask).i64_and();
             if memory_add {
                 self.c()
                     .local_get(R)
                     .local_get(B)
                     .i32_lt_u()
+                    .i64_extend_i32_u()
+                    .i64_or();
+            }
+            if decrement {
+                self.c()
+                    .local_get(R)
+                    .i32_eqz()
+                    .i32_const(6)
+                    .i32_shl()
                     .i64_extend_i32_u()
                     .i64_or();
             }
@@ -732,6 +763,24 @@ impl Output {
     }
 
     pub(super) fn deferred_bit(&mut self, bit: u32) {
+        if bit == 6
+            && matches!(
+                self.recipe,
+                Some(Recipe::Increment {
+                    decrement: true,
+                    ..
+                })
+            )
+        {
+            self.c()
+                .local_get(FLAGS)
+                .i32_wrap_i64()
+                .i32_const(6)
+                .i32_shr_u()
+                .i32_const(1)
+                .i32_and();
+            return;
+        }
         if bit == 0
             && let Some(recipe @ Recipe::MemoryAdd { .. }) = self.recipe
         {

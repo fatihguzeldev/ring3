@@ -90,6 +90,17 @@ impl Analysis {
                     operation: instruction.map(|instruction| *instruction.operation()),
                     produced: instruction.and_then(|instruction| {
                         let operation = *instruction.operation();
+                        if native
+                            && let Operation::Unary {
+                                kind: UnaryKind::Dec,
+                                destination: Location32::Register(result),
+                            } = operation
+                        {
+                            return Some(deferred::Recipe::Increment {
+                                result,
+                                decrement: true,
+                            });
+                        }
                         let Operation::Binary { kind, .. } = operation else {
                             return None;
                         };
@@ -170,7 +181,12 @@ impl Analysis {
                 if let Some(recipe) = node.produced
                     && !matches!(
                         recipe,
-                        deferred::Recipe::Logical { .. } | deferred::Recipe::MemoryAdd { .. }
+                        deferred::Recipe::Logical { .. }
+                            | deferred::Recipe::MemoryAdd { .. }
+                            | deferred::Recipe::Increment {
+                                decrement: true,
+                                ..
+                            }
                     )
                     && !killed_before_barrier(
                         &blocks[entry.block as usize],
@@ -279,6 +295,61 @@ mod tests {
     };
 
     #[test]
+    fn native_register_dec_defers_flags_through_its_branch_and_backedge() {
+        for (code, defer) in [
+            (&[0x49, 0x75, 0xfd][..], true),
+            (&[0x41, 0x75, 0xfd][..], false),
+            (&[0xff, 0x0b, 0x75, 0xfc][..], false),
+            (&[0x66, 0x49, 0x75, 0xfc][..], false),
+        ] {
+            let mut memory = AddressSpace::new(1).unwrap();
+            memory
+                .map_zeroed(
+                    PageRange::new(GuestAddress(0x1000), 1).unwrap(),
+                    Permissions::ALL,
+                )
+                .unwrap();
+            memory.write(GuestAddress(0x1000), code).unwrap();
+            let branch = 0x1000 + code.len() as u32 - 2;
+            let instructions = [0x1000, branch]
+                .into_iter()
+                .map(|pc| {
+                    let BoundDecode::Instruction(instruction) = decode_for_compilation(
+                        &memory,
+                        GuestAddress(pc),
+                        DecodePolicy::Strict,
+                        None,
+                        DecodeAuthority::default(),
+                    )
+                    .unwrap() else {
+                        panic!("authored instruction must decode");
+                    };
+                    instruction
+                })
+                .collect();
+            let blocks = [Block {
+                pc: 0x1000,
+                instructions,
+                gate: None,
+            }];
+            let entries = entry_points(&blocks);
+            let native = Analysis::new(&blocks, &entries, true);
+            let recipe = defer.then_some(deferred::Recipe::Increment {
+                result: Register32::Ecx,
+                decrement: true,
+            });
+            assert_eq!(native.produced(0x1000), recipe);
+            assert_eq!(native.expected(branch), recipe);
+            assert_eq!(native.after(branch), recipe);
+            assert_eq!(native.expected(0x1000), recipe);
+            assert_eq!(
+                Analysis::new(&blocks, &entries, false).produced(0x1000),
+                None
+            );
+        }
+    }
+
+    #[test]
     fn native_memory_add_defers_for_carry_but_stays_eager_before_return() {
         for (code, defer) in [
             (&[0x83, 0x43, 0x0c, 1, 0x49][..], true),
@@ -320,7 +391,13 @@ mod tests {
             let native = Analysis::new(&blocks, &entries, true);
             assert_eq!(native.produced(0x1000).is_some(), defer);
             assert_eq!(native.expected(next), native.produced(0x1000));
-            assert_eq!(native.after(next), None);
+            assert_eq!(
+                native.after(next),
+                defer.then_some(deferred::Recipe::Increment {
+                    result: Register32::Ecx,
+                    decrement: true,
+                })
+            );
             assert_eq!(
                 Analysis::new(&blocks, &entries, false).produced(0x1000),
                 None
