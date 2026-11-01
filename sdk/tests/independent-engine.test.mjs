@@ -3003,3 +3003,51 @@ test('actual native ADD flags remain observable until a register XOR kills them'
     f.close();
   }
 });
+
+test('actual native canonical INC DEC preserve carry and publish exact quota state', {skip}, () => {
+  for (const variant of [
+    {name: 'INC', opcode: 0x40, rows: [
+      {pc: 0x1000, quota: 0, eax: 0x7fffffff, before: 0x80000800, result: 0x7fffffff, after: 0x80000800, retired: 0},
+      {pc: 0x1000, quota: 1, eax: 0x7fffffff, before: 0x80000600, result: 0x80000000, after: 0x80000e96, retired: 1},
+      {pc: 0x1000, quota: 1, eax: 0xffffffff, before: 0x80000e91, result: 0, after: 0x80000657, retired: 1},
+      {pc: 0x1001, quota: 0, eax: 0x12345678, before: 0x80000801, result: 0x12345678, after: 0x80000801, retired: 0},
+    ]},
+    {name: 'DEC', opcode: 0x48, rows: [
+      {pc: 0x1000, quota: 0, eax: 0x80000000, before: 0x80000801, result: 0x80000000, after: 0x80000801, retired: 0},
+      {pc: 0x1000, quota: 1, eax: 0x80000000, before: 0x80000600, result: 0x7fffffff, after: 0x80000e16, retired: 1},
+      {pc: 0x1000, quota: 1, eax: 0, before: 0x80000e41, result: 0xffffffff, after: 0x80000697, retired: 1},
+      {pc: 0x1001, quota: 0, eax: 0x12345678, before: 0x80000800, result: 0x12345678, after: 0x80000800, retired: 0},
+    ]},
+  ]) {
+    const f = fixture([variant.opcode, 0x90], {independent: false, fpControl: 0x127f, fpStatus: 0x4720,
+      registers: [0, 0x12345678, 0xa1b2c3d4, 0x55667788, 0x2f00, 0x13579bdf, 0x2468ace0, 0x0f1e2d3c]});
+    let active = false;
+    try {
+      const api = f.engine.api;
+      f.engine.ok('cpu_begin', ...KEY); active = true;
+      const context = api.cpu_context_ptr() >>> 0;
+      f.slab().setUint32(48, 2, true);
+      f.engine.ok('cpu_prepare', ...KEY, 0x1000, 2);
+      const bytes = new Uint8Array(f.engine.memory.buffer, api.cpu_code_ptr() >>> 0, api.cpu_code_len() >>> 0);
+      const unit = new WebAssembly.Instance(new WebAssembly.Module(bytes), {env: {memory: f.engine.memory},
+        cpu: {read: api.cpu_runtime_read, write: api.cpu_runtime_write}});
+      const expected = new Uint8Array(f.engine.memory.buffer).slice();
+      const initial = expected.slice(context, context + 160), state = new DataView(expected.buffer, context, 160);
+      for (const row of variant.rows) {
+        new Uint8Array(f.engine.memory.buffer, context, 160).set(initial);
+        new Uint8Array(expected.buffer, context, 160).set(initial);
+        for (const [at, value] of [[8, row.eax], [40, row.pc], [44, row.before], [48, row.quota]]) {
+          f.slab().setUint32(at, value, true); state.setUint32(at, value, true);
+        }
+        for (const [at, value] of [[8, row.result], [40, row.retired ? 0x1001 : row.pc], [44, row.after], [48, 0], [52, 2], [56, row.retired]])
+          state.setUint32(at, value, true);
+        assert.equal(unit.exports.run(context), 2);
+        assert.deepEqual(new Uint8Array(f.engine.memory.buffer), expected,
+          `${variant.name} PC${row.pc.toString(16)} quota${row.quota}: carry, opaque FLAGS and every scalar/RAM/native/process bank byte remain exact`);
+      }
+    } finally {
+      if (active) f.engine.ok('cpu_end', ...KEY);
+      f.close();
+    }
+  }
+});

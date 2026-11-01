@@ -662,6 +662,8 @@ fn generated_register_flag_dependencies_preserve_clobbers_raw_bits_and_condition
             ][..],
             6,
         ),
+        ("cmp-inc", &[0x39, 0xc8, 0x42][..], 2),
+        ("cmp-dec", &[0x39, 0xc8, 0x4a][..], 2),
         ("opaque", &[0x90, 0xfd, 0xfc][..], 3),
     ] {
         memory.write(GuestAddress(0x1000), code).unwrap();
@@ -695,7 +697,7 @@ import fs from 'node:fs';
 const memory=new WebAssembly.Memory({initial:2}),ram=new Uint8Array(memory.buffer),d=new DataView(memory.buffer),ctx=0x8000;
 const word=(at,v)=>d.setUint32(ctx+at,v>>>0,true);
 const imports={env:{memory},cpu:{read(){throw Error('unexpected read in register dependency fixture');},write(){throw Error('unexpected write in register dependency fixture');}}};
-const runs={};for(const name of['result-full','result-byte','cmp-left','cmp-right','test-left','carry-df','opaque','unsigned','signed'])runs[name]=(await WebAssembly.instantiate(fs.readFileSync(`${process.argv[1]}/${name}.wasm`),imports)).instance.exports.run;
+const runs={};for(const name of['result-full','result-byte','cmp-left','cmp-right','test-left','carry-df','cmp-inc','cmp-dec','opaque','unsigned','signed'])runs[name]=(await WebAssembly.instantiate(fs.readFileSync(`${process.argv[1]}/${name}.wasm`),imports)).instance.exports.run;
 function scenario(name,input,expect){
  for(let i=0;i<ram.length;i++)ram[i]=(i*47+5)&255;ram.fill(0,ctx,ctx+160);
  word(0,1);word(4,160);[0x7fffffff,1,0x1234abcd,0x12345678,0x4800,10,0x6000,12].forEach((v,i)=>word(8+i*4,v));
@@ -713,6 +715,10 @@ scenario('result-byte',{quota:4},{pc:0x1008,steps:4,flags:0x200e96,regs:{0:0x800
 scenario('cmp-left',{quota:5,regs:{0:0x80000000}},{pc:0x100e,steps:5,flags:0x200e16,regs:{0:0x11221644,2:0x12340001}});
 scenario('cmp-right',{quota:5,regs:{1:0xffffffff}},{pc:0x100b,steps:5,flags:0x200e87,regs:{0:0x7fff87ff,1:0xffffff44,2:0x12340100}});
 scenario('test-left',{quota:5,regs:{0:0x80000000,1:0xffffffff}},{pc:0x100e,steps:5,flags:0x200686,regs:{0:0x11228644,2:0x12340001}});
+scenario('cmp-inc',{quota:2,flags:0x200602,regs:{0:0,1:1,2:0x7fffffff}},{pc:0x1003,steps:2,flags:0x200e97,regs:{2:0x80000000}});
+scenario('cmp-inc',{quota:2,flags:0x200603,regs:{0:1,1:0,2:0xffffffff}},{pc:0x1003,steps:2,flags:0x200656,regs:{2:0}});
+scenario('cmp-dec',{quota:2,flags:0x200602,regs:{0:0,1:1,2:0x80000000}},{pc:0x1003,steps:2,flags:0x200e17,regs:{2:0x7fffffff}});
+scenario('cmp-dec',{quota:2,flags:0x200603,regs:{0:1,1:0,2:0}},{pc:0x1003,steps:2,flags:0x200696,regs:{2:0xffffffff}});
 scenario('carry-df',{quota:1,flags:0x200203,regs:{0:0xffffffff,1:0}},{pc:0x1002,steps:1,flags:0x200257,status:2,regs:{0:0}});
 scenario('carry-df',{quota:2,flags:0x200203,regs:{0:0xffffffff,1:0}},{pc:0x1003,steps:2,flags:0x200657,status:2,regs:{0:0}});
 scenario('carry-df',{quota:6,flags:0x200203,regs:{0:0xffffffff,1:0}},{pc:0x100d,steps:6,flags:0x200257,regs:{0:0x5700,2:1}});
