@@ -3004,6 +3004,61 @@ test('actual native ADD flags remain observable until a register XOR kills them'
   }
 });
 
+test('actual native XOR flags survive carry consumers clobbers and cold branches', {skip}, () => {
+  for (const variant of [
+    {name: 'register XOR INC', code: [0x31, 0xc8, 0x42, 0x90], rows: [
+      {quota: 0, eax: 0x7fffffff, edx: 0x7fffffff, next: 0x1000, flags: 0x80000e91},
+      {quota: 1, eax: 0x7fffffff, edx: 0x7fffffff, next: 0x1002, flags: 0x80000606},
+      {quota: 2, eax: 0x7fffffff, edx: 0x7fffffff, d: 0x80000000, next: 0x1003, flags: 0x80000e96},
+      {pc: 0x1002, quota: 0, eax: 0x7fffffff, edx: 0x7fffffff, next: 0x1002, incoming: 0x80000800, flags: 0x80000800},
+    ]},
+    {name: 'register XOR DEC', code: [0x31, 0xc8, 0x4a, 0x90], rows: [
+      {quota: 2, eax: 0x7fffffff, edx: 0x80000000, d: 0x7fffffff, next: 0x1003, flags: 0x80000e16},
+    ]},
+    {name: 'immediate XOR branch and clobber', code: [0x83, 0xf0, 1, 0x72, 0x0b,
+      0xb8, 0x44, 0x33, 0x22, 0x11, 0x9f, 0xe9, 0xf0, 0xef, 1, 0,
+      0xbb, 0xef, 0xbe, 0xad, 0xde, 0xe9, 0xe6, 0xef, 1, 0], rows: [
+      {quota: 1, eax: 1, a: 0, edx: 0x7fffffff, next: 0x1003, flags: 0x80000646},
+      {quota: 5, eax: 1, a: 0x11224644, edx: 0x7fffffff, next: 0x20000, flags: 0x80000646, status: 0},
+      {quota: 5, eax: 0x80000001, a: 0x11228644, edx: 0x7fffffff, next: 0x20000, flags: 0x80000686, status: 0},
+      {pc: 0x1003, quota: 1, eax: 1, edx: 0x7fffffff, next: 0x1010, incoming: 0x80000801, flags: 0x80000801},
+    ]},
+  ]) {
+    const f = fixture(variant.code, {independent: false, fpControl: 0x127f, fpStatus: 0x4720,
+      registers: [0, 0, 0, 0x55667788, 0x2f00, 0x13579bdf, 0x2468ace0, 0x0f1e2d3c]});
+    let active = false;
+    try {
+      const api = f.engine.api;
+      f.engine.ok('cpu_begin', ...KEY); active = true;
+      const context = api.cpu_context_ptr() >>> 0;
+      f.slab().setUint32(48, 8, true);
+      f.engine.ok('cpu_prepare', ...KEY, 0x1000, 8);
+      const bytes = new Uint8Array(f.engine.memory.buffer, api.cpu_code_ptr() >>> 0, api.cpu_code_len() >>> 0);
+      const unit = new WebAssembly.Instance(new WebAssembly.Module(bytes), {env: {memory: f.engine.memory},
+        cpu: {read: api.cpu_runtime_read, write: api.cpu_runtime_write}});
+      const expected = new Uint8Array(f.engine.memory.buffer).slice();
+      const initial = expected.slice(context, context + 160), state = new DataView(expected.buffer, context, 160);
+      for (const row of variant.rows) {
+        new Uint8Array(f.engine.memory.buffer, context, 160).set(initial);
+        new Uint8Array(expected.buffer, context, 160).set(initial);
+        for (const [at, value] of [[8, row.eax], [16, row.edx], [40, row.pc ?? 0x1000],
+          [44, row.incoming ?? 0x80000e91], [48, row.quota]]) {
+          f.slab().setUint32(at, value, true); state.setUint32(at, value, true);
+        }
+        const status = row.status ?? 2;
+        for (const [at, value] of [[8, row.a ?? row.eax], [16, row.d ?? row.edx], [40, row.next],
+          [44, row.flags], [48, 0], [52, status], [56, row.quota]]) state.setUint32(at, value, true);
+        assert.equal(unit.exports.run(context), status);
+        assert.deepEqual(new Uint8Array(f.engine.memory.buffer), expected,
+          `${variant.name} PC${(row.pc ?? 0x1000).toString(16)} quota${row.quota}: exact FLAGS, scalar state, RAM and banks`);
+      }
+    } finally {
+      if (active) f.engine.ok('cpu_end', ...KEY);
+      f.close();
+    }
+  }
+});
+
 test('actual native canonical INC DEC preserve carry and publish exact quota state', {skip}, () => {
   for (const variant of [
     {name: 'INC', opcode: 0x40, rows: [
