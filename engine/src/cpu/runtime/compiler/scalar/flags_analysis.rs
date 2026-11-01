@@ -47,7 +47,7 @@ fn killed_before_barrier(
         if matches!(
             operation,
             Operation::Binary {
-                kind: BinaryKind::Add | BinaryKind::Sub | BinaryKind::Cmp,
+                kind: BinaryKind::Add | BinaryKind::Sub | BinaryKind::Cmp | BinaryKind::Xor,
                 destination: Location32::Register(_),
                 source: Value32::Register(_) | Value32::Immediate(_),
             }
@@ -225,5 +225,67 @@ impl Analysis {
             node.operation
                 .and_then(|operation| deferred::transfer(operation, node.expected, node.produced))
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{
+        cpu::{
+            runtime::compiler::entry_points,
+            x86::decode::{BoundDecode, DecodeAuthority, DecodePolicy, decode_for_compilation},
+        },
+        memory::{AddressSpace, GuestAddress, PageRange, Permissions},
+    };
+
+    #[test]
+    fn native_register_xor_kills_prior_add_flags_without_crossing_memory() {
+        for (suffix, eligible) in [
+            (&[0x31, 0xc2][..], true),
+            (&[0x83, 0xf2, 0][..], true),
+            (&[0x31, 0x02][..], false),
+            (&[0x33, 0x02][..], false),
+        ] {
+            let mut memory = AddressSpace::new(1).unwrap();
+            memory
+                .map_zeroed(
+                    PageRange::new(GuestAddress(0x1000), 1).unwrap(),
+                    Permissions::ALL,
+                )
+                .unwrap();
+            let mut code = vec![0x83, 0xc0, 3];
+            code.extend_from_slice(suffix);
+            memory.write(GuestAddress(0x1000), &code).unwrap();
+            let mut instructions = Vec::new();
+            for pc in [0x1000, 0x1003] {
+                let BoundDecode::Instruction(instruction) = decode_for_compilation(
+                    &memory,
+                    GuestAddress(pc),
+                    DecodePolicy::Strict,
+                    None,
+                    DecodeAuthority::default(),
+                )
+                .unwrap() else {
+                    panic!("authored instruction must decode");
+                };
+                instructions.push(instruction);
+            }
+            let blocks = [Block {
+                pc: 0x1000,
+                instructions,
+                gate: None,
+            }];
+            let entries = entry_points(&blocks);
+            let native = Analysis::new(&blocks, &entries, true);
+            assert_eq!(native.produced(0x1000).is_some(), eligible);
+            assert_eq!(native.expected(0x1003).is_some(), eligible);
+            assert_eq!(native.produced(0x1003), None);
+            assert_eq!(native.after(0x1003), None);
+            assert_eq!(
+                Analysis::new(&blocks, &entries, false).produced(0x1000),
+                None
+            );
+        }
     }
 }

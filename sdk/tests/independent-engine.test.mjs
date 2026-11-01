@@ -2949,3 +2949,57 @@ test('actual native flag recipes survive bounded branch trees and canonical cold
     }
   }
 });
+
+test('actual native ADD flags remain observable until a register XOR kills them', {skip}, () => {
+  const f = fixture([0x83, 0xc0, 3, 0x31, 0xc2, 0x83, 0x43, 0x0c, 1, 0x49],
+    {independent: false, fpControl: 0x127f, fpStatus: 0x4720,
+      registers: [0, 2, 0, 0x8ff4, 0x2f00, 0x13579bdf, 0x2468ace0, 0x0f1e2d3c]});
+  let active = false;
+  try {
+    const api = f.engine.api;
+    f.engine.ok('cpu_begin', ...KEY); active = true;
+    const context = api.cpu_context_ptr() >>> 0;
+    f.slab().setUint32(48, 3, true);
+    f.engine.ok('cpu_prepare', ...KEY, 0x1000, 4);
+    const bytes = new Uint8Array(f.engine.memory.buffer, api.cpu_code_ptr() >>> 0, api.cpu_code_len() >>> 0);
+    const unit = new WebAssembly.Instance(new WebAssembly.Module(bytes), {env: {memory: f.engine.memory},
+      cpu: {read: api.cpu_runtime_read, write: api.cpu_runtime_write}});
+    const expected = new Uint8Array(f.engine.memory.buffer).slice();
+    const initial = expected.slice(context, context + 160), state = new DataView(expected.buffer, context, 160);
+    const all = new DataView(expected.buffer), numeric = state.getUint32(124, true), capacity = state.getUint32(112, true);
+    const faultRanges = [[state.getUint32(84, true), state.getUint32(88, true) * 4096],
+      [state.getUint32(100, true), capacity], [state.getUint32(104, true), capacity * 4],
+      [numeric, 40], [all.getUint32(numeric + 8, true), 100], [all.getUint32(numeric + 36, true), 132],
+      [f.engine.base, 56], [f.engine.base + 4236, 352], [f.engine.base + 4612, 184]];
+    const rows = [
+      {quota: 0, eax: 0x7fffffff, edx: 0x80000002, next: 0x1000, a: 0x7fffffff, d: 0x80000002, flags: 0x80000603, retired: 0},
+      {quota: 1, eax: 0x7fffffff, edx: 0x80000002, next: 0x1003, a: 0x80000002, d: 0x80000002, flags: 0x80000e92, retired: 1},
+      {quota: 2, eax: 0x7fffffff, edx: 0x80000002, next: 0x1005, a: 0x80000002, d: 0, flags: 0x80000646, retired: 2},
+      {quota: 1, eax: 0xfffffffd, edx: 0x80000000, next: 0x1003, a: 0, d: 0x80000000, flags: 0x80000657, retired: 1},
+      {quota: 2, eax: 0xfffffffd, edx: 0x80000000, next: 0x1005, a: 0, d: 0x80000000, flags: 0x80000686, retired: 2},
+      {pc: 0x1003, quota: 0, eax: 0x11223344, edx: 0x55667788, next: 0x1003, a: 0x11223344, d: 0x55667788, flags: 0x80000800, incoming: 0x80000800, retired: 0},
+      {quota: 3, eax: 0x7fffffff, edx: 0x80000002, next: 0x1005, a: 0x80000002, d: 0, flags: 0x80000646, retired: 2, fault: true},
+      {quota: 3, eax: 0xfffffffd, edx: 0x80000000, next: 0x1005, a: 0, d: 0x80000000, flags: 0x80000686, retired: 2, fault: true},
+    ];
+    for (const row of rows) {
+      new Uint8Array(f.engine.memory.buffer, context, 160).set(initial);
+      new Uint8Array(expected.buffer, context, 160).set(initial);
+      for (const [at, value] of [[8, row.eax], [16, row.edx], [40, row.pc ?? 0x1000], [44, row.incoming ?? 0x80000603], [48, row.quota]]) {
+        f.slab().setUint32(at, value, true); state.setUint32(at, value, true);
+      }
+      const status = row.fault ? 3 : 2;
+      for (const [at, value] of [[8, row.a], [16, row.d], [40, row.next], [44, row.flags], [48, row.fault ? 1 : 0], [52, status], [56, row.retired]])
+        state.setUint32(at, value, true);
+      if (row.fault) for (const [at, value] of [[60, 0x9000], [64, 0x10204], [68, 4]]) state.setUint32(at, value, true);
+      assert.equal(unit.exports.run(context), status);
+      assert.deepEqual(new Uint8Array(f.engine.memory.buffer, context, 160), new Uint8Array(expected.buffer, context, 160));
+      if (!row.fault) assert.deepEqual(new Uint8Array(f.engine.memory.buffer), expected);
+      else for (const [pointer, count] of faultRanges)
+        assert.deepEqual(new Uint8Array(f.engine.memory.buffer, pointer, count), expected.subarray(pointer, pointer + count),
+          'the real native read fault preserves all guest RAM, dirty records and native/process banks; private Rust service stack bytes are not architectural state');
+    }
+  } finally {
+    if (active) f.engine.ok('cpu_end', ...KEY);
+    f.close();
+  }
+});
