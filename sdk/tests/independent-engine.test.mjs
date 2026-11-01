@@ -3059,6 +3059,135 @@ test('actual native XOR flags survive carry consumers clobbers and cold branches
   }
 });
 
+test('actual native memory ADD flags survive quota carry and operand changes', {skip}, () => {
+  const immediate = [0x83, 0x05, ...dword(0x2000), 1, 0x49, 0x90];
+  const register = [0x01, 0x1d, ...dword(0x2000), 0x49, 0x90];
+  for (const row of [
+    {code: immediate, quota: 0, value: 0x7fffffff, next: 0x1000, incoming: 0x80000800, flags: 0x80000800},
+    {code: immediate, quota: 1, value: 0x7fffffff, after: 0x80000000, next: 0x1007, incoming: 0x80000603, flags: 0x80000e96},
+    {code: immediate, quota: 1, value: 0xffffffff, after: 0, next: 0x1007, flags: 0x80000657},
+    {code: immediate, quota: 2, value: 0xffffffff, after: 0, ecx: 0, c: 0xffffffff, next: 0x1008, flags: 0x80000697},
+    {code: register, quota: 1, value: 0x7fffffff, after: 0x80000002, next: 0x1006, incoming: 0x80000603, flags: 0x80000e92},
+    {code: register, quota: 2, value: 0xfffffffd, after: 0, ecx: 0x80000000, c: 0x7fffffff, next: 0x1007, flags: 0x80000e17},
+    {code: immediate, pc: 0x1007, quota: 0, value: 0x7fffffff, next: 0x1007, incoming: 0x80000800, flags: 0x80000800},
+    {code: immediate, pc: 0x1007, quota: 1, value: 0x7fffffff, ecx: 0, c: 0xffffffff, next: 0x1008, incoming: 0x80000602, flags: 0x80000696},
+    {code: [...register.slice(0, 6), 0xbb, ...dword(0), 0x90], quota: 2, value: 0x7fffffff,
+      after: 0x80000002, b: 0, next: 0x100b, flags: 0x80000e92},
+    {code: [...register.slice(0, 6), 0xb3, 0, 0x90], quota: 2, value: 0x7fffffff,
+      after: 0x80000002, b: 0, next: 0x1008, flags: 0x80000e92},
+    {code: [...register.slice(0, 6), 0x83, 0xd3, 0, 0x90], quota: 2, value: 0xfffffffd,
+      after: 0, b: 4, next: 0x1009, flags: 0x80000602},
+    {code: [...register.slice(0, 6), 0xc7, 0x05, ...dword(0x2000), ...dword(99), 0x90], quota: 2,
+      value: 0x7fffffff, after: 99, next: 0x1010, flags: 0x80000e92},
+  ]) {
+    const registers = [0x11223344, row.ecx ?? 2, 0xa1b2c3d4, 3, 0x2f00, 0x13579bdf, 0x2468ace0, 0x0f1e2d3c];
+    const f = fixture(row.code, {independent: false, registers, fpControl: 0x127f, fpStatus: 0x4720,
+      data: dword(row.value).map((value, index) => [0x2000 + index, value])});
+    let active = false;
+    try {
+      const api = f.engine.api;
+      f.engine.ok('cpu_begin', ...KEY); active = true;
+      const context = api.cpu_context_ptr() >>> 0;
+      f.slab().setUint32(48, 8, true);
+      f.engine.ok('cpu_prepare', ...KEY, 0x1000, 8);
+      const unit = new WebAssembly.Instance(new WebAssembly.Module(new Uint8Array(f.engine.memory.buffer,
+        api.cpu_code_ptr() >>> 0, api.cpu_code_len() >>> 0)), {env: {memory: f.engine.memory},
+        cpu: {read: api.cpu_runtime_read, write: api.cpu_runtime_write}});
+      const state = f.slab(), all = new DataView(f.engine.memory.buffer), banks = processBanks(f);
+      const backing = state.getUint32(84, true), length = state.getUint32(88, true) * 4096;
+      const slot = all.getUint32(state.getUint32(76, true) + 2 * 4, true) - 1;
+      const capacity = state.getUint32(112, true), bits = state.getUint32(100, true), slots = state.getUint32(104, true);
+      const expectedRam = new Uint8Array(f.engine.memory.buffer, backing, length).slice();
+      expectedRam.set(dword(row.after ?? row.value), slot * 4096);
+      const expectedBits = new Uint8Array(f.engine.memory.buffer, bits, capacity).slice();
+      const expectedSlots = new Uint8Array(f.engine.memory.buffer, slots, capacity * 4).slice();
+      const stores = Number(!row.pc && row.quota > 0);
+      assert.equal(state.getUint32(108, true), 0);
+      if (stores) {expectedBits[slot] = 1; new DataView(expectedSlots.buffer).setUint32(0, slot, true);}
+      state.setUint32(40, row.pc ?? 0x1000, true); state.setUint32(44, row.incoming ?? 0x80000602, true);
+      state.setUint32(48, row.quota, true);
+      const expected = new Uint8Array(f.engine.memory.buffer, context, 160).slice(), output = new DataView(expected.buffer);
+      for (const [at, value] of [[12, row.c ?? registers[1]], [20, row.b ?? 3], [40, row.next],
+        [44, row.flags], [48, 0], [52, 2], [56, row.quota], [108, stores]]) output.setUint32(at, value, true);
+      assert.equal(unit.exports.run(context), 2);
+      assert.deepEqual(new Uint8Array(f.engine.memory.buffer, context, 160), expected);
+      assert.deepEqual(new Uint8Array(f.engine.memory.buffer, backing, length), expectedRam);
+      assert.deepEqual(new Uint8Array(f.engine.memory.buffer, bits, capacity), expectedBits);
+      assert.deepEqual(new Uint8Array(f.engine.memory.buffer, slots, capacity * 4), expectedSlots);
+      assert.deepEqual(processBanks(f), banks);
+    } finally {
+      if (active) f.engine.ok('cpu_end', ...KEY);
+      f.close();
+    }
+  }
+});
+
+test('actual native memory ADD publishes the right recipe on faults and completed SMC', {skip}, () => {
+  for (const row of [
+    {name: 'later ADD read fault', code: [0x01, 0x1d, ...dword(0x2000), 0x83, 0x05, ...dword(0x9000), 1, 0x90],
+      status: 3, retired: 1, next: 0x1006, flags: 0x80000e92, after: 0x80000002, stores: 1, fault: true},
+    {name: 'canonical write failure', code: [0x31, 0xc0, 0x83, 0x05, ...dword(0x2000), 1, 0x90],
+      status: 8, retired: 1, next: 0x1002, flags: 0x80000646, a: 0, exhausted: true},
+    {name: 'completed SMC', code: [0x31, 0xc0, 0x83, 0x05, ...dword(0x1000), 1, 0x49],
+      status: 6, retired: 2, next: 0x1009, flags: 0x80000602, a: 0, smc: true},
+  ]) {
+    const f = fixture(row.code, {independent: false, fpControl: 0x127f, fpStatus: 0x4720,
+      registers: [0x11223344, 2, 0xa1b2c3d4, 3, 0x2f00, 0x13579bdf, 0x2468ace0, 0x0f1e2d3c],
+      data: dword(0x7fffffff).map((value, index) => [0x2000 + index, value])});
+    let active = false, versionPointer = 0, savedVersion;
+    try {
+      const api = f.engine.api;
+      if (row.smc) f.engine.ok('protect', 0x1000, 1, 7);
+      f.engine.ok('cpu_begin', ...KEY); active = true;
+      const context = api.cpu_context_ptr() >>> 0;
+      f.slab().setUint32(48, 3, true);
+      f.engine.ok('cpu_prepare', ...KEY, 0x1000, 3);
+      const calls = {read: 0, write: 0};
+      const unit = new WebAssembly.Instance(new WebAssembly.Module(new Uint8Array(f.engine.memory.buffer,
+        api.cpu_code_ptr() >>> 0, api.cpu_code_len() >>> 0)), {env: {memory: f.engine.memory}, cpu: {
+        read: (...args) => {calls.read++; return api.cpu_runtime_read(...args);},
+        write: (...args) => {calls.write++; return api.cpu_runtime_write(...args);},
+      }});
+      const state = f.slab(), all = new DataView(f.engine.memory.buffer), banks = processBanks(f);
+      const backing = state.getUint32(84, true), length = state.getUint32(88, true) * 4096;
+      const slot = page => all.getUint32(state.getUint32(76, true) + page * 4, true) - 1;
+      const capacity = state.getUint32(112, true), bits = state.getUint32(100, true), slots = state.getUint32(104, true);
+      const expectedRam = new Uint8Array(f.engine.memory.buffer, backing, length).slice();
+      expectedRam.set(dword(row.after ?? 0x7fffffff), slot(2) * 4096);
+      if (row.smc) expectedRam.set(dword(0x0583c032), slot(1) * 4096);
+      const expectedBits = new Uint8Array(f.engine.memory.buffer, bits, capacity).slice();
+      const expectedSlots = new Uint8Array(f.engine.memory.buffer, slots, capacity * 4).slice();
+      if (row.stores) {expectedBits[slot(2)] = 1; new DataView(expectedSlots.buffer).setUint32(0, slot(2), true);}
+      if (row.exhausted) {
+        versionPointer = state.getUint32(156, true); savedVersion = all.getBigUint64(versionPointer, true);
+        all.setBigUint64(versionPointer, 0xffffffffffffffffn, true);
+      }
+      state.setUint32(40, 0x1000, true); state.setUint32(44, 0x80000603, true); state.setUint32(48, 3, true);
+      const expected = new Uint8Array(f.engine.memory.buffer, context, 160).slice(), output = new DataView(expected.buffer);
+      for (const [at, value] of [[8, row.a ?? 0x11223344], [40, row.next], [44, row.flags], [48, 3 - row.retired],
+        [52, row.status], [56, row.retired], [108, row.stores ?? 0]]) output.setUint32(at, value, true);
+      if (row.fault) for (const [at, value] of [[60, 0x9000], [64, 0x10204], [68, 4]]) output.setUint32(at, value, true);
+      if (row.exhausted) output.setBigUint64(128, 0xffffffffffffffffn, true);
+      if (row.smc) {
+        output.setBigUint64(128, output.getBigUint64(128, true) + 1n, true);
+        output.setBigUint64(136, output.getBigUint64(136, true) + 1n, true);
+      }
+      assert.equal(unit.exports.run(context), row.status, row.name);
+      assert.deepEqual(new Uint8Array(f.engine.memory.buffer, context, 160), expected, row.name);
+      assert.deepEqual(new Uint8Array(f.engine.memory.buffer, backing, length), expectedRam, row.name);
+      assert.deepEqual(new Uint8Array(f.engine.memory.buffer, bits, capacity), expectedBits, row.name);
+      assert.deepEqual(new Uint8Array(f.engine.memory.buffer, slots, capacity * 4), expectedSlots, row.name);
+      assert.deepEqual(processBanks(f), banks, row.name);
+      assert.deepEqual(calls, row.fault ? {read: 1, write: 0} : {read: 0, write: 1}, row.name);
+    } finally {
+      if (versionPointer && savedVersion !== undefined)
+        new DataView(f.engine.memory.buffer).setBigUint64(versionPointer, savedVersion, true);
+      if (active) f.engine.ok('cpu_end', ...KEY);
+      f.close();
+    }
+  }
+});
+
 test('actual native canonical INC DEC preserve carry and publish exact quota state', {skip}, () => {
   for (const variant of [
     {name: 'INC', opcode: 0x40, rows: [
